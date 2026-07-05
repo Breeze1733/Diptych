@@ -1,14 +1,14 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/app_user.dart';
+import '../services/api_service.dart';
 import '../services/auth_service.dart';
-import '../services/firestore_service.dart';
 import '../services/storage_service.dart';
 
 /// 认证服务实例
 final authServiceProvider = Provider<AuthService>((ref) => AuthService());
 
-/// Firestore 服务实例
-final firestoreServiceProvider = Provider<FirestoreService>((ref) => FirestoreService());
+/// API 服务实例
+final apiServiceProvider = Provider<ApiService>((ref) => ApiService());
 
 /// Storage 服务实例
 final storageServiceProvider = Provider<StorageService>((ref) => StorageService());
@@ -61,18 +61,16 @@ final loadUsersProvider = FutureProvider<void>((ref) async {
   final role = ref.watch(currentUserRoleProvider);
   if (role == null) return;
 
-  final firestoreService = ref.read(firestoreServiceProvider);
+  final apiService = ref.read(apiServiceProvider);
 
   // 确保预设用户存在
-  await firestoreService.ensurePresetUsers();
+  await apiService.ensurePresetUsers();
 
   // 加载当前用户
-  final currentUser = await firestoreService.getUser(role);
+  final currentUser = await apiService.getUser(role);
   ref.read(currentUserProvider.notifier).state = currentUser;
 
   // 加载对方
-  if (currentUser != null) {
-    final partner = await firestoreService.getUser(currentUser.partnerUid);
-    ref.read(partnerUserProvider.notifier).state = partner;
-  }
+  final partner = await apiService.getUser(currentUser.partnerUid);
+  ref.read(partnerUserProvider.notifier).state = partner;
 });

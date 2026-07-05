@@ -1,32 +1,41 @@
+import 'dart:convert';
 import 'dart:io';
-import 'package:firebase_storage/firebase_storage.dart';
+import 'package:http/http.dart' as http;
+import '../utils/url_helper.dart';
 
-/// Firebase Storage 图片上传服务
+/// 图片上传服务
 class StorageService {
-  final FirebaseStorage _storage = FirebaseStorage.instance;
+  static const String _baseUrl = 'https://example.com/api';
 
   /// 上传图片文件，返回下载 URL
-  /// [file] 图片文件
-  /// [folder] 存储路径前缀（如 "user_A"）
   Future<String> uploadImage(File file, String folder) async {
-    final originalName = file.path.split('/').last;
-    final fileName =
-        '${DateTime.now().millisecondsSinceEpoch}_$originalName';
-    final ref = _storage.ref('$folder/$fileName');
+    final bytes = await file.readAsBytes();
+    final request = http.MultipartRequest('POST', Uri.parse('$_baseUrl/upload'));
+    request.files.add(http.MultipartFile.fromBytes(
+      'file',
+      bytes,
+      filename: file.path.split('/').last,
+    ));
+    request.fields['folder'] = folder;
 
-    final uploadTask = ref.putFile(file);
-    final snapshot = await uploadTask.whenComplete(() {});
-    final downloadUrl = await snapshot.ref.getDownloadURL();
-    return downloadUrl;
+    final streamed = await request.send();
+    final res = await http.Response.fromStream(streamed);
+    final body = jsonDecode(res.body);
+    if (body['ok'] != true) {
+      throw Exception(body['error'] ?? '服务器返回失败，响应: ${res.body}');
+    }
+    final url = body['data']['url'] as String;
+    if (url.isEmpty) throw Exception('上传成功但未返回图片 URL');
+    return UrlHelper.normalize(url);
   }
 
-  /// 删除图片（编辑时替换图片用）
-  Future<void> deleteImage(String imageUrl) async {
-    try {
-      final ref = _storage.refFromURL(imageUrl);
-      await ref.delete();
-    } catch (_) {
-      // 图片可能不存在，忽略错误
-    }
+  /// 删除服务器上的旧图片
+  Future<void> deleteImage(String url) async {
+    if (url.isEmpty) return;
+    await http.post(
+      Uri.parse('$_baseUrl/upload/delete'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'url': url}),
+    );
   }
 }

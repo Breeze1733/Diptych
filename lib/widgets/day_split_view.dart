@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../constants/app_theme.dart';
 import '../constants/strings.dart';
 import '../models/moment.dart';
-import 'blur_overlay.dart';
+
 import 'moment_card.dart';
 
 /// 单日 1:1 分屏视图
@@ -96,10 +96,22 @@ class DaySplitView extends StatelessWidget {
       );
     }
 
-    // 对方未发布 → 盲盒遮罩
-    return const Padding(
-      padding: EdgeInsets.all(12),
-      child: BlurOverlay(),
+    // 对方未发布 → 空白
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.image_outlined, size: 40, color: Colors.grey[300]),
+            const SizedBox(height: 8),
+            Text(
+              AppStrings.noPostPlaceholder,
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

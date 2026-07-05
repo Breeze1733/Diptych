@@ -1,3 +1,5 @@
+import '../utils/url_helper.dart';
+
 /// 用户数据模型
 class AppUser {
   final String uid; // "A" 或 "B"
@@ -17,7 +19,7 @@ class AppUser {
       uid: json['uid'] as String? ?? '',
       nickname: json['nickname'] as String? ?? '',
       partnerUid: json['partner_uid'] as String? ?? '',
-      avatarUrl: json['avatar_url'] as String? ?? '',
+      avatarUrl: UrlHelper.normalize(json['avatar_url'] as String? ?? ''),
     );
   }
 
@@ -28,6 +30,15 @@ class AppUser {
       'partner_uid': partnerUid,
       'avatar_url': avatarUrl,
     };
+  }
+
+  AppUser copyWith({String? nickname, String? avatarUrl}) {
+    return AppUser(
+      uid: uid,
+      nickname: nickname ?? this.nickname,
+      partnerUid: partnerUid,
+      avatarUrl: avatarUrl ?? this.avatarUrl,
+    );
   }
 
   /// 预定义的两位用户

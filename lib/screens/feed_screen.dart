@@ -11,6 +11,7 @@ import '../widgets/calendar_picker.dart';
 import '../widgets/date_header.dart';
 import '../widgets/day_split_view.dart';
 import 'edit_moment_screen.dart';
+import 'profile_screen.dart';
 
 /// 主页面：顶栏 + 日视图分屏 + FAB
 class FeedScreen extends ConsumerWidget {
@@ -21,9 +22,13 @@ class FeedScreen extends ConsumerWidget {
     final selectedDate = ref.watch(selectedDateProvider);
     final currentUser = ref.watch(currentUserProvider);
     final partner = ref.watch(partnerUserProvider);
+    final role = ref.watch(currentUserRoleProvider);
 
     // 确保用户数据已加载
-    ref.watch(loadUsersProvider);
+    final loadUsersAsync = ref.watch(loadUsersProvider);
+
+    // 用户显示名：优先从加载的数据取，否则用角色生成
+    final displayName = currentUser?.nickname ?? (role != null ? '用户$role' : '');
 
     return Scaffold(
       backgroundColor: AppTheme.backgroundColor,
@@ -31,17 +36,21 @@ class FeedScreen extends ConsumerWidget {
         title: const Text(AppStrings.appTitle),
         actions: [
           // 显示当前登录用户
-          if (currentUser != null)
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: Chip(
-                  avatar: const Icon(Icons.person, size: 16),
-                  label: Text(currentUser.nickname),
-                  backgroundColor: AppTheme.primaryColor.withAlpha(20),
-                ),
-              ),
+          if (displayName.isNotEmpty)
+            Chip(
+              avatar: const Icon(Icons.person, size: 16),
+              label: Text(displayName),
+              backgroundColor: AppTheme.primaryColor.withAlpha(20),
+              side: BorderSide.none,
+              padding: EdgeInsets.zero,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
+          // 个人设置
+          IconButton(
+            icon: const Icon(Icons.settings_outlined, size: 20),
+            tooltip: '个人设置',
+            onPressed: () => _openProfile(context),
+          ),
           // 退出按钮
           IconButton(
             icon: const Icon(Icons.logout, size: 20),
@@ -50,26 +59,51 @@ class FeedScreen extends ConsumerWidget {
           ),
         ],
       ),
-      body: Column(
-        children: [
-          // 日期顶栏
-          DateHeader(
-            dateText: DateHelper.toChineseDate(selectedDate),
-            onCalendarTap: () => _openCalendar(context, ref),
-          ),
-
-          // 分隔线
-          const Divider(height: 1, thickness: 1, color: AppTheme.dividerColor),
-
-          // 分屏日视图
-          if (currentUser != null && partner != null) _buildDayView(ref, currentUser, partner),
-        ],
-      ),
-
-      // FAB：仅今天显示
-      floatingActionButton: DateHelper.isToday(selectedDate)
+      body: _buildBody(ref, loadUsersAsync, currentUser, partner, selectedDate, context),
+      floatingActionButton: DateHelper.isToday(selectedDate) && currentUser != null
           ? _buildFab(context, ref, selectedDate, currentUser)
           : null,
+    );
+  }
+
+  Widget _buildBody(WidgetRef ref, AsyncValue<void> loadUsersAsync,
+      currentUser, partner, DateTime selectedDate, BuildContext context) {
+    if (loadUsersAsync.isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (loadUsersAsync.hasError) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Text(
+            '加载失败：${loadUsersAsync.error}\n\n请检查后端服务是否正常运行',
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
+    if (currentUser == null) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(32),
+          child: Text(
+            '用户数据加载失败\n\n请确认后端已实现以下接口：\n• POST /api/users/ensure\n• GET /api/users/:uid',
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      children: [
+        DateHeader(
+          dateText: DateHelper.toChineseDate(selectedDate),
+          onCalendarTap: () => _openCalendar(context, ref),
+        ),
+        const Divider(height: 1, thickness: 1, color: AppTheme.dividerColor),
+        if (currentUser != null && partner != null)
+          _buildDayView(ref, currentUser, partner),
+      ],
     );
   }
 
@@ -158,6 +192,14 @@ class FeedScreen extends ConsumerWidget {
       ref.invalidate(dayMomentsProvider);
       ref.invalidate(markedDatesProvider);
     }
+  }
+
+  /// 打开个人设置
+  void _openProfile(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const ProfileScreen()),
+    );
   }
 
   /// 退出登录

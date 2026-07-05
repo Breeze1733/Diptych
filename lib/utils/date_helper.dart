@@ -37,6 +37,22 @@ class DateHelper {
 
   /// 格式化时间戳为简短时间
   static String toShortTime(DateTime date) {
-    return DateFormat('HH:mm').format(date);
+    return DateFormat('HH:mm').format(date.toLocal());
+  }
+
+  /// 解析后端返回的时间字符串（兼容多种格式）
+  static DateTime tryParseDateTime(String value) {
+    // 先试 ISO 8601
+    final parsed = DateTime.tryParse(value);
+    if (parsed != null) return parsed;
+    // 再试 MySQL 格式 "2026-07-05 08:38:00"
+    try {
+      return DateFormat('yyyy-MM-dd HH:mm:ss').parse(value);
+    } catch (_) {}
+    // 再试不带秒 "2026-07-05 08:38"
+    try {
+      return DateFormat('yyyy-MM-dd HH:mm').parse(value);
+    } catch (_) {}
+    return DateTime.now();
   }
 }

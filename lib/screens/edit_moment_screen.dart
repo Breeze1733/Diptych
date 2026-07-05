@@ -52,7 +52,7 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
       final currentUser = ref.read(currentUserProvider);
       if (currentUser == null) throw Exception('未登录');
 
-      final firestoreService = ref.read(firestoreServiceProvider);
+      final apiService = ref.read(apiServiceProvider);
       final storageService = ref.read(storageServiceProvider);
       final dateStr = DateHelper.toDateStr(widget.date);
       final folder = 'user_${currentUser.uid}';
@@ -62,40 +62,38 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
 
       if (_isEdit) {
         // 编辑模式：仅上传新选择的图片，否则保留旧 URL
-        selfImageUrl = widget.existingMoment!.selfImageUrl;
-        partnerImageUrl = widget.existingMoment!.partnerImageUrl;
+        final oldSelfUrl = widget.existingMoment!.selfImageUrl;
+        final oldPartnerUrl = widget.existingMoment!.partnerImageUrl;
+        selfImageUrl = oldSelfUrl;
+        partnerImageUrl = oldPartnerUrl;
 
         if (_selfImageFile != null) {
           selfImageUrl = await storageService.uploadImage(_selfImageFile!, folder);
+          if (oldSelfUrl.isNotEmpty) storageService.deleteImage(oldSelfUrl);
         }
         if (_partnerImageFile != null) {
           partnerImageUrl = await storageService.uploadImage(_partnerImageFile!, folder);
+          if (oldPartnerUrl.isNotEmpty) storageService.deleteImage(oldPartnerUrl);
         }
 
-        await firestoreService.updateMoment(
+        await apiService.updateMoment(
           widget.existingMoment!.id,
           {
             'self_image_url': selfImageUrl,
             'partner_image_url': partnerImageUrl,
             'feeling': _feelingController.text.trim(),
-            'updated_at': DateTime.now().toIso8601String(),
           },
         );
       } else {
-        // 新建模式：必须选择两张图片
-        if (_selfImageFile == null || _partnerImageFile == null) {
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('请选择两张照片')),
-          );
-          setState(() => _isSaving = false);
-          return;
-        }
+        // 新建模式：上传已选择的图片，没选的留空
+        selfImageUrl = _selfImageFile != null
+            ? await storageService.uploadImage(_selfImageFile!, folder)
+            : '';
+        partnerImageUrl = _partnerImageFile != null
+            ? await storageService.uploadImage(_partnerImageFile!, folder)
+            : '';
 
-        selfImageUrl = await storageService.uploadImage(_selfImageFile!, folder);
-        partnerImageUrl = await storageService.uploadImage(_partnerImageFile!, folder);
-
-        await firestoreService.createMoment(
+        await apiService.createMoment(
           dateStr: dateStr,
           authorId: currentUser.uid,
           selfImageUrl: selfImageUrl,
@@ -171,7 +169,14 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
                 hintText: AppStrings.feelingHint,
               ),
             ),
-            const SizedBox(height: 32),
+            // 已选图片提示
+            Center(
+              child: Text(
+                '已选 ${(_selfImageFile != null ? 1 : 0) + (_partnerImageFile != null ? 1 : 0)}/2 张照片',
+                style: TextStyle(color: Colors.grey[500], fontSize: 13),
+              ),
+            ),
+            const SizedBox(height: 12),
 
             // 保存按钮
             SizedBox(

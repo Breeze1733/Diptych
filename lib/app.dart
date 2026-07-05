@@ -11,17 +11,19 @@ class SplitMomentsApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // 监听自动登录状态
+    // 监听自动登录状态（仅用于判断初始加载完成）
     final autoLoginAsync = ref.watch(autoLoginProvider);
+    // 监听当前用户角色（登录/退出后会自动更新）
+    final currentRole = ref.watch(currentUserRoleProvider);
 
     return MaterialApp(
       title: 'Split Moments',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
       home: autoLoginAsync.when(
-        data: (role) {
-          // role != null 表示已登录，否则显示登录页
-          if (role != null) {
+        data: (_) {
+          // 根据 currentUserRoleProvider 决定显示哪个页面
+          if (currentRole != null) {
             return const FeedScreen();
           }
           return const LoginScreen();

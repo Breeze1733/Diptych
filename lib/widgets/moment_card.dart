@@ -1,4 +1,7 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
 import '../constants/app_theme.dart';
 import '../models/moment.dart';
 import '../utils/date_helper.dart';
@@ -45,14 +48,10 @@ class MomentCard extends StatelessWidget {
           ),
           const SizedBox(height: 10),
 
-          // 两张图片：左右并排
-          Row(
-            children: [
-              Expanded(child: _buildImageBox(moment.selfImageUrl, '关于自己')),
-              const SizedBox(width: 6),
-              Expanded(child: _buildImageBox(moment.partnerImageUrl, '关于对方')),
-            ],
-          ),
+          // 两张图片：上下排列
+          _buildImageBox(context, moment.selfImageUrl, ''),
+          const SizedBox(height: 6),
+          _buildImageBox(context, moment.partnerImageUrl, ''),
           const SizedBox(height: 10),
 
           // 感受文字
@@ -63,7 +62,7 @@ class MomentCard extends StatelessWidget {
 
           // 时间
           Text(
-            DateHelper.toShortTime(moment.createdAt),
+            DateHelper.toShortTime(moment.updatedAt),
             style: AppTheme.momentTime,
           ),
         ],
@@ -71,7 +70,20 @@ class MomentCard extends StatelessWidget {
     );
   }
 
-  Widget _buildImageBox(String url, String label) {
+  Widget _buildImageBox(BuildContext context, String url, String label) {
+    final image = url.isNotEmpty
+        ? GestureDetector(
+            onTap: () => _openFullScreen(context, url),
+            child: Image.network(
+              url,
+              fit: BoxFit.cover,
+              width: double.infinity,
+              height: double.infinity,
+              errorBuilder: (_, _, _) => _placeholder(label),
+            ),
+          )
+        : _placeholder(label);
+
     return Container(
       height: 140,
       decoration: BoxDecoration(
@@ -79,32 +91,16 @@ class MomentCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(6),
       ),
       clipBehavior: Clip.antiAlias,
-      child: url.isNotEmpty
-          ? Stack(
-              fit: StackFit.expand,
-              children: [
-                Image.network(
-                  url,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, _, _) => _placeholder(label),
-                ),
-                Positioned(
-                  bottom: 0,
-                  left: 0,
-                  right: 0,
-                  child: Container(
-                    color: Colors.black38,
-                    padding: const EdgeInsets.symmetric(vertical: 2),
-                    child: Text(
-                      label,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.white70, fontSize: 10),
-                    ),
-                  ),
-                ),
-              ],
-            )
-          : _placeholder(label),
+      child: image,
+    );
+  }
+
+  void _openFullScreen(BuildContext context, String url) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => _FullScreenImage(url: url),
+      ),
     );
   }
 
@@ -116,9 +112,98 @@ class MomentCard extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(Icons.image_outlined, size: 28, color: Colors.grey[300]),
-          const SizedBox(height: 2),
-          Text(label, style: TextStyle(fontSize: 10, color: Colors.grey[400])),
+          if (label.isNotEmpty)
+            Text(label, style: TextStyle(fontSize: 10, color: Colors.grey[400])),
         ],
+      ),
+    );
+  }
+}
+
+/// 全屏图片查看器：支持缩放 + 下载
+class _FullScreenImage extends StatefulWidget {
+  final String url;
+  const _FullScreenImage({required this.url});
+
+  @override
+  State<_FullScreenImage> createState() => _FullScreenImageState();
+}
+
+class _FullScreenImageState extends State<_FullScreenImage> {
+  bool _isDownloading = false;
+
+  Future<void> _download() async {
+    setState(() => _isDownloading = true);
+    try {
+      final res = await http.get(Uri.parse(widget.url));
+      final dir = await getApplicationDocumentsDirectory();
+      final name = widget.url.split('/').last;
+      final file = File('${dir.path}/$name');
+      await file.writeAsBytes(res.bodyBytes);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('已保存到 ${file.path}')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('下载失败: $e'), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) setState(() => _isDownloading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        iconTheme: const IconThemeData(color: Colors.white),
+        actions: [
+          IconButton(
+            icon: _isDownloading
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.download),
+            tooltip: '下载',
+            onPressed: _isDownloading ? null : _download,
+          ),
+        ],
+      ),
+      body: InteractiveViewer(
+        minScale: 0.5,
+        maxScale: 4.0,
+        child: SizedBox.expand(
+          child: Image.network(
+            widget.url,
+            fit: BoxFit.contain,
+            loadingBuilder: (_, child, progress) {
+              if (progress == null) return child;
+              return const Center(
+                child: CircularProgressIndicator(color: Colors.white),
+              );
+            },
+            errorBuilder: (_, e, _) => Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.broken_image, size: 48, color: Colors.white54),
+                  const SizedBox(height: 8),
+                  const Text('图片加载失败', style: TextStyle(color: Colors.white54)),
+                  Text('$e', style: const TextStyle(color: Colors.white30, fontSize: 12)),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

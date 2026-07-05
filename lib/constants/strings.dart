@@ -12,7 +12,6 @@ class AppStrings {
   // 主页
   static const String todayLabel = '今天';
   static const String noPostPlaceholder = '未发布';
-  static const String blindBoxMessage = '🔒 对方还未上传今天的动态，敬请期待';
 
   // 编辑页
   static const String selfPhotoLabel = '📷 关于自己的照片';

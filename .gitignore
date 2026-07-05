@@ -38,6 +38,7 @@ migrate_working_dir/
 .pub-cache/
 .pub/
 /build/
+/docs
 /coverage/
 
 # Symbolication related
@@ -47,29 +48,10 @@ app.*.symbols
 app.*.map.json
 
 # Android Studio
+/android/build/
+/android/.gradle/
+/android/.kotlin/
 /android/app/debug
 /android/app/profile
 /android/app/release
 /android/local.properties
-
-# iOS
-/ios/Pods/
-/ios/.symlinks/
-
-# macOS
-/macos/Pods/
-
-# Web
-/web/build/
-
-# Windows
-/windows/flutter/ephemeral/
-
-# Linux
-/linux/flutter/ephemeral/
-
-# Firebase
-firebase.json
-.firebaserc
-google-services.json
-GoogleService-Info.plist
