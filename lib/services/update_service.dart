@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:open_filex/open_filex.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// 版本信息
 class VersionInfo {
@@ -92,6 +93,29 @@ class UpdateService {
   /// 安装 APK
   Future<void> installApk(String filePath) async {
     await OpenFilex.open(filePath, type: 'application/vnd.android.package-archive');
+  }
+
+  /// 标记待清理的安装包（下次启动时删除）
+  Future<void> markForCleanup(String filePath) async {
+    final prefs = await _getPrefs();
+    await prefs.setString('pending_apk_cleanup', filePath);
+  }
+
+  /// 启动时清理上次更新的安装包
+  static Future<void> cleanupOldApk() async {
+    try {
+      final prefs = await _getPrefs();
+      final path = prefs.getString('pending_apk_cleanup');
+      if (path != null) {
+        await prefs.remove('pending_apk_cleanup');
+        final file = File(path);
+        if (await file.exists()) await file.delete();
+      }
+    } catch (_) {}
+  }
+
+  static Future<SharedPreferences> _getPrefs() async {
+    return SharedPreferences.getInstance();
   }
 
   /// 删除安装包

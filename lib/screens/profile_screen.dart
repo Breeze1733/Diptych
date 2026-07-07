@@ -171,12 +171,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
       await _updateService.installApk(apkPath);
 
-      // 安装界面已经弹出，等用户回来后清理
-      setState(() => _updateStatus = '安装完成后将自动清理安装包');
-      // 延迟清理，给安装器时间
-      Future.delayed(const Duration(seconds: 30), () {
-        _updateService.deleteApk(apkPath!);
-      });
+      // 安装完成后，下次打开 APP 时自动清理安装包
+      setState(() => _updateStatus = '请在安装完成后重新打开 APP');
+      // 记录待清理的文件路径
+      _updateService.markForCleanup(apkPath);
     } catch (e) {
       setState(() {
         _isDownloading = false;
