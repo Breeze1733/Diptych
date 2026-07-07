@@ -3,7 +3,7 @@ class AppStrings {
   AppStrings._();
 
   // 登录页
-  static const String appTitle = 'Split Moments';
+  static const String appTitle = 'Diptych';
   static const String loginTitle = '欢迎回来';
   static const String loginHint = '请输入你的密钥';
   static const String loginButton = '进入';
@@ -16,12 +16,21 @@ class AppStrings {
   // 编辑页
   static const String selfPhotoLabel = '📷 关于自己的照片';
   static const String partnerPhotoLabel = '📷 关于对方的照片';
-  static const String feelingLabel = '💭 今日感受';
+  static const String feelingLabel = '😊 今日心情（可选）';
   static const String feelingHint = '记录今天的感受...';
   static const String saveButton = '保存';
   static const String createTitle = '写日记';
-  static const String editTitle = '编辑今日';
+  static const String editTitle = '编辑日记';
   static const String alreadyPosted = '今日已发布';
+  static const String moodHint = '选择 1-10 分';
+
+  // 交互按钮
+  static const String editButton = '编辑';
+  static const String commentButton = '评论';
+  static const String commentHint = '写下你的评论...';
+  static const String commentTitle = '添加评论';
+  static const String deleteComment = '删除评论';
+  static const String deleteCommentConfirm = '确定删除这条评论？';
 
   // 通用
   static const String logout = '退出登录';

@@ -7,6 +7,16 @@ import '../utils/url_helper.dart';
 class StorageService {
   static const String _baseUrl = 'https://example.com/api';
 
+  /// 安全解析 JSON
+  dynamic _safeDecode(http.Response res) {
+    try {
+      return jsonDecode(res.body);
+    } catch (e) {
+      final preview = res.body.length > 200 ? '${res.body.substring(0, 200)}...' : res.body;
+      throw Exception('服务器返回非 JSON（状态 ${res.statusCode}）: $preview');
+    }
+  }
+
   /// 上传图片文件，返回下载 URL
   Future<String> uploadImage(File file, String folder) async {
     final bytes = await file.readAsBytes();
@@ -20,7 +30,7 @@ class StorageService {
 
     final streamed = await request.send();
     final res = await http.Response.fromStream(streamed);
-    final body = jsonDecode(res.body);
+    final body = _safeDecode(res);
     if (body['ok'] != true) {
       throw Exception(body['error'] ?? '服务器返回失败，响应: ${res.body}');
     }

@@ -14,6 +14,10 @@ class DaySplitView extends StatelessWidget {
   final String partnerNickname;
   final String? myAvatarUrl;
   final String? partnerAvatarUrl;
+  final VoidCallback? onEditMyMoment;
+  final VoidCallback? onCommentPartner;
+  final void Function(int index)? onDeleteMyComment;
+  final void Function(int index)? onDeletePartnerComment;
 
   const DaySplitView({
     super.key,
@@ -23,6 +27,10 @@ class DaySplitView extends StatelessWidget {
     this.partnerNickname = '',
     this.myAvatarUrl,
     this.partnerAvatarUrl,
+    this.onEditMyMoment,
+    this.onCommentPartner,
+    this.onDeleteMyComment,
+    this.onDeletePartnerComment,
   });
 
   @override
@@ -38,6 +46,9 @@ class DaySplitView extends StatelessWidget {
               nickname: myNickname,
               avatarUrl: myAvatarUrl,
               isSelf: true,
+              onEdit: onEditMyMoment,
+              onComment: null,
+              onDeleteComment: onDeleteMyComment,
             ),
           ),
           // 中间分隔线
@@ -52,6 +63,9 @@ class DaySplitView extends StatelessWidget {
               nickname: partnerNickname,
               avatarUrl: partnerAvatarUrl,
               isSelf: false,
+              onEdit: null,
+              onComment: onCommentPartner,
+              onDeleteComment: onDeletePartnerComment,
             ),
           ),
         ],
@@ -64,6 +78,9 @@ class DaySplitView extends StatelessWidget {
     required String nickname,
     required String? avatarUrl,
     required bool isSelf,
+    VoidCallback? onEdit,
+    VoidCallback? onComment,
+    void Function(int index)? onDeleteComment,
   }) {
     if (moment != null) {
       // 有动态，正常显示
@@ -72,6 +89,10 @@ class DaySplitView extends StatelessWidget {
           moment: moment,
           nickname: nickname,
           avatarUrl: avatarUrl,
+          isSelf: isSelf,
+          onEdit: onEdit,
+          onComment: onComment,
+          onDeleteComment: onDeleteComment,
         ),
       );
     }

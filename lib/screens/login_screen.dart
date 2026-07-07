@@ -66,17 +66,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       color: AppTheme.primaryColor.withAlpha(25),
                       borderRadius: BorderRadius.circular(20),
                     ),
-                    child: const Icon(
-                      Icons.favorite_border,
-                      size: 40,
-                      color: AppTheme.primaryColor,
+                    child: Image.asset(
+                      'assets/icon.png',
+                      width: 40,
+                      height: 40,
                     ),
                   ),
                   const SizedBox(height: 24),
 
                   // 标题
                   const Text(
-                    'Split Moments',
+                    'Diptych',
                     style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 8),

@@ -9,6 +9,8 @@ class Moment {
   final String selfImageUrl;
   final String partnerImageUrl;
   final String feeling;
+  final int? mood; // 心情分数 1-10，可为空
+  final List<String> comments; // 对方的评论留言
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -19,6 +21,8 @@ class Moment {
     required this.selfImageUrl,
     required this.partnerImageUrl,
     required this.feeling,
+    this.mood,
+    this.comments = const [],
     required this.createdAt,
     required this.updatedAt,
   });
@@ -32,12 +36,17 @@ class Moment {
       selfImageUrl: UrlHelper.normalize(json['self_image_url'] as String? ?? ''),
       partnerImageUrl: UrlHelper.normalize(json['partner_image_url'] as String? ?? ''),
       feeling: json['feeling'] as String? ?? '',
+      mood: json['mood'] as int?,
+      comments: (json['comments'] as List<dynamic>?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          [],
       createdAt: DateHelper.tryParseDateTime(json['created_at'] as String? ?? ''),
       updatedAt: DateHelper.tryParseDateTime(json['updated_at'] as String? ?? ''),
     );
   }
 
-  /// 转为 JSON（创建/更新请求体）
+  /// 转为 JSON（创建请求体）
   Map<String, dynamic> toJson() {
     return {
       'date_str': dateStr,
@@ -45,6 +54,7 @@ class Moment {
       'self_image_url': selfImageUrl,
       'partner_image_url': partnerImageUrl,
       'feeling': feeling,
+      if (mood != null) 'mood': mood,
     };
   }
 
@@ -54,6 +64,8 @@ class Moment {
       'self_image_url': selfImageUrl,
       'partner_image_url': partnerImageUrl,
       'feeling': feeling,
+      if (mood != null) 'mood': mood,
+      'comments': comments,
     };
   }
 }

@@ -60,9 +60,29 @@ class FeedScreen extends ConsumerWidget {
         ],
       ),
       body: _buildBody(ref, loadUsersAsync, currentUser, partner, selectedDate, context),
-      floatingActionButton: DateHelper.isToday(selectedDate) && currentUser != null
-          ? _buildFab(context, ref, selectedDate, currentUser)
-          : null,
+      // FAB 仅在没有自己的动态时显示（用于新建）
+      floatingActionButton: _buildFabIfNeeded(ref, currentUser, context),
+    );
+  }
+
+  /// 仅在自己的动态为空时显示绿色新建按钮
+  Widget? _buildFabIfNeeded(WidgetRef ref, currentUser, BuildContext context) {
+    if (currentUser == null) return null;
+
+    final dayMomentsAsync = ref.watch(dayMomentsProvider);
+    return dayMomentsAsync.when(
+      data: (data) {
+        final myMoment = data['myMoment'];
+        // 已有动态就不显示 FAB（编辑在卡片内操作）
+        if (myMoment != null) return null;
+        return FloatingActionButton.extended(
+          onPressed: () => _openCreateEditor(ref, context),
+          icon: const Icon(Icons.add),
+          label: const Text(AppStrings.createTitle),
+        );
+      },
+      loading: () => null,
+      error: (_, _) => null,
     );
   }
 
@@ -102,19 +122,19 @@ class FeedScreen extends ConsumerWidget {
         ),
         const Divider(height: 1, thickness: 1, color: AppTheme.dividerColor),
         if (currentUser != null && partner != null)
-          _buildDayView(ref, currentUser, partner),
+          _buildDayView(ref, currentUser, partner, context),
       ],
     );
   }
 
-  /// 构建日视图（消费 StreamProvider）
-  Widget _buildDayView(WidgetRef ref, currentUser, partner) {
+  /// 构建日视图
+  Widget _buildDayView(WidgetRef ref, currentUser, partner, BuildContext context) {
     final dayMomentsAsync = ref.watch(dayMomentsProvider);
 
     return dayMomentsAsync.when(
       data: (data) {
-        final myMoment = data['myMoment'];
-        final partnerMoment = data['partnerMoment'];
+        final myMoment = data['myMoment'] as Moment?;
+        final partnerMoment = data['partnerMoment'] as Moment?;
         return DaySplitView(
           myMoment: myMoment,
           partnerMoment: partnerMoment,
@@ -122,6 +142,30 @@ class FeedScreen extends ConsumerWidget {
           partnerNickname: partner.nickname,
           myAvatarUrl: currentUser.avatarUrl,
           partnerAvatarUrl: partner.avatarUrl,
+          // 编辑自己的动态
+          onEditMyMoment: myMoment != null
+              ? () => _openEditor(
+                    context,
+                    ref,
+                    ref.read(selectedDateProvider),
+                    myMoment,
+                  )
+              : null,
+          // 评论对方的动态
+          onCommentPartner: partnerMoment != null
+              ? () => _openCommentDialog(
+                    context,
+                    ref,
+                    partnerMoment,
+                  )
+              : null,
+          // 删除自己动态下的评论
+          onDeleteMyComment: myMoment != null
+              ? (index) => _deleteComment(context, ref, myMoment, index)
+              : null,
+          onDeletePartnerComment: partnerMoment != null
+              ? (index) => _deleteComment(context, ref, partnerMoment, index)
+              : null,
         );
       },
       loading: () => const Expanded(
@@ -130,26 +174,6 @@ class FeedScreen extends ConsumerWidget {
       error: (e, _) => Expanded(
         child: Center(child: Text('加载失败: $e')),
       ),
-    );
-  }
-
-  /// FAB：根据今日是否已发布显示不同样式
-  Widget _buildFab(BuildContext context, WidgetRef ref, DateTime selectedDate, currentUser) {
-    final dayMomentsAsync = ref.watch(dayMomentsProvider);
-
-    return dayMomentsAsync.when(
-      data: (data) {
-        final myMoment = data['myMoment'];
-        final hasPosted = myMoment != null;
-
-        return FloatingActionButton.extended(
-          onPressed: () => _openEditor(context, ref, selectedDate, myMoment),
-          icon: Icon(hasPosted ? Icons.edit : Icons.add),
-          label: Text(hasPosted ? AppStrings.editTitle : AppStrings.createTitle),
-        );
-      },
-      loading: () => const SizedBox.shrink(),
-      error: (_, _) => const SizedBox.shrink(),
     );
   }
 
@@ -169,12 +193,26 @@ class FeedScreen extends ConsumerWidget {
     }
   }
 
-  /// 打开发布/编辑页
+  /// 打开新建编辑页
+  Future<void> _openCreateEditor(WidgetRef ref, BuildContext context) async {
+    final date = ref.read(selectedDateProvider);
+    final result = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => EditMomentScreen(date: date),
+      ),
+    );
+    if (result == true) {
+      _refresh(ref);
+    }
+  }
+
+  /// 打开编辑页
   Future<void> _openEditor(
     BuildContext context,
     WidgetRef ref,
     DateTime date,
-    Moment? existingMoment,
+    Moment existingMoment,
   ) async {
     final result = await Navigator.push<bool>(
       context,
@@ -185,13 +223,108 @@ class FeedScreen extends ConsumerWidget {
         ),
       ),
     );
-
-    // 编辑/发布成功后刷新
     if (result == true) {
-      // StreamProvider 会自动更新，但强制刷新确保一致
-      ref.invalidate(dayMomentsProvider);
-      ref.invalidate(markedDatesProvider);
+      _refresh(ref);
     }
+  }
+
+  /// 打开评论弹窗
+  Future<void> _openCommentDialog(
+    BuildContext context,
+    WidgetRef ref,
+    Moment moment,
+  ) async {
+    final controller = TextEditingController();
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text(AppStrings.commentTitle),
+        content: TextField(
+          controller: controller,
+          maxLines: 3,
+          decoration: const InputDecoration(
+            hintText: AppStrings.commentHint,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(AppStrings.cancel, style: TextStyle(color: Colors.grey[600])),
+          ),
+          FilledButton(
+            onPressed: () {
+              final text = controller.text.trim();
+              if (text.isNotEmpty) Navigator.pop(ctx, text);
+            },
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.primaryColor),
+            child: Text(AppStrings.confirm),
+          ),
+        ],
+      ),
+    );
+
+    if (result != null && result.isNotEmpty) {
+      final apiService = ref.read(apiServiceProvider);
+      final newComments = List<String>.from(moment.comments)..add(result);
+      try {
+        await apiService.updateMoment(moment.id, {'comments': newComments});
+        _refresh(ref);
+      } catch (e) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('评论失败: $e'), backgroundColor: Colors.red),
+          );
+        }
+      }
+    }
+  }
+
+  /// 删除评论
+  Future<void> _deleteComment(
+    BuildContext context,
+    WidgetRef ref,
+    Moment moment,
+    int index,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text(AppStrings.deleteComment),
+        content: const Text(AppStrings.deleteCommentConfirm),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(AppStrings.cancel, style: TextStyle(color: Colors.grey[600])),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: Text(AppStrings.confirm),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    final apiService = ref.read(apiServiceProvider);
+    final newComments = List<String>.from(moment.comments)..removeAt(index);
+    try {
+      await apiService.updateMoment(moment.id, {'comments': newComments});
+      _refresh(ref);
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('删除失败: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  /// 刷新数据
+  void _refresh(WidgetRef ref) {
+    ref.invalidate(dayMomentsProvider);
+    ref.invalidate(markedDatesProvider);
   }
 
   /// 打开个人设置
@@ -206,6 +339,5 @@ class FeedScreen extends ConsumerWidget {
   void _handleLogout(WidgetRef ref) {
     final logout = ref.read(logoutActionProvider);
     logout();
-    // 导航回登录页由 app.dart 的 auth 状态监听处理
   }
 }

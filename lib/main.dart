@@ -9,7 +9,7 @@ void main() {
   // 启动应用，包裹 ProviderScope（Riverpod 根节点）
   runApp(
     const ProviderScope(
-      child: SplitMomentsApp(),
+      child: DiptychApp(),
     ),
   );
 }

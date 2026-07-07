@@ -3,22 +3,31 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import '../constants/app_theme.dart';
+import '../constants/strings.dart';
 import '../models/moment.dart';
 import '../utils/date_helper.dart';
 import 'avatar_widget.dart';
 
 /// 朋友圈风格动态卡片
-/// 展示：头像 + 昵称 + 自己的图 + 对方的图 + 感受文字 + 时间
+/// 展示：头像 + 昵称 + 心情分 + 自己的图 + 对方的图 + 感受文字 + 时间 + 编辑/评论按钮 + 评论列表
 class MomentCard extends StatelessWidget {
   final Moment moment;
   final String nickname;
   final String? avatarUrl;
+  final bool isSelf; // 是否是自己（决定显示"编辑"还是"评论"）
+  final VoidCallback? onEdit;
+  final VoidCallback? onComment;
+  final void Function(int index)? onDeleteComment;
 
   const MomentCard({
     super.key,
     required this.moment,
     this.nickname = '',
     this.avatarUrl,
+    this.isSelf = true,
+    this.onEdit,
+    this.onComment,
+    this.onDeleteComment,
   });
 
   @override
@@ -34,7 +43,7 @@ class MomentCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 头像 + 昵称
+          // 头像 + 昵称 + 心情分
           Row(
             children: [
               AvatarWidget(
@@ -43,7 +52,11 @@ class MomentCard extends StatelessWidget {
                 size: 32,
               ),
               const SizedBox(width: 8),
-              Text(nickname, style: AppTheme.momentNickname),
+              Expanded(
+                child: Text(nickname, style: AppTheme.momentNickname),
+              ),
+              // 心情分数
+              if (moment.mood != null) _buildMoodBadge(),
             ],
           ),
           const SizedBox(height: 10),
@@ -60,12 +73,124 @@ class MomentCard extends StatelessWidget {
 
           const SizedBox(height: 8),
 
-          // 时间
-          Text(
-            DateHelper.toShortTime(moment.updatedAt),
-            style: AppTheme.momentTime,
+          // 最新编辑时间 + 操作按钮
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Text(
+                  DateHelper.toEditTime(moment.updatedAt),
+                  style: AppTheme.momentTime,
+                ),
+              ),
+              // 编辑按钮（自己）或评论按钮（对方）
+              _buildActionButton(),
+            ],
           ),
+
+          // 评论列表
+          if (moment.comments.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            _buildComments(),
+          ],
         ],
+      ),
+    );
+  }
+
+  /// 心情分数徽章
+  Widget _buildMoodBadge() {
+    final mood = moment.mood!;
+    Color moodColor;
+    if (mood >= 8) {
+      moodColor = const Color(0xFF07C160); // 开心绿
+    } else if (mood >= 5) {
+      moodColor = const Color(0xFFFFA726); // 一般橙
+    } else {
+      moodColor = const Color(0xFF78909C); // 低落灰蓝
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: moodColor.withAlpha(20),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: moodColor.withAlpha(80), width: 0.5),
+      ),
+      child: Text(
+        '$mood 分',
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: moodColor,
+        ),
+      ),
+    );
+  }
+
+  /// 编辑 / 评论按钮
+  Widget _buildActionButton() {
+    if (isSelf) {
+      return GestureDetector(
+        onTap: onEdit,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: const Color(0xFF2196F3).withAlpha(15),
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(color: const Color(0xFF2196F3).withAlpha(60), width: 0.5),
+          ),
+          child: const Text(
+            AppStrings.editButton,
+            style: TextStyle(fontSize: 11, color: Color(0xFF2196F3), fontWeight: FontWeight.w500),
+          ),
+        ),
+      );
+    } else {
+      return GestureDetector(
+        onTap: onComment,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: AppTheme.primaryColor.withAlpha(15),
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(color: AppTheme.primaryColor.withAlpha(60), width: 0.5),
+          ),
+          child: const Text(
+            AppStrings.commentButton,
+            style: TextStyle(fontSize: 11, color: AppTheme.primaryColor, fontWeight: FontWeight.w500),
+          ),
+        ),
+      );
+    }
+  }
+
+  /// 评论列表
+  Widget _buildComments() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: Colors.grey[50],
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: List.generate(moment.comments.length, (index) {
+          return GestureDetector(
+            onLongPress: () => onDeleteComment?.call(index),
+            child: Padding(
+              padding: EdgeInsets.only(
+                top: index == 0 ? 0 : 4,
+                bottom: index == moment.comments.length - 1 ? 0 : 4,
+              ),
+              child: Text(
+                moment.comments[index],
+                style: const TextStyle(fontSize: 13, color: AppTheme.textPrimary, height: 1.4),
+              ),
+            ),
+          );
+        }),
       ),
     );
   }

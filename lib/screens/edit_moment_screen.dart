@@ -27,6 +27,7 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
   final _feelingController = TextEditingController();
   File? _selfImageFile;
   File? _partnerImageFile;
+  int? _mood;
   bool _isSaving = false;
 
   bool get _isEdit => widget.existingMoment != null;
@@ -36,6 +37,7 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
     super.initState();
     if (_isEdit) {
       _feelingController.text = widget.existingMoment!.feeling;
+      _mood = widget.existingMoment!.mood;
     }
   }
 
@@ -82,10 +84,11 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
             'self_image_url': selfImageUrl,
             'partner_image_url': partnerImageUrl,
             'feeling': _feelingController.text.trim(),
+            if (_mood != null) 'mood': _mood,
           },
         );
       } else {
-        // 新建模式：上传已选择的图片，没选的留空
+        // 新建模式
         selfImageUrl = _selfImageFile != null
             ? await storageService.uploadImage(_selfImageFile!, folder)
             : '';
@@ -93,13 +96,35 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
             ? await storageService.uploadImage(_partnerImageFile!, folder)
             : '';
 
-        await apiService.createMoment(
-          dateStr: dateStr,
-          authorId: currentUser.uid,
-          selfImageUrl: selfImageUrl,
-          partnerImageUrl: partnerImageUrl,
-          feeling: _feelingController.text.trim(),
-        );
+        // 先检查是否已存在（防止因缓存/网络问题导致的 409）
+        final existing = await apiService.getMomentByDate(currentUser.uid, dateStr);
+        if (existing != null) {
+          // 已存在 → 走更新逻辑
+          if (selfImageUrl.isNotEmpty && existing.selfImageUrl.isNotEmpty) {
+            storageService.deleteImage(existing.selfImageUrl);
+          }
+          if (partnerImageUrl.isNotEmpty && existing.partnerImageUrl.isNotEmpty) {
+            storageService.deleteImage(existing.partnerImageUrl);
+          }
+          await apiService.updateMoment(
+            existing.id,
+            {
+              'self_image_url': selfImageUrl.isNotEmpty ? selfImageUrl : existing.selfImageUrl,
+              'partner_image_url': partnerImageUrl.isNotEmpty ? partnerImageUrl : existing.partnerImageUrl,
+              'feeling': _feelingController.text.trim(),
+              if (_mood != null) 'mood': _mood,
+            },
+          );
+        } else {
+          await apiService.createMoment(
+            dateStr: dateStr,
+            authorId: currentUser.uid,
+            selfImageUrl: selfImageUrl,
+            partnerImageUrl: partnerImageUrl,
+            feeling: _feelingController.text.trim(),
+            mood: _mood,
+          );
+        }
       }
 
       if (!mounted) return;
@@ -137,6 +162,12 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
             ),
             const SizedBox(height: 20),
 
+            // 心情打分
+            Text(AppStrings.feelingLabel, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
+            const SizedBox(height: 8),
+            _buildMoodSelector(),
+            const SizedBox(height: 16),
+
             // 图片插槽 1：关于自己
             Text(AppStrings.selfPhotoLabel, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
             const SizedBox(height: 8),
@@ -160,7 +191,7 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
             const SizedBox(height: 20),
 
             // 感受输入
-            Text(AppStrings.feelingLabel, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
+            Text('💭 今日感受', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
             const SizedBox(height: 8),
             TextField(
               controller: _feelingController,
@@ -169,6 +200,8 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
                 hintText: AppStrings.feelingHint,
               ),
             ),
+            const SizedBox(height: 12),
+
             // 已选图片提示
             Center(
               child: Text(
@@ -199,6 +232,41 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildMoodSelector() {
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: List.generate(10, (i) {
+        final score = i + 1;
+        final isSelected = _mood == score;
+        return GestureDetector(
+          onTap: () => setState(() => _mood = isSelected ? null : score),
+          child: Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: isSelected ? AppTheme.primaryColor : Colors.grey[100],
+              border: Border.all(
+                color: isSelected ? AppTheme.primaryColor : Colors.grey[300]!,
+                width: 1.5,
+              ),
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              '$score',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: isSelected ? Colors.white : Colors.grey[600],
+              ),
+            ),
+          ),
+        );
+      }),
     );
   }
 }

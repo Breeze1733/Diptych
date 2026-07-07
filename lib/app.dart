@@ -6,8 +6,8 @@ import 'screens/feed_screen.dart';
 import 'screens/login_screen.dart';
 
 /// 应用根组件：根据认证状态切换页面
-class SplitMomentsApp extends ConsumerWidget {
-  const SplitMomentsApp({super.key});
+class DiptychApp extends ConsumerWidget {
+  const DiptychApp({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -17,7 +17,7 @@ class SplitMomentsApp extends ConsumerWidget {
     final currentRole = ref.watch(currentUserRoleProvider);
 
     return MaterialApp(
-      title: 'Split Moments',
+      title: 'Diptych',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
       home: autoLoginAsync.when(
@@ -47,10 +47,10 @@ class _SplashScreen extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.favorite_border, size: 48, color: AppTheme.primaryColor),
+            Image(image: AssetImage('assets/icon.png'), width: 48, height: 48),
             SizedBox(height: 16),
             Text(
-              'Split Moments',
+              'Diptych',
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
             ),
             SizedBox(height: 24),

@@ -1,5 +1,5 @@
-name: split_moments
-description: "Split Moments - 双人私密日记"
+name: diptych
+description: "Diptych - 双人私密日记"
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -34,3 +34,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/icon.png

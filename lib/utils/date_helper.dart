@@ -9,8 +9,17 @@ class DateHelper {
     return DateFormat('yyyy-MM-dd').format(date);
   }
 
-  /// 今天的日期字符串
-  static String get todayStr => toDateStr(DateTime.now());
+  /// 以 6:00 为界获取"有效今天"——0:00-5:59 算前一天
+  static DateTime get effectiveNow {
+    final now = DateTime.now();
+    if (now.hour < 6) {
+      return now.subtract(const Duration(days: 1));
+    }
+    return now;
+  }
+
+  /// 今天的日期字符串（以 6:00 为界）
+  static String get todayStr => toDateStr(effectiveNow);
 
   /// 日期 → "2026年07月05日 星期一"
   static String toChineseDate(DateTime date) {
@@ -25,9 +34,9 @@ class DateHelper {
     return a.year == b.year && a.month == b.month && a.day == b.day;
   }
 
-  /// 判断是否是今天
+  /// 判断是否是今天（以 6:00 为界）
   static bool isToday(DateTime date) {
-    return isSameDay(date, DateTime.now());
+    return isSameDay(date, effectiveNow);
   }
 
   /// 日期字符串转 DateTime
@@ -38,6 +47,14 @@ class DateHelper {
   /// 格式化时间戳为简短时间
   static String toShortTime(DateTime date) {
     return DateFormat('HH:mm').format(date.toLocal());
+  }
+
+  /// 格式化编辑时间：第一行日期，第二行时间
+  static String toEditTime(DateTime date) {
+    final local = date.toLocal();
+    final dateLine = DateFormat('yyyy年MM月dd日').format(local);
+    final timeLine = DateFormat('HH:mm').format(local);
+    return '$dateLine\n$timeLine';
   }
 
   /// 解析后端返回的时间字符串（兼容多种格式）

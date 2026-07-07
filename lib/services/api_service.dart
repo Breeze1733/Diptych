@@ -15,7 +15,7 @@ class ApiService {
     if (res.statusCode != 200) {
       throw Exception('GET /users/$uid 返回 ${res.statusCode}: ${res.body}');
     }
-    final body = jsonDecode(res.body);
+    final body = _safeDecode(res);
     if (body['ok'] != true || body['data'] == null) {
       throw Exception('GET /users/$uid 响应异常: ${res.body}');
     }
@@ -56,7 +56,7 @@ class ApiService {
       Uri.parse('$_baseUrl/moments?date_str=$dateStr&author_ids=$userId'),
     );
     if (res.statusCode != 200) return null;
-    final body = jsonDecode(res.body);
+    final body = _safeDecode(res);
     if (body['ok'] != true || body['data'] == null) return null;
     final list = body['data'] as List;
     if (list.isEmpty) return null;
@@ -70,10 +70,24 @@ class ApiService {
     final res = await http.get(
       Uri.parse('$_baseUrl/moments?date_str=$dateStr&author_ids=$ids'),
     );
-    if (res.statusCode != 200) return [];
-    final body = jsonDecode(res.body);
-    if (body['ok'] != true || body['data'] == null) return [];
+    if (res.statusCode != 200) {
+      throw Exception('GET /moments 返回 ${res.statusCode}: ${res.body}');
+    }
+    final body = _safeDecode(res);
+    if (body['ok'] != true || body['data'] == null) {
+      throw Exception('GET /moments 响应异常: ${res.body}');
+    }
     return (body['data'] as List).map((e) => Moment.fromJson(e)).toList();
+  }
+
+  /// 安全解析 JSON，解析失败时附带原始响应内容便于排查
+  dynamic _safeDecode(http.Response res) {
+    try {
+      return jsonDecode(res.body);
+    } catch (e) {
+      final preview = res.body.length > 200 ? '${res.body.substring(0, 200)}...' : res.body;
+      throw Exception('服务器返回非 JSON（状态 ${res.statusCode}）: $preview');
+    }
   }
 
   /// 创建动态
@@ -83,21 +97,25 @@ class ApiService {
     required String selfImageUrl,
     required String partnerImageUrl,
     required String feeling,
+    int? mood,
   }) async {
+    final body = <String, dynamic>{
+      'date_str': dateStr,
+      'author_id': authorId,
+      'self_image_url': selfImageUrl,
+      'partner_image_url': partnerImageUrl,
+      'feeling': feeling,
+    };
+    if (mood != null) body['mood'] = mood;
+
     final res = await http.post(
       Uri.parse('$_baseUrl/moments'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'date_str': dateStr,
-        'author_id': authorId,
-        'self_image_url': selfImageUrl,
-        'partner_image_url': partnerImageUrl,
-        'feeling': feeling,
-      }),
+      body: jsonEncode(body),
     );
-    final body = jsonDecode(res.body);
-    if (body['ok'] != true) throw Exception(body['error'] ?? '创建失败');
-    return body['data']['id'].toString();
+    final bodyDecoded = _safeDecode(res);
+    if (bodyDecoded['ok'] != true) throw Exception(bodyDecoded['error'] ?? '创建失败');
+    return bodyDecoded['data']['id'].toString();
   }
 
   /// 更新动态
@@ -113,7 +131,7 @@ class ApiService {
   Future<List<String>> getDatesWithMoments(String userId) async {
     final res = await http.get(Uri.parse('$_baseUrl/moments/$userId/dates'));
     if (res.statusCode != 200) return [];
-    final body = jsonDecode(res.body);
+    final body = _safeDecode(res);
     if (body['ok'] != true || body['data'] == null) return [];
     return (body['data'] as List).map((e) => e.toString()).toList();
   }
