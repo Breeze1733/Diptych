@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 
 /// 头像组件
 class AvatarWidget extends StatelessWidget {
@@ -17,12 +18,13 @@ class AvatarWidget extends StatelessWidget {
   Widget build(BuildContext context) {
     if (avatarUrl != null && avatarUrl!.isNotEmpty) {
       return ClipOval(
-        child: Image.network(
-          avatarUrl!,
+        child: CachedNetworkImage(
+          imageUrl: avatarUrl!,
           width: size,
           height: size,
           fit: BoxFit.cover,
-          errorBuilder: (_, _, _) => _buildFallback(),
+          placeholder: (_, __) => _buildFallback(),
+          errorWidget: (_, __, ___) => _buildFallback(),
         ),
       );
     }

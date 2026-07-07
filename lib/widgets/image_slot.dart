@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 
 /// 图片选择插槽
 /// 点击可选择/更换图片，显示预览
@@ -85,7 +86,12 @@ class ImageSlot extends StatelessWidget {
     return Stack(
       fit: StackFit.expand,
       children: [
-        Image.network(existingUrl!, fit: BoxFit.cover, errorBuilder: (_, _, _) => _buildPlaceholder()),
+        CachedNetworkImage(
+          imageUrl: existingUrl!,
+          fit: BoxFit.cover,
+          placeholder: (_, __) => _buildPlaceholder(),
+          errorWidget: (_, __, ___) => _buildPlaceholder(),
+        ),
         _buildChangeLabel(),
         Positioned(top: 4, left: 8, child: _labelChip()),
       ],

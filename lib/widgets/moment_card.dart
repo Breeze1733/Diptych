@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../constants/app_theme.dart';
 import '../constants/strings.dart';
 import '../models/moment.dart';
@@ -199,12 +200,13 @@ class MomentCard extends StatelessWidget {
     final image = url.isNotEmpty
         ? GestureDetector(
             onTap: () => _openFullScreen(context, url),
-            child: Image.network(
-              url,
+            child: CachedNetworkImage(
+              imageUrl: url,
               fit: BoxFit.cover,
               width: double.infinity,
               height: double.infinity,
-              errorBuilder: (_, _, _) => _placeholder(label),
+              placeholder: (_, __) => _placeholder(label),
+              errorWidget: (_, __, ___) => _placeholder(label),
             ),
           )
         : _placeholder(label);
@@ -307,16 +309,13 @@ class _FullScreenImageState extends State<_FullScreenImage> {
         minScale: 0.5,
         maxScale: 4.0,
         child: SizedBox.expand(
-          child: Image.network(
-            widget.url,
+          child: CachedNetworkImage(
+            imageUrl: widget.url,
             fit: BoxFit.contain,
-            loadingBuilder: (_, child, progress) {
-              if (progress == null) return child;
-              return const Center(
-                child: CircularProgressIndicator(color: Colors.white),
-              );
-            },
-            errorBuilder: (_, e, _) => Center(
+            placeholder: (_, __) => const Center(
+              child: CircularProgressIndicator(color: Colors.white),
+            ),
+            errorWidget: (_, __, e) => Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [

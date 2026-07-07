@@ -63,19 +63,27 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
       String partnerImageUrl;
 
       if (_isEdit) {
-        // 编辑模式：仅上传新选择的图片，否则保留旧 URL
+        // 编辑模式：并行上传新选择的图片
         final oldSelfUrl = widget.existingMoment!.selfImageUrl;
         final oldPartnerUrl = widget.existingMoment!.partnerImageUrl;
-        selfImageUrl = oldSelfUrl;
-        partnerImageUrl = oldPartnerUrl;
 
-        if (_selfImageFile != null) {
-          selfImageUrl = await storageService.uploadImage(_selfImageFile!, folder);
-          if (oldSelfUrl.isNotEmpty) storageService.deleteImage(oldSelfUrl);
+        final uploads = await Future.wait([
+          _selfImageFile != null
+              ? storageService.uploadImage(_selfImageFile!, folder)
+              : Future.value(oldSelfUrl),
+          _partnerImageFile != null
+              ? storageService.uploadImage(_partnerImageFile!, folder)
+              : Future.value(oldPartnerUrl),
+        ]);
+        selfImageUrl = uploads[0] as String;
+        partnerImageUrl = uploads[1] as String;
+
+        // 异步删除旧图片（不阻塞）
+        if (_selfImageFile != null && oldSelfUrl.isNotEmpty) {
+          storageService.deleteImage(oldSelfUrl);
         }
-        if (_partnerImageFile != null) {
-          partnerImageUrl = await storageService.uploadImage(_partnerImageFile!, folder);
-          if (oldPartnerUrl.isNotEmpty) storageService.deleteImage(oldPartnerUrl);
+        if (_partnerImageFile != null && oldPartnerUrl.isNotEmpty) {
+          storageService.deleteImage(oldPartnerUrl);
         }
 
         await apiService.updateMoment(
@@ -88,13 +96,17 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
           },
         );
       } else {
-        // 新建模式
-        selfImageUrl = _selfImageFile != null
-            ? await storageService.uploadImage(_selfImageFile!, folder)
-            : '';
-        partnerImageUrl = _partnerImageFile != null
-            ? await storageService.uploadImage(_partnerImageFile!, folder)
-            : '';
+        // 新建模式：并行上传图片
+        final uploads = await Future.wait([
+          _selfImageFile != null
+              ? storageService.uploadImage(_selfImageFile!, folder)
+              : Future.value(''),
+          _partnerImageFile != null
+              ? storageService.uploadImage(_partnerImageFile!, folder)
+              : Future.value(''),
+        ]);
+        selfImageUrl = uploads[0] as String;
+        partnerImageUrl = uploads[1] as String;
 
         // 先检查是否已存在（防止因缓存/网络问题导致的 409）
         final existing = await apiService.getMomentByDate(currentUser.uid, dateStr);
