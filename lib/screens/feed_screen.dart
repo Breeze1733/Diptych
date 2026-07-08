@@ -6,12 +6,16 @@ import '../models/moment.dart';
 import '../providers/auth_provider.dart';
 import '../providers/day_moment_provider.dart';
 import '../providers/selected_date_provider.dart';
+import '../services/update_service.dart';
 import '../utils/date_helper.dart';
 import '../widgets/calendar_picker.dart';
 import '../widgets/date_header.dart';
 import '../widgets/day_split_view.dart';
 import 'edit_moment_screen.dart';
 import 'profile_screen.dart';
+
+/// 是否已静默检查过更新（仅触发一次）
+final _autoUpdateCheckedProvider = StateProvider<bool>((ref) => false);
 
 /// 主页面：顶栏 + 日视图分屏 + FAB
 class FeedScreen extends ConsumerWidget {
@@ -26,6 +30,13 @@ class FeedScreen extends ConsumerWidget {
 
     // 确保用户数据已加载
     final loadUsersAsync = ref.watch(loadUsersProvider);
+
+    // 用户数据加载完成后，静默检查更新（仅一次）
+    final hasChecked = ref.watch(_autoUpdateCheckedProvider);
+    if (!hasChecked && loadUsersAsync is AsyncData) {
+      ref.read(_autoUpdateCheckedProvider.notifier).state = true;
+      _silentCheckUpdate(context);
+    }
 
     // 用户显示名：优先从加载的数据取，否则用角色生成
     final displayName = currentUser?.nickname ?? (role != null ? '用户$role' : '');
@@ -321,10 +332,9 @@ class FeedScreen extends ConsumerWidget {
     }
   }
 
-  /// 刷新数据
+  /// 刷新数据（触发后端拉取）
   void _refresh(WidgetRef ref) {
-    ref.invalidate(dayMomentsProvider);
-    ref.invalidate(markedDatesProvider);
+    refreshAllData(ref);
   }
 
   /// 打开个人设置
@@ -333,6 +343,50 @@ class FeedScreen extends ConsumerWidget {
       context,
       MaterialPageRoute(builder: (_) => const ProfileScreen()),
     );
+  }
+
+  /// 静默检查更新（后端不通不报错）
+  static Future<void> _silentCheckUpdate(BuildContext context) async {
+    try {
+      final service = UpdateService();
+      final current = await service.getCurrentVersion();
+      final latest = await service.checkLatestVersion();
+
+      if (!service.needUpdate(current, latest)) {
+        service.dispose();
+        return;
+      }
+
+      if (!context.mounted) return;
+
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('发现新版本'),
+          content: Text('最新版本 ${latest.version}，是否更新？\n\n${latest.releaseNotes}'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(AppStrings.cancel, style: TextStyle(color: Colors.grey[600])),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: FilledButton.styleFrom(backgroundColor: AppTheme.primaryColor),
+              child: Text(AppStrings.confirm),
+            ),
+          ],
+        ),
+      );
+
+      if (ok == true) {
+        final apkPath = await service.downloadApk(latest.downloadUrl, (_) {});
+        await service.installApk(apkPath);
+        await service.markForCleanup(apkPath);
+      }
+      service.dispose();
+    } catch (_) {
+      // 后端不通，静默跳过
+    }
   }
 
   /// 退出登录

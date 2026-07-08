@@ -113,6 +113,16 @@ lib/
 
 需确保后端 `POST /api/upload` 接口可正常访问，详见 [API 文档](docs/backend-api-spec.md)。
 
+
+每次都改两处，同一个版本号：
+
+文件	改什么	示例
+pubspec.yaml:4	version: x.y.z+N	version: 1.0.2+3
+version.json	version + version_code	"version": "1.0.2", "version_code": 3
+
+重启后端
+pm2 restart moments-backend
+
 ## License
 
 MIT
