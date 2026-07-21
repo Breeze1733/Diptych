@@ -49,7 +49,7 @@ class AppTheme {
         backgroundColor: Colors.white,
         foregroundColor: textPrimary,
         elevation: 0.5,
-        centerTitle: true,
+        centerTitle: false,
       ),
       floatingActionButtonTheme: const FloatingActionButtonThemeData(
         backgroundColor: primaryColor,

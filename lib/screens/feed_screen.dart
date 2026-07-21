@@ -6,6 +6,7 @@ import '../models/moment.dart';
 import '../providers/auth_provider.dart';
 import '../providers/day_moment_provider.dart';
 import '../providers/selected_date_provider.dart';
+import '../services/cache_service.dart';
 import '../services/update_service.dart';
 import '../utils/date_helper.dart';
 import '../widgets/calendar_picker.dart';
@@ -322,6 +323,8 @@ class FeedScreen extends ConsumerWidget {
         await apiService.updateMoment(moment.id, {
           'comments': newComments.map((c) => c.toJson()).toList(),
         });
+        // 立即更新本地缓存，确保刷新后读到最新数据
+        await _updateCachedMomentComments(ref, moment.id, newComments);
         _refresh(ref);
       } catch (e) {
         if (context.mounted) {
@@ -331,6 +334,20 @@ class FeedScreen extends ConsumerWidget {
         }
       }
     }
+  }
+
+  /// 更新本地缓存中某条日记的评论
+  Future<void> _updateCachedMomentComments(WidgetRef ref, String momentId, List<Comment> comments) async {
+    final dateStr = DateHelper.toDateStr(ref.read(selectedDateProvider));
+    final cached = await CacheService.loadDayMoments(dateStr);
+    if (cached == null) return;
+    for (int i = 0; i < cached.length; i++) {
+      if (cached[i]['id'] == momentId) {
+        cached[i]['comments'] = comments.map((c) => c.toJson()).toList();
+        break;
+      }
+    }
+    await CacheService.saveDayMoments(dateStr, cached);
   }
 
   /// 删除评论（同时删除其所有子回复）
@@ -375,6 +392,8 @@ class FeedScreen extends ConsumerWidget {
       await apiService.updateMoment(moment.id, {
         'comments': newComments.map((c) => c.toJson()).toList(),
       });
+      // 立即更新本地缓存
+      await _updateCachedMomentComments(ref, moment.id, newComments);
       _refresh(ref);
     } catch (e) {
       if (context.mounted) {
