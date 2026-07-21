@@ -56,6 +56,8 @@ class FeedScreen extends ConsumerWidget {
               padding: EdgeInsets.zero,
               materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
+          // 刷新按钮
+          _buildRefreshButton(ref),
           // 个人设置
           IconButton(
             icon: const Icon(Icons.settings_outlined, size: 20),
@@ -73,6 +75,19 @@ class FeedScreen extends ConsumerWidget {
       body: _buildBody(ref, loadUsersAsync, currentUser, partner, selectedDate, context),
       // FAB 仅在没有自己的动态时显示（用于新建）
       floatingActionButton: _buildFabIfNeeded(ref, currentUser, context),
+    );
+  }
+
+  /// 刷新按钮（后端离线时禁用）
+  Widget _buildRefreshButton(WidgetRef ref) {
+    final online = ref.watch(backendOnlineProvider);
+    final isLoading = ref.watch(dayMomentsProvider).isLoading;
+    return IconButton(
+      icon: isLoading
+          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+          : Icon(Icons.refresh, size: 20, color: online ? Colors.grey[700] : Colors.grey[400]),
+      tooltip: '刷新',
+      onPressed: (online && !isLoading) ? () => refreshDayData(ref) : null,
     );
   }
 
@@ -164,18 +179,21 @@ class FeedScreen extends ConsumerWidget {
               : null,
           // 评论对方的动态
           onCommentPartner: partnerMoment != null
-              ? () => _openCommentDialog(
-                    context,
-                    ref,
-                    partnerMoment,
-                  )
+              ? () => _openCommentDialog(context, ref, partnerMoment, null)
               : null,
           // 删除自己动态下的评论
           onDeleteMyComment: myMoment != null
-              ? (index) => _deleteComment(context, ref, myMoment, index)
+              ? (c) => _deleteComment(context, ref, myMoment, c)
               : null,
           onDeletePartnerComment: partnerMoment != null
-              ? (index) => _deleteComment(context, ref, partnerMoment, index)
+              ? (c) => _deleteComment(context, ref, partnerMoment, c)
+              : null,
+          // 回复评论
+          onReplyMyComment: myMoment != null
+              ? (parent) => _openCommentDialog(context, ref, myMoment, parent)
+              : null,
+          onReplyPartnerComment: partnerMoment != null
+              ? (parent) => _openCommentDialog(context, ref, partnerMoment, parent)
               : null,
         );
       },
@@ -239,22 +257,29 @@ class FeedScreen extends ConsumerWidget {
     }
   }
 
-  /// 打开评论弹窗
+  /// 生成评论 ID
+  String _makeCommentId() {
+    return DateTime.now().millisecondsSinceEpoch.toString();
+  }
+
+  /// 打开评论弹窗（新增 / 回复）
   Future<void> _openCommentDialog(
     BuildContext context,
     WidgetRef ref,
     Moment moment,
+    Comment? replyTo, // null = 新增顶级评论，非 null = 回复某条
   ) async {
     final controller = TextEditingController();
+    final title = replyTo != null ? '回复评论' : AppStrings.commentTitle;
     final result = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text(AppStrings.commentTitle),
+        title: Text(title),
         content: TextField(
           controller: controller,
           maxLines: 3,
-          decoration: const InputDecoration(
-            hintText: AppStrings.commentHint,
+          decoration: InputDecoration(
+            hintText: replyTo != null ? '写下回复...' : AppStrings.commentHint,
           ),
         ),
         actions: [
@@ -275,10 +300,41 @@ class FeedScreen extends ConsumerWidget {
     );
 
     if (result != null && result.isNotEmpty) {
+      final currentUser = ref.read(currentUserProvider);
+      final newComment = Comment(
+        id: _makeCommentId(),
+        authorId: currentUser?.uid ?? '',
+        content: result,
+        replyTo: replyTo?.id, // 如果是回复，记录父评论 id
+        createdAt: DateTime.now(),
+      );
+
+      final newComments = List<Comment>.from(moment.comments);
+
+      if (replyTo != null) {
+        // 回复：插入到父评论的正下方（找到父评论后面所有同父评论之后）
+        int insertIndex = newComments.indexWhere((c) => c.id == replyTo.id);
+        if (insertIndex != -1) {
+          // 跳过父评论及其已有的所有子回复
+          insertIndex++;
+          while (insertIndex < newComments.length &&
+              newComments[insertIndex].replyTo == replyTo.id) {
+            insertIndex++;
+          }
+          newComments.insert(insertIndex, newComment);
+        } else {
+          newComments.add(newComment);
+        }
+      } else {
+        // 顶级评论：追加到末尾
+        newComments.add(newComment);
+      }
+
       final apiService = ref.read(apiServiceProvider);
-      final newComments = List<String>.from(moment.comments)..add(result);
       try {
-        await apiService.updateMoment(moment.id, {'comments': newComments});
+        await apiService.updateMoment(moment.id, {
+          'comments': newComments.map((c) => c.toJson()).toList(),
+        });
         _refresh(ref);
       } catch (e) {
         if (context.mounted) {
@@ -290,12 +346,12 @@ class FeedScreen extends ConsumerWidget {
     }
   }
 
-  /// 删除评论
+  /// 删除评论（同时删除其所有子回复）
   Future<void> _deleteComment(
     BuildContext context,
     WidgetRef ref,
     Moment moment,
-    int index,
+    Comment comment,
   ) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -318,10 +374,20 @@ class FeedScreen extends ConsumerWidget {
 
     if (confirmed != true) return;
 
+    // 收集要删除的评论 id（包括子回复）
+    final toRemove = <String>{comment.id};
+    // 找出所有回复该评论的子评论
+    for (final c in moment.comments) {
+      if (c.replyTo == comment.id) toRemove.add(c.id);
+    }
+
+    final newComments = moment.comments.where((c) => !toRemove.contains(c.id)).toList();
+
     final apiService = ref.read(apiServiceProvider);
-    final newComments = List<String>.from(moment.comments)..removeAt(index);
     try {
-      await apiService.updateMoment(moment.id, {'comments': newComments});
+      await apiService.updateMoment(moment.id, {
+        'comments': newComments.map((c) => c.toJson()).toList(),
+      });
       _refresh(ref);
     } catch (e) {
       if (context.mounted) {
@@ -334,7 +400,8 @@ class FeedScreen extends ConsumerWidget {
 
   /// 刷新数据（触发后端拉取）
   void _refresh(WidgetRef ref) {
-    refreshAllData(ref);
+    refreshDayData(ref);
+    refreshMarkedDates(ref);
   }
 
   /// 打开个人设置

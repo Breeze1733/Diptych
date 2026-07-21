@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/app_user.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
+import '../services/cache_service.dart';
 import '../services/storage_service.dart';
 
 /// 认证服务实例
@@ -56,21 +57,37 @@ final logoutActionProvider = Provider<Future<void> Function()>((ref) {
   };
 });
 
-/// 加载当前用户和对方信息
+/// 加载当前用户和对方信息（缓存优先，后端兜底）
 final loadUsersProvider = FutureProvider<void>((ref) async {
   final role = ref.watch(currentUserRoleProvider);
   if (role == null) return;
 
   final apiService = ref.read(apiServiceProvider);
 
-  // 确保预设用户存在
-  await apiService.ensurePresetUsers();
+  try {
+    // 确保预设用户存在
+    await apiService.ensurePresetUsers();
 
-  // 加载当前用户
-  final currentUser = await apiService.getUser(role);
-  ref.read(currentUserProvider.notifier).state = currentUser;
+    // 加载当前用户
+    final currentUser = await apiService.getUser(role);
+    ref.read(currentUserProvider.notifier).state = currentUser;
+    await CacheService.saveUser(currentUser);
 
-  // 加载对方
-  final partner = await apiService.getUser(currentUser.partnerUid);
-  ref.read(partnerUserProvider.notifier).state = partner;
+    // 加载对方
+    final partner = await apiService.getUser(currentUser.partnerUid);
+    ref.read(partnerUserProvider.notifier).state = partner;
+    await CacheService.saveUser(partner);
+  } catch (_) {
+    // 后端不通 → 尝试从缓存加载
+    final cachedCurrent = await CacheService.loadUser(role);
+    if (cachedCurrent != null) {
+      ref.read(currentUserProvider.notifier).state = cachedCurrent;
+      final cachedPartner = await CacheService.loadUser(cachedCurrent.partnerUid);
+      if (cachedPartner != null) {
+        ref.read(partnerUserProvider.notifier).state = cachedPartner;
+        return; // 缓存加载成功，不抛错
+      }
+    }
+    rethrow; // 无缓存，还是报错
+  }
 });

@@ -1,6 +1,53 @@
 import '../utils/date_helper.dart';
 import '../utils/url_helper.dart';
 
+/// 评论数据模型
+class Comment {
+  final String id;
+  final String authorId; // "A" 或 "B"
+  final String content;
+  final String? replyTo; // 回复的目标评论 id，null 表示顶级评论
+  final DateTime createdAt;
+
+  const Comment({
+    required this.id,
+    required this.authorId,
+    required this.content,
+    this.replyTo,
+    required this.createdAt,
+  });
+
+  factory Comment.fromJson(Map<String, dynamic> json) {
+    return Comment(
+      id: json['id']?.toString() ?? '',
+      authorId: json['author_id'] as String? ?? '',
+      content: json['content'] as String? ?? '',
+      replyTo: json['reply_to'] as String?,
+      createdAt: DateHelper.tryParseDateTime(json['created_at'] as String? ?? ''),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'author_id': authorId,
+      'content': content,
+      if (replyTo != null) 'reply_to': replyTo,
+      'created_at': DateHelper.toIsoString(createdAt),
+    };
+  }
+
+  Comment copyWith({String? id, String? authorId, String? content, String? replyTo, DateTime? createdAt}) {
+    return Comment(
+      id: id ?? this.id,
+      authorId: authorId ?? this.authorId,
+      content: content ?? this.content,
+      replyTo: replyTo ?? this.replyTo,
+      createdAt: createdAt ?? this.createdAt,
+    );
+  }
+}
+
 /// 动态数据模型（每天每条用户一条）
 class Moment {
   final String id;
@@ -10,7 +57,7 @@ class Moment {
   final String partnerImageUrl;
   final String feeling;
   final int? mood; // 心情分数 1-10，可为空
-  final List<String> comments; // 对方的评论留言
+  final List<Comment> comments; // 评论列表
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -38,7 +85,7 @@ class Moment {
       feeling: json['feeling'] as String? ?? '',
       mood: json['mood'] as int?,
       comments: (json['comments'] as List<dynamic>?)
-              ?.map((e) => e.toString())
+              ?.map((e) => e is Map<String, dynamic> ? Comment.fromJson(e) : Comment(id: '', authorId: '', content: e.toString(), createdAt: DateTime.now()))
               .toList() ??
           [],
       createdAt: DateHelper.tryParseDateTime(json['created_at'] as String? ?? ''),
@@ -46,7 +93,7 @@ class Moment {
     );
   }
 
-  /// 转为 JSON（创建请求体）
+  /// 转为 JSON（创建请求体 / 缓存）
   Map<String, dynamic> toJson() {
     return {
       'date_str': dateStr,
@@ -55,6 +102,7 @@ class Moment {
       'partner_image_url': partnerImageUrl,
       'feeling': feeling,
       if (mood != null) 'mood': mood,
+      'comments': comments.map((c) => c.toJson()).toList(),
     };
   }
 
@@ -65,7 +113,33 @@ class Moment {
       'partner_image_url': partnerImageUrl,
       'feeling': feeling,
       if (mood != null) 'mood': mood,
-      'comments': comments,
+      'comments': comments.map((c) => c.toJson()).toList(),
     };
+  }
+
+  Moment copyWith({
+    String? id,
+    String? dateStr,
+    String? authorId,
+    String? selfImageUrl,
+    String? partnerImageUrl,
+    String? feeling,
+    int? mood,
+    List<Comment>? comments,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  }) {
+    return Moment(
+      id: id ?? this.id,
+      dateStr: dateStr ?? this.dateStr,
+      authorId: authorId ?? this.authorId,
+      selfImageUrl: selfImageUrl ?? this.selfImageUrl,
+      partnerImageUrl: partnerImageUrl ?? this.partnerImageUrl,
+      feeling: feeling ?? this.feeling,
+      mood: mood ?? this.mood,
+      comments: comments ?? this.comments,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
   }
 }

@@ -16,8 +16,10 @@ class DaySplitView extends StatelessWidget {
   final String? partnerAvatarUrl;
   final VoidCallback? onEditMyMoment;
   final VoidCallback? onCommentPartner;
-  final void Function(int index)? onDeleteMyComment;
-  final void Function(int index)? onDeletePartnerComment;
+  final void Function(Comment comment)? onDeleteMyComment;
+  final void Function(Comment comment)? onDeletePartnerComment;
+  final void Function(Comment? parentComment)? onReplyMyComment;
+  final void Function(Comment? parentComment)? onReplyPartnerComment;
 
   const DaySplitView({
     super.key,
@@ -31,6 +33,8 @@ class DaySplitView extends StatelessWidget {
     this.onCommentPartner,
     this.onDeleteMyComment,
     this.onDeletePartnerComment,
+    this.onReplyMyComment,
+    this.onReplyPartnerComment,
   });
 
   @override
@@ -44,11 +48,13 @@ class DaySplitView extends StatelessWidget {
             child: _buildColumn(
               moment: myMoment,
               nickname: myNickname,
+              partnerNickname: partnerNickname,
               avatarUrl: myAvatarUrl,
               isSelf: true,
               onEdit: onEditMyMoment,
               onComment: null,
               onDeleteComment: onDeleteMyComment,
+              onReplyComment: onReplyMyComment,
             ),
           ),
           // 中间分隔线
@@ -61,11 +67,13 @@ class DaySplitView extends StatelessWidget {
             child: _buildColumn(
               moment: partnerMoment,
               nickname: partnerNickname,
+              partnerNickname: myNickname,
               avatarUrl: partnerAvatarUrl,
               isSelf: false,
               onEdit: null,
               onComment: onCommentPartner,
               onDeleteComment: onDeletePartnerComment,
+              onReplyComment: onReplyPartnerComment,
             ),
           ),
         ],
@@ -76,11 +84,13 @@ class DaySplitView extends StatelessWidget {
   Widget _buildColumn({
     required Moment? moment,
     required String nickname,
+    required String partnerNickname,
     required String? avatarUrl,
     required bool isSelf,
     VoidCallback? onEdit,
     VoidCallback? onComment,
-    void Function(int index)? onDeleteComment,
+    void Function(Comment comment)? onDeleteComment,
+    void Function(Comment? parentComment)? onReplyComment,
   }) {
     if (moment != null) {
       // 有动态，正常显示
@@ -89,10 +99,12 @@ class DaySplitView extends StatelessWidget {
           moment: moment,
           nickname: nickname,
           avatarUrl: avatarUrl,
+          partnerNickname: partnerNickname,
           isSelf: isSelf,
           onEdit: onEdit,
           onComment: onComment,
           onDeleteComment: onDeleteComment,
+          onReplyComment: onReplyComment,
         ),
       );
     }

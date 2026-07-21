@@ -1,12 +1,13 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:path_provider/path_provider.dart';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import '../constants/app_theme.dart';
 import '../constants/strings.dart';
 import '../models/moment.dart';
 import '../utils/date_helper.dart';
+import '../utils/file_helper.dart';
 import 'avatar_widget.dart';
 
 /// 朋友圈风格动态卡片
@@ -15,21 +16,30 @@ class MomentCard extends StatelessWidget {
   final Moment moment;
   final String nickname;
   final String? avatarUrl;
+  final String partnerNickname;
   final bool isSelf; // 是否是自己（决定显示"编辑"还是"评论"）
   final VoidCallback? onEdit;
   final VoidCallback? onComment;
-  final void Function(int index)? onDeleteComment;
+  final void Function(Comment comment)? onDeleteComment;
+  final void Function(Comment? parentComment)? onReplyComment;
 
   const MomentCard({
     super.key,
     required this.moment,
     this.nickname = '',
     this.avatarUrl,
+    this.partnerNickname = '',
     this.isSelf = true,
     this.onEdit,
     this.onComment,
     this.onDeleteComment,
+    this.onReplyComment,
   });
+
+  /// 根据 authorId 获取显示昵称
+  String _nickFor(String authorId) {
+    return authorId == moment.authorId ? nickname : partnerNickname;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -89,10 +99,10 @@ class MomentCard extends StatelessWidget {
             ],
           ),
 
-          // 评论列表
+          // 评论列表（朋友圈风格）
           if (moment.comments.isNotEmpty) ...[
             const SizedBox(height: 8),
-            _buildComments(),
+            _buildComments(context),
           ],
         ],
       ),
@@ -166,8 +176,20 @@ class MomentCard extends StatelessWidget {
     }
   }
 
-  /// 评论列表
-  Widget _buildComments() {
+  /// 评论区（微信朋友圈风格）
+  Widget _buildComments(BuildContext context) {
+    // 构建评论树：顶级评论 + 其回复
+    final topLevel = <Comment>[];
+    final replies = <String, List<Comment>>{}; // parentId → replies
+
+    for (final c in moment.comments) {
+      if (c.replyTo == null) {
+        topLevel.add(c);
+      } else {
+        replies.putIfAbsent(c.replyTo!, () => []).add(c);
+      }
+    }
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(8),
@@ -177,21 +199,119 @@ class MomentCard extends StatelessWidget {
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: List.generate(moment.comments.length, (index) {
-          return GestureDetector(
-            onLongPress: () => onDeleteComment?.call(index),
-            child: Padding(
-              padding: EdgeInsets.only(
-                top: index == 0 ? 0 : 4,
-                bottom: index == moment.comments.length - 1 ? 0 : 4,
-              ),
-              child: Text(
-                moment.comments[index],
-                style: const TextStyle(fontSize: 13, color: AppTheme.textPrimary, height: 1.4),
+        children: [
+          for (int i = 0; i < topLevel.length; i++) ...[
+            if (i > 0) const SizedBox(height: 4),
+            _buildCommentRow(context, topLevel[i], replies[topLevel[i].id]),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// 单条评论 + 其回复
+  Widget _buildCommentRow(BuildContext context, Comment comment, List<Comment>? childReplies) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        GestureDetector(
+          onTap: () => _showCommentActions(context, comment),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 2),
+            child: RichText(
+              text: TextSpan(
+                children: [
+                  TextSpan(
+                    text: '${_nickFor(comment.authorId)}：',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.primaryColor,
+                      height: 1.4,
+                    ),
+                  ),
+                  TextSpan(
+                    text: comment.content,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: AppTheme.textPrimary,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
               ),
             ),
-          );
-        }),
+          ),
+        ),
+        // 回复列表（左对齐，不缩进）
+        if (childReplies != null && childReplies.isNotEmpty)
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (final reply in childReplies)
+                GestureDetector(
+                  onTap: () => _showCommentActions(context, reply),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: RichText(
+                      text: TextSpan(
+                        children: [
+                          TextSpan(
+                            text: '${_nickFor(reply.authorId)}：',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.primaryColor,
+                              height: 1.4,
+                            ),
+                          ),
+                          TextSpan(
+                            text: reply.content,
+                            style: const TextStyle(
+                              fontSize: 13,
+                              color: AppTheme.textPrimary,
+                              height: 1.4,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+      ],
+    );
+  }
+
+  /// 点击评论弹出操作菜单
+  void _showCommentActions(BuildContext context, Comment comment) {
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Wrap(
+          children: [
+            // 回复
+            ListTile(
+              leading: const Icon(Icons.reply),
+              title: const Text('回复'),
+              onTap: () {
+                Navigator.pop(ctx);
+                // 传入被回复的评论
+                onReplyComment?.call(comment);
+              },
+            ),
+            // 删除
+            ListTile(
+              leading: const Icon(Icons.delete_outline, color: Colors.red),
+              title: const Text('删除', style: TextStyle(color: Colors.red)),
+              onTap: () {
+                Navigator.pop(ctx);
+                onDeleteComment?.call(comment);
+              },
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -263,10 +383,11 @@ class _FullScreenImageState extends State<_FullScreenImage> {
     setState(() => _isDownloading = true);
     try {
       final res = await http.get(Uri.parse(widget.url));
-      final dir = await getApplicationDocumentsDirectory();
+      final dir = await FileHelper.getDownloadsDirectory();
       final name = widget.url.split('/').last;
       final file = File('${dir.path}/$name');
       await file.writeAsBytes(res.bodyBytes);
+      await FileHelper.scanFile(file.path);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('已保存到 ${file.path}')),

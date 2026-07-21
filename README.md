@@ -31,40 +31,7 @@ flutter pub get
 
 ### 构建 APK
 
-```bash
-# Debug 版本（开发调试用）
-flutter build apk --debug
-
-# Release 版本（正式发布用）
 flutter build apk --release
-
-# 分架构构建（减小体积）
-flutter build apk --split-per-abi
-```
-
-产物路径：`build/app/outputs/flutter-apk/app-debug.apk`
-
-### 安装到手机
-
-```bash
-# USB 连接手机后
-flutter install
-
-# 或者用 adb
-adb install build/app/outputs/flutter-apk/app-debug.apk
-```
-
-### 本地运行（热重载开发）
-
-```bash
-# Android 真机
-flutter run -d <device-id>
-
-# Chrome 浏览器
-flutter run -d chrome
-```
-
-查看已连接设备：`flutter devices`
 
 ## 项目结构
 

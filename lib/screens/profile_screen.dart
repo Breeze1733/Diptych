@@ -6,6 +6,8 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../constants/app_theme.dart';
 import '../providers/auth_provider.dart';
 import '../services/update_service.dart';
+import '../utils/cache_helper.dart';
+import '../utils/file_helper.dart';
 
 /// 个人设置页：修改用户信息 + 检查更新
 class ProfileScreen extends ConsumerStatefulWidget {
@@ -26,6 +28,15 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   bool _isChecking = false;
   bool _isDownloading = false;
   double _downloadProgress = 0;
+
+  // 迁移相关
+  bool _isMigrating = false;
+  String _migrateStatus = '';
+
+  // 缓存相关
+  String _cacheSizeText = '点击计算';
+  bool _isClearingCache = false;
+  bool _isCalcCache = false;
 
   @override
   void initState() {
@@ -185,6 +196,117 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     }
   }
 
+  // ─── 缓存管理 ───
+
+  Future<void> _calcCacheSize() async {
+    setState(() {
+      _isCalcCache = true;
+      _cacheSizeText = '计算中...';
+    });
+
+    try {
+      final total = await CacheHelper.getTotalCacheSize();
+      if (!mounted) return;
+      setState(() {
+        _isCalcCache = false;
+        _cacheSizeText = CacheHelper.formatSize(total);
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _isCalcCache = false;
+        _cacheSizeText = '获取失败';
+      });
+    }
+  }
+
+  Future<void> _clearCache() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('清理缓存'),
+        content: const Text('将清除日记缓存、图片缓存和临时文件，不会影响已发布的日记数据。确定继续？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('取消', style: TextStyle(color: Colors.grey[600])),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.primaryColor),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    setState(() {
+      _isClearingCache = true;
+      _cacheSizeText = '清理中...';
+    });
+
+    try {
+      final freed = await CacheHelper.clearAllCache();
+      if (!mounted) return;
+      final newSize = await CacheHelper.getTotalCacheSize();
+      if (!mounted) return;
+      setState(() {
+        _isClearingCache = false;
+        _cacheSizeText = CacheHelper.formatSize(newSize);
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('已释放 ${CacheHelper.formatSize(freed)}'),
+          backgroundColor: AppTheme.primaryColor,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isClearingCache = false;
+        _cacheSizeText = '清理失败';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('清理失败: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
+  // ─── 迁移旧图片 ───
+
+  Future<void> _migrateImages() async {
+    setState(() {
+      _isMigrating = true;
+      _migrateStatus = '正在迁移...';
+    });
+
+    try {
+      final count = await FileHelper.migrateToDownloads();
+      if (!mounted) return;
+      setState(() {
+        _isMigrating = false;
+        _migrateStatus = count > 0 ? '迁移完成，共 $count 张图片' : '没有需要迁移的图片';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_migrateStatus),
+          backgroundColor: AppTheme.primaryColor,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isMigrating = false;
+        _migrateStatus = '迁移失败: $e';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('迁移失败: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
   // ─── UI ───
 
   @override
@@ -207,6 +329,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 _buildSectionHeader('系统'),
                 const SizedBox(height: 12),
                 _buildUpdateCard(),
+                const SizedBox(height: 16),
+                _buildMigrateCard(),
+                const SizedBox(height: 16),
+                _buildCacheCard(),
               ],
             ),
     );
@@ -271,6 +397,110 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                     : const Text('保存', style: TextStyle(fontSize: 15)),
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMigrateCard() {
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.drive_folder_upload, color: AppTheme.primaryColor),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('迁移旧图片', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
+                      Text('将之前下载到私有目录的图片移到 Downloads 文件夹', style: TextStyle(fontSize: 13, color: Colors.grey)),
+                    ],
+                  ),
+                ),
+                _isMigrating
+                    ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
+                    : FilledButton(
+                        onPressed: _isMigrating ? null : _migrateImages,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppTheme.primaryColor,
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        ),
+                        child: const Text('迁移', style: TextStyle(fontSize: 14)),
+                      ),
+              ],
+            ),
+            if (_migrateStatus.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text(
+                _migrateStatus,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: _migrateStatus.contains('失败') ? Colors.red : Colors.grey[600],
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCacheCard() {
+    final bool hasCalc = !_isCalcCache && _cacheSizeText != '点击计算';
+    final bool isLoading = _isCalcCache || _isClearingCache;
+
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.cleaning_services_outlined, color: AppTheme.primaryColor),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('缓存管理', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
+                      Text(
+                        hasCalc ? '当前占用 $_cacheSizeText' : _cacheSizeText,
+                        style: const TextStyle(fontSize: 13, color: Colors.grey),
+                      ),
+                    ],
+                  ),
+                ),
+                if (isLoading)
+                  const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
+                else if (hasCalc)
+                  OutlinedButton(
+                    onPressed: _clearCache,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.red,
+                      side: const BorderSide(color: Colors.red),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    ),
+                    child: const Text('清理', style: TextStyle(fontSize: 14)),
+                  )
+                else
+                  FilledButton(
+                    onPressed: _calcCacheSize,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppTheme.primaryColor,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    ),
+                    child: const Text('计算', style: TextStyle(fontSize: 14)),
+                  ),
+              ],
             ),
           ],
         ),

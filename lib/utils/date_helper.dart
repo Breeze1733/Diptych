@@ -72,4 +72,11 @@ class DateHelper {
     } catch (_) {}
     return DateTime.now();
   }
+
+  /// DateTime → ISO 8601 字符串（+08:00）
+  static String toIsoString(DateTime date) {
+    final d = date.toUtc().add(const Duration(hours: 8));
+    String pad(int n, int len) => n.toString().padLeft(len, '0');
+    return '${d.year}-${pad(d.month, 2)}-${pad(d.day, 2)}T${pad(d.hour, 2)}:${pad(d.minute, 2)}:${pad(d.second, 2)}.${pad(d.millisecond, 3)}+08:00';
+  }
 }
