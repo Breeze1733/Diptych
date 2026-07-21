@@ -274,6 +274,33 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     }
   }
 
+  // ─── 退出登录 ───
+
+  Future<void> _handleLogout(BuildContext context, WidgetRef ref) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('退出登录'),
+        content: const Text('确定要退出登录吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('取消', style: TextStyle(color: Colors.grey[600])),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('退出'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      final logout = ref.read(logoutActionProvider);
+      await logout();
+    }
+  }
+
   // ─── 迁移旧图片 ───
 
   Future<void> _migrateImages() async {
@@ -333,6 +360,18 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 _buildMigrateCard(),
                 const SizedBox(height: 16),
                 _buildCacheCard(),
+                const SizedBox(height: 32),
+                // 退出登录（小字，不常用）
+                Center(
+                  child: GestureDetector(
+                    onTap: () => _handleLogout(context, ref),
+                    child: Text(
+                      '退出登录',
+                      style: TextStyle(fontSize: 13, color: Colors.grey[400]),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
               ],
             ),
     );

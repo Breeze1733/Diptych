@@ -13,6 +13,7 @@ import '../widgets/date_header.dart';
 import '../widgets/day_split_view.dart';
 import 'edit_moment_screen.dart';
 import 'profile_screen.dart';
+import 'topics_screen.dart';
 
 /// 是否已静默检查过更新（仅触发一次）
 final _autoUpdateCheckedProvider = StateProvider<bool>((ref) => false);
@@ -26,7 +27,6 @@ class FeedScreen extends ConsumerWidget {
     final selectedDate = ref.watch(selectedDateProvider);
     final currentUser = ref.watch(currentUserProvider);
     final partner = ref.watch(partnerUserProvider);
-    final role = ref.watch(currentUserRoleProvider);
 
     // 确保用户数据已加载
     final loadUsersAsync = ref.watch(loadUsersProvider);
@@ -38,24 +38,17 @@ class FeedScreen extends ConsumerWidget {
       _silentCheckUpdate(context);
     }
 
-    // 用户显示名：优先从加载的数据取，否则用角色生成
-    final displayName = currentUser?.nickname ?? (role != null ? '用户$role' : '');
-
     return Scaffold(
       backgroundColor: AppTheme.backgroundColor,
       appBar: AppBar(
         title: const Text(AppStrings.appTitle),
         actions: [
-          // 显示当前登录用户
-          if (displayName.isNotEmpty)
-            Chip(
-              avatar: const Icon(Icons.person, size: 16),
-              label: Text(displayName),
-              backgroundColor: AppTheme.primaryColor.withAlpha(20),
-              side: BorderSide.none,
-              padding: EdgeInsets.zero,
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
+          // 话题
+          IconButton(
+            icon: const Icon(Icons.forum_outlined, size: 20),
+            tooltip: '话题',
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const TopicsScreen())),
+          ),
           // 刷新按钮
           _buildRefreshButton(ref),
           // 个人设置
@@ -63,12 +56,6 @@ class FeedScreen extends ConsumerWidget {
             icon: const Icon(Icons.settings_outlined, size: 20),
             tooltip: '个人设置',
             onPressed: () => _openProfile(context),
-          ),
-          // 退出按钮
-          IconButton(
-            icon: const Icon(Icons.logout, size: 20),
-            tooltip: AppStrings.logout,
-            onPressed: () => _handleLogout(ref),
           ),
         ],
       ),
@@ -159,8 +146,8 @@ class FeedScreen extends ConsumerWidget {
 
     return dayMomentsAsync.when(
       data: (data) {
-        final myMoment = data['myMoment'] as Moment?;
-        final partnerMoment = data['partnerMoment'] as Moment?;
+        final myMoment = data['myMoment'];
+        final partnerMoment = data['partnerMoment'];
         return DaySplitView(
           myMoment: myMoment,
           partnerMoment: partnerMoment,
@@ -398,10 +385,10 @@ class FeedScreen extends ConsumerWidget {
     }
   }
 
-  /// 刷新数据（触发后端拉取）
+  /// 刷新数据（触发后端拉取 + 本地更新日历圆点）
   void _refresh(WidgetRef ref) {
     refreshDayData(ref);
-    refreshMarkedDates(ref);
+    updateMarkedDateCache(ref);
   }
 
   /// 打开个人设置
@@ -456,9 +443,4 @@ class FeedScreen extends ConsumerWidget {
     }
   }
 
-  /// 退出登录
-  void _handleLogout(WidgetRef ref) {
-    final logout = ref.read(logoutActionProvider);
-    logout();
-  }
 }

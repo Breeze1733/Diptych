@@ -5,6 +5,7 @@ import '../constants/app_theme.dart';
 import '../constants/strings.dart';
 import '../models/moment.dart';
 import '../providers/auth_provider.dart';
+import '../services/draft_service.dart';
 import '../utils/date_helper.dart';
 import '../widgets/image_slot.dart';
 
@@ -29,8 +30,11 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
   File? _partnerImageFile;
   int? _mood;
   bool _isSaving = false;
+  bool _isSavingDraft = false;
 
   bool get _isEdit => widget.existingMoment != null;
+
+  String get _dateStr => DateHelper.toDateStr(widget.date);
 
   @override
   void initState() {
@@ -38,7 +42,26 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
     if (_isEdit) {
       _feelingController.text = widget.existingMoment!.feeling;
       _mood = widget.existingMoment!.mood;
+    } else {
+      _loadDraft();
     }
+  }
+
+  Future<void> _loadDraft() async {
+    final draft = await DraftService.load(_dateStr);
+    if (draft == null || !mounted) return;
+    setState(() {
+      _feelingController.text = draft['feeling'] as String? ?? '';
+      _mood = draft['mood'] as int?;
+      final selfPath = draft['self_image'] as String?;
+      final partnerPath = draft['partner_image'] as String?;
+      if (selfPath != null && File(selfPath).existsSync()) {
+        _selfImageFile = File(selfPath);
+      }
+      if (partnerPath != null && File(partnerPath).existsSync()) {
+        _partnerImageFile = File(partnerPath);
+      }
+    });
   }
 
   @override
@@ -56,14 +79,12 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
 
       final apiService = ref.read(apiServiceProvider);
       final storageService = ref.read(storageServiceProvider);
-      final dateStr = DateHelper.toDateStr(widget.date);
       final folder = 'user_${currentUser.uid}';
 
       String selfImageUrl;
       String partnerImageUrl;
 
       if (_isEdit) {
-        // 编辑模式：并行上传新选择的图片
         final oldSelfUrl = widget.existingMoment!.selfImageUrl;
         final oldPartnerUrl = widget.existingMoment!.partnerImageUrl;
 
@@ -75,10 +96,9 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
               ? storageService.uploadImage(_partnerImageFile!, folder)
               : Future.value(oldPartnerUrl),
         ]);
-        selfImageUrl = uploads[0] as String;
-        partnerImageUrl = uploads[1] as String;
+        selfImageUrl = uploads[0];
+        partnerImageUrl = uploads[1];
 
-        // 异步删除旧图片（不阻塞）
         if (_selfImageFile != null && oldSelfUrl.isNotEmpty) {
           storageService.deleteImage(oldSelfUrl);
         }
@@ -96,7 +116,6 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
           },
         );
       } else {
-        // 新建模式：并行上传图片
         final uploads = await Future.wait([
           _selfImageFile != null
               ? storageService.uploadImage(_selfImageFile!, folder)
@@ -105,13 +124,11 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
               ? storageService.uploadImage(_partnerImageFile!, folder)
               : Future.value(''),
         ]);
-        selfImageUrl = uploads[0] as String;
-        partnerImageUrl = uploads[1] as String;
+        selfImageUrl = uploads[0];
+        partnerImageUrl = uploads[1];
 
-        // 先检查是否已存在（防止因缓存/网络问题导致的 409）
-        final existing = await apiService.getMomentByDate(currentUser.uid, dateStr);
+        final existing = await apiService.getMomentByDate(currentUser.uid, _dateStr);
         if (existing != null) {
-          // 已存在 → 走更新逻辑
           if (selfImageUrl.isNotEmpty && existing.selfImageUrl.isNotEmpty) {
             storageService.deleteImage(existing.selfImageUrl);
           }
@@ -129,7 +146,7 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
           );
         } else {
           await apiService.createMoment(
-            dateStr: dateStr,
+            dateStr: _dateStr,
             authorId: currentUser.uid,
             selfImageUrl: selfImageUrl,
             partnerImageUrl: partnerImageUrl,
@@ -138,6 +155,9 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
           );
         }
       }
+
+      // 发布成功 → 清除草稿
+      await DraftService.clear(_dateStr);
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -154,6 +174,32 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
     }
   }
 
+  /// 存草稿
+  Future<void> _handleSaveDraft() async {
+    setState(() => _isSavingDraft = true);
+    try {
+      // 复制图片到草稿目录（防止临时文件被清理）
+      if (_selfImageFile != null) {
+        await DraftService.saveImage(_dateStr, 'self', _selfImageFile);
+      }
+      if (_partnerImageFile != null) {
+        await DraftService.saveImage(_dateStr, 'partner', _partnerImageFile);
+      }
+      await DraftService.save(_dateStr, _feelingController.text, _mood);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('草稿已保存'), backgroundColor: AppTheme.primaryColor),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('保存草稿失败: $e'), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) setState(() => _isSavingDraft = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -165,7 +211,6 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 日期显示
             Center(
               child: Text(
                 DateHelper.toChineseDate(widget.date),
@@ -187,7 +232,12 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
               imageFile: _selfImageFile,
               existingUrl: widget.existingMoment?.selfImageUrl,
               label: '自己',
-              onImagePicked: (file) => setState(() => _selfImageFile = file),
+              onImagePicked: (file) {
+                setState(() => _selfImageFile = file);
+                if (!_isEdit && file != null) {
+                  DraftService.saveImage(_dateStr, 'self', file);
+                }
+              },
             ),
             const SizedBox(height: 20),
 
@@ -198,7 +248,12 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
               imageFile: _partnerImageFile,
               existingUrl: widget.existingMoment?.partnerImageUrl,
               label: '对方',
-              onImagePicked: (file) => setState(() => _partnerImageFile = file),
+              onImagePicked: (file) {
+                setState(() => _partnerImageFile = file);
+                if (!_isEdit && file != null) {
+                  DraftService.saveImage(_dateStr, 'partner', file);
+                }
+              },
             ),
             const SizedBox(height: 20),
 
@@ -223,23 +278,43 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
             ),
             const SizedBox(height: 12),
 
-            // 保存按钮
-            SizedBox(
-              width: double.infinity,
-              height: 48,
-              child: FilledButton(
-                onPressed: _isSaving ? null : _handleSave,
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppTheme.primaryColor,
+            // 保存 + 存草稿 按钮
+            Row(
+              children: [
+                // 存草稿（仅新建模式有）
+                if (!_isEdit) ...[
+                  Expanded(
+                    child: SizedBox(
+                      height: 48,
+                      child: OutlinedButton(
+                        onPressed: _isSavingDraft ? null : _handleSaveDraft,
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppTheme.primaryColor,
+                          side: const BorderSide(color: AppTheme.primaryColor),
+                        ),
+                        child: _isSavingDraft
+                            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                            : const Text('存草稿', style: TextStyle(fontSize: 16)),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                ],
+                Expanded(
+                  child: SizedBox(
+                    height: 48,
+                    child: FilledButton(
+                      onPressed: _isSaving ? null : _handleSave,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppTheme.primaryColor,
+                      ),
+                      child: _isSaving
+                          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                          : const Text(AppStrings.saveButton, style: TextStyle(fontSize: 16)),
+                    ),
+                  ),
                 ),
-                child: _isSaving
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                      )
-                    : const Text(AppStrings.saveButton, style: TextStyle(fontSize: 16)),
-              ),
+              ],
             ),
           ],
         ),

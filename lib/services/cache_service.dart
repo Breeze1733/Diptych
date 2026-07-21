@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../models/moment.dart';
 import '../models/app_user.dart';
 
 /// 本地缓存服务 —— 离线也能看日记
