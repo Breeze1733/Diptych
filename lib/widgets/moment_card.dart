@@ -176,41 +176,40 @@ class MomentCard extends StatelessWidget {
     }
   }
 
-  /// 评论区（微信朋友圈风格）
+  /// 评论区：每个一级评论 + 其回复为一个灰色块，块之间白底分隔
   Widget _buildComments(BuildContext context) {
-    // 构建评论树：顶级评论 + 其回复
-    final topLevel = <Comment>[];
-    final replies = <String, List<Comment>>{}; // parentId → replies
-
+    final replies = <String, List<Comment>>{};
     for (final c in moment.comments) {
-      if (c.replyTo == null) {
-        topLevel.add(c);
-      } else {
+      if (c.replyTo != null) {
         replies.putIfAbsent(c.replyTo!, () => []).add(c);
       }
     }
 
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: Colors.grey[50],
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          for (int i = 0; i < topLevel.length; i++) ...[
-            if (i > 0) const SizedBox(height: 4),
-            _buildCommentRow(context, topLevel[i], replies[topLevel[i].id]),
-          ],
+    final topLevel = moment.comments.where((c) => c.replyTo == null).toList();
+    if (topLevel.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (int i = 0; i < topLevel.length; i++) ...[
+          if (i > 0) const SizedBox(height: 4),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.grey[50],
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: _buildCommentTree(context, topLevel[i], replies),
+          ),
         ],
-      ),
+      ],
     );
   }
 
-  /// 单条评论 + 其回复
-  Widget _buildCommentRow(BuildContext context, Comment comment, List<Comment>? childReplies) {
+  /// 递归渲染评论树：当前评论 + 所有子回复
+  Widget _buildCommentTree(BuildContext context, Comment comment, Map<String, List<Comment>> replies) {
+    final children = replies[comment.id];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -243,41 +242,12 @@ class MomentCard extends StatelessWidget {
             ),
           ),
         ),
-        // 回复列表（左对齐，不缩进）
-        if (childReplies != null && childReplies.isNotEmpty)
+        if (children != null && children.isNotEmpty)
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              for (final reply in childReplies)
-                GestureDetector(
-                  onTap: () => _showCommentActions(context, reply),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 2),
-                    child: RichText(
-                      text: TextSpan(
-                        children: [
-                          TextSpan(
-                            text: '${_nickFor(reply.authorId)}：',
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: AppTheme.primaryColor,
-                              height: 1.4,
-                            ),
-                          ),
-                          TextSpan(
-                            text: reply.content,
-                            style: const TextStyle(
-                              fontSize: 13,
-                              color: AppTheme.textPrimary,
-                              height: 1.4,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
+              for (final child in children)
+                _buildCommentTree(context, child, replies),
             ],
           ),
       ],

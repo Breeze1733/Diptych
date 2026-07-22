@@ -44,28 +44,4 @@ class FileHelper {
     }
   }
 
-  /// 将应用私有文档目录中的旧图片迁移到 Downloads 目录
-  /// 返回迁移成功的文件数量
-  static Future<int> migrateToDownloads() async {
-    final sourceDir = await getApplicationDocumentsDirectory();
-    final targetDir = await getDownloadsDirectory();
-    int count = 0;
-
-    if (!await sourceDir.exists()) return 0;
-
-    final files = sourceDir.listSync().whereType<File>();
-    for (final file in files) {
-      try {
-        final targetFile = File('${targetDir.path}/${file.uri.pathSegments.last}');
-        // 如果目标已存在则跳过
-        if (await targetFile.exists()) continue;
-        await file.copy(targetFile.path);
-        await scanFile(targetFile.path);
-        count++;
-      } catch (_) {
-        // 单个文件失败不影响其他文件
-      }
-    }
-    return count;
-  }
 }

@@ -35,7 +35,7 @@ class DiptychApp extends ConsumerWidget {
   }
 }
 
-/// 启动闪屏（检查登录状态时显示）
+/// 启动闪屏（检查登录状态时显示，无转圈）
 class _SplashScreen extends StatelessWidget {
   const _SplashScreen();
 
@@ -53,8 +53,6 @@ class _SplashScreen extends StatelessWidget {
               'Diptych',
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
             ),
-            SizedBox(height: 24),
-            CircularProgressIndicator(color: AppTheme.primaryColor),
           ],
         ),
       ),

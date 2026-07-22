@@ -31,6 +31,8 @@ class FeedScreen extends ConsumerWidget {
 
     // 确保用户数据已加载
     final loadUsersAsync = ref.watch(loadUsersProvider);
+    // 预加载日历圆点数据
+    ref.watch(markedDatesProvider);
 
     // 用户数据加载完成后，静默检查更新（仅一次）
     final hasChecked = ref.watch(_autoUpdateCheckedProvider);
@@ -66,16 +68,15 @@ class FeedScreen extends ConsumerWidget {
     );
   }
 
-  /// 刷新按钮（后端离线时禁用）
+  /// 刷新按钮（加载中显示转圈）
   Widget _buildRefreshButton(WidgetRef ref) {
-    final online = ref.watch(backendOnlineProvider);
     final isLoading = ref.watch(dayMomentsProvider).isLoading;
     return IconButton(
       icon: isLoading
           ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-          : Icon(Icons.refresh, size: 20, color: online ? Colors.grey[700] : Colors.grey[400]),
+          : const Icon(Icons.refresh, size: 20),
       tooltip: '刷新',
-      onPressed: (online && !isLoading) ? () => refreshDayData(ref) : null,
+      onPressed: isLoading ? null : () => ref.invalidate(dayMomentsProvider),
     );
   }
 
@@ -85,6 +86,7 @@ class FeedScreen extends ConsumerWidget {
 
     final dayMomentsAsync = ref.watch(dayMomentsProvider);
     return dayMomentsAsync.when(
+      skipLoadingOnRefresh: true,
       data: (data) {
         final myMoment = data['myMoment'];
         // 已有动态就不显示 FAB（编辑在卡片内操作）
@@ -102,10 +104,8 @@ class FeedScreen extends ConsumerWidget {
 
   Widget _buildBody(WidgetRef ref, AsyncValue<void> loadUsersAsync,
       currentUser, partner, DateTime selectedDate, BuildContext context) {
-    if (loadUsersAsync.isLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    if (loadUsersAsync.hasError) {
+    // 只有彻底加载失败且无用户数据才显示错误
+    if (currentUser == null && loadUsersAsync.hasError) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
@@ -116,18 +116,8 @@ class FeedScreen extends ConsumerWidget {
         ),
       );
     }
-    if (currentUser == null) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(32),
-          child: Text(
-            '用户数据加载失败\n\n请确认后端已实现以下接口：\n• POST /api/users/ensure\n• GET /api/users/:uid',
-            textAlign: TextAlign.center,
-          ),
-        ),
-      );
-    }
 
+    // 始终渲染布局，数据到了自动填充（不转圈）
     return Column(
       children: [
         DateHeader(
@@ -146,6 +136,7 @@ class FeedScreen extends ConsumerWidget {
     final dayMomentsAsync = ref.watch(dayMomentsProvider);
 
     return dayMomentsAsync.when(
+      skipLoadingOnRefresh: true,
       data: (data) {
         final myMoment = data['myMoment'];
         final partnerMoment = data['partnerMoment'];
@@ -185,9 +176,7 @@ class FeedScreen extends ConsumerWidget {
               : null,
         );
       },
-      loading: () => const Expanded(
-        child: Center(child: CircularProgressIndicator()),
-      ),
+      loading: () => const Expanded(child: SizedBox()),
       error: (e, _) => Expanded(
         child: Center(child: Text('加载失败: $e')),
       ),
@@ -404,9 +393,9 @@ class FeedScreen extends ConsumerWidget {
     }
   }
 
-  /// 刷新数据（触发后端拉取 + 本地更新日历圆点）
+  /// 刷新数据（清除 Provider 缓存强制重读 + 更新日历圆点）
   void _refresh(WidgetRef ref) {
-    refreshDayData(ref);
+    ref.invalidate(dayMomentsProvider);
     updateMarkedDateCache(ref);
   }
 

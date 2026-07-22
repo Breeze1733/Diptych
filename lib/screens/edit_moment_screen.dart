@@ -5,6 +5,7 @@ import '../constants/app_theme.dart';
 import '../constants/strings.dart';
 import '../models/moment.dart';
 import '../providers/auth_provider.dart';
+import '../services/cache_service.dart';
 import '../services/draft_service.dart';
 import '../utils/date_helper.dart';
 import '../widgets/image_slot.dart';
@@ -68,6 +69,47 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
   void dispose() {
     _feelingController.dispose();
     super.dispose();
+  }
+
+  /// API 保存成功后更新本地缓存
+  Future<void> _updateCacheAfterSave(String authorId, String selfUrl, String partnerUrl) async {
+    final cached = await CacheService.loadDayMoments(_dateStr) ?? [];
+    final feeling = _feelingController.text.trim();
+
+    final now = DateHelper.toIsoString(DateTime.now());
+
+    // 构建当前日记的 JSON
+    final momentJson = <String, dynamic>{
+      'date_str': _dateStr,
+      'author_id': authorId,
+      'self_image_url': selfUrl,
+      'partner_image_url': partnerUrl,
+      'feeling': feeling,
+      if (_mood != null) 'mood': _mood,
+      'updated_at': now,
+    };
+
+    if (_isEdit) {
+      momentJson['id'] = widget.existingMoment!.id;
+      momentJson['created_at'] = DateHelper.toIsoString(widget.existingMoment!.createdAt);
+      momentJson['comments'] = widget.existingMoment!.comments.map((c) => c.toJson()).toList();
+    } else {
+      momentJson['created_at'] = now;
+      momentJson['comments'] = <Map<String, dynamic>>[];
+    }
+
+    // 替换或追加到缓存列表
+    final idx = cached.indexWhere((m) =>
+        m['date_str'] == _dateStr && m['author_id'] == authorId);
+    if (idx >= 0) {
+      // 保留已有的 id（创建时可能还不知道）
+      momentJson['id'] ??= cached[idx]['id'];
+      cached[idx] = momentJson;
+    } else {
+      cached.add(momentJson);
+    }
+
+    await CacheService.saveDayMoments(_dateStr, cached);
   }
 
   Future<void> _handleSave() async {
@@ -156,7 +198,8 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
         }
       }
 
-      // 发布成功 → 清除草稿
+      // 发布成功 → 更新本地缓存 + 清除草稿
+      await _updateCacheAfterSave(currentUser.uid, selfImageUrl, partnerImageUrl);
       await DraftService.clear(_dateStr);
 
       if (!mounted) return;

@@ -50,8 +50,12 @@ class _TopicDetailScreenState extends ConsumerState<TopicDetailScreen> {
     }
   }
 
-  String _nickFor(String authorId, String currentUid) {
-    return authorId == currentUid ? '我' : authorId;
+  String _nickFor(String authorId) {
+    final currentUser = ref.read(currentUserProvider);
+    final partner = ref.read(partnerUserProvider);
+    if (authorId == currentUser?.uid) return currentUser?.nickname ?? authorId;
+    if (authorId == partner?.uid) return partner?.nickname ?? authorId;
+    return authorId;
   }
 
   Future<void> _reply() async {
@@ -185,13 +189,13 @@ class _TopicDetailScreenState extends ConsumerState<TopicDetailScreen> {
                                             CircleAvatar(
                                               radius: 14,
                                               child: Text(
-                                                _nickFor(post.authorId, currentUid)[0],
+                                                _nickFor(post.authorId)[0],
                                                 style: const TextStyle(fontSize: 12),
                                               ),
                                             ),
                                             const SizedBox(width: 8),
                                             Text(
-                                              _nickFor(post.authorId, currentUid),
+                                              _nickFor(post.authorId),
                                               style: TextStyle(
                                                 fontSize: 13,
                                                 fontWeight: FontWeight.w600,

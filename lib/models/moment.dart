@@ -96,6 +96,7 @@ class Moment {
   /// 转为 JSON（创建请求体 / 缓存）
   Map<String, dynamic> toJson() {
     return {
+      'id': id,
       'date_str': dateStr,
       'author_id': authorId,
       'self_image_url': selfImageUrl,
@@ -103,6 +104,8 @@ class Moment {
       'feeling': feeling,
       if (mood != null) 'mood': mood,
       'comments': comments.map((c) => c.toJson()).toList(),
+      'created_at': DateHelper.toIsoString(createdAt),
+      'updated_at': DateHelper.toIsoString(updatedAt),
     };
   }
 
@@ -114,6 +117,7 @@ class Moment {
       'feeling': feeling,
       if (mood != null) 'mood': mood,
       'comments': comments.map((c) => c.toJson()).toList(),
+      'updated_at': DateHelper.toIsoString(updatedAt),
     };
   }
 

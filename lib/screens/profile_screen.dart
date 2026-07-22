@@ -7,7 +7,6 @@ import '../constants/app_theme.dart';
 import '../providers/auth_provider.dart';
 import '../services/update_service.dart';
 import '../utils/cache_helper.dart';
-import '../utils/file_helper.dart';
 
 /// 个人设置页：修改用户信息 + 检查更新
 class ProfileScreen extends ConsumerStatefulWidget {
@@ -28,10 +27,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   bool _isChecking = false;
   bool _isDownloading = false;
   double _downloadProgress = 0;
-
-  // 迁移相关
-  bool _isMigrating = false;
-  String _migrateStatus = '';
 
   // 缓存相关
   String _cacheSizeText = '点击计算';
@@ -301,39 +296,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     }
   }
 
-  // ─── 迁移旧图片 ───
-
-  Future<void> _migrateImages() async {
-    setState(() {
-      _isMigrating = true;
-      _migrateStatus = '正在迁移...';
-    });
-
-    try {
-      final count = await FileHelper.migrateToDownloads();
-      if (!mounted) return;
-      setState(() {
-        _isMigrating = false;
-        _migrateStatus = count > 0 ? '迁移完成，共 $count 张图片' : '没有需要迁移的图片';
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(_migrateStatus),
-          backgroundColor: AppTheme.primaryColor,
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _isMigrating = false;
-        _migrateStatus = '迁移失败: $e';
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('迁移失败: $e'), backgroundColor: Colors.red),
-      );
-    }
-  }
-
   // ─── UI ───
 
   @override
@@ -356,8 +318,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 _buildSectionHeader('系统'),
                 const SizedBox(height: 12),
                 _buildUpdateCard(),
-                const SizedBox(height: 16),
-                _buildMigrateCard(),
                 const SizedBox(height: 16),
                 _buildCacheCard(),
                 const SizedBox(height: 32),
@@ -437,55 +397,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     : const Text('保存', style: TextStyle(fontSize: 15)),
               ),
             ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildMigrateCard() {
-    return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            Row(
-              children: [
-                const Icon(Icons.drive_folder_upload, color: AppTheme.primaryColor),
-                const SizedBox(width: 12),
-                const Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('迁移旧图片', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
-                      Text('将之前下载到私有目录的图片移到 Downloads 文件夹', style: TextStyle(fontSize: 13, color: Colors.grey)),
-                    ],
-                  ),
-                ),
-                _isMigrating
-                    ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
-                    : FilledButton(
-                        onPressed: _isMigrating ? null : _migrateImages,
-                        style: FilledButton.styleFrom(
-                          backgroundColor: AppTheme.primaryColor,
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        ),
-                        child: const Text('迁移', style: TextStyle(fontSize: 14)),
-                      ),
-              ],
-            ),
-            if (_migrateStatus.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Text(
-                _migrateStatus,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: _migrateStatus.contains('失败') ? Colors.red : Colors.grey[600],
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ],
           ],
         ),
       ),

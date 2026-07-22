@@ -90,6 +90,14 @@ class _TopicsScreenState extends ConsumerState<TopicsScreen> {
     }
   }
 
+  String _nickFor(String authorId) {
+    final currentUser = ref.read(currentUserProvider);
+    final partner = ref.read(partnerUserProvider);
+    if (authorId == currentUser?.uid) return currentUser?.nickname ?? authorId;
+    if (authorId == partner?.uid) return partner?.nickname ?? authorId;
+    return authorId;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -147,7 +155,7 @@ class _TopicsScreenState extends ConsumerState<TopicsScreen> {
           return ListTile(
             title: Text(topic.title, style: const TextStyle(fontWeight: FontWeight.w500)),
             subtitle: Text(
-              '由 ${topic.authorId} 创建',
+              '由 ${_nickFor(topic.authorId)} 创建',
               style: TextStyle(fontSize: 12, color: Colors.grey[500]),
             ),
             trailing: const Icon(Icons.chevron_right),
