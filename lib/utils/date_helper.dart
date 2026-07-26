@@ -49,6 +49,11 @@ class DateHelper {
     return DateFormat('HH:mm').format(date.toLocal());
   }
 
+  /// 日期时间：统一显示为 "yyyy-MM-dd HH:mm"
+  static String toFriendlyDateTime(DateTime date) {
+    return DateFormat('yyyy-MM-dd HH:mm').format(date.toLocal());
+  }
+
   /// 格式化编辑时间：第一行日期，第二行时间
   static String toEditTime(DateTime date) {
     final local = date.toLocal();

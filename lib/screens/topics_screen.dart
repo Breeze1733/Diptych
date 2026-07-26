@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../constants/app_theme.dart';
 import '../providers/auth_provider.dart';
 import '../services/topic_service.dart';
+import '../utils/date_helper.dart';
 import 'topic_detail_screen.dart';
 
 /// 话题列表页
@@ -18,6 +19,8 @@ class _TopicsScreenState extends ConsumerState<TopicsScreen> {
   List<dynamic>? _topics;
   bool _loading = true;
   String? _error;
+  // 各话题最新更新时间（最近一条帖子时间，无帖子则为话题创建时间）
+  final Map<String, DateTime> _latestUpdate = {};
 
   @override
   void initState() {
@@ -37,6 +40,8 @@ class _TopicsScreenState extends ConsumerState<TopicsScreen> {
         _topics = topics;
         _loading = false;
       });
+      // 列表文字先秒开，最新更新时间后台并行补齐（每次打开都会重新比对）
+      _loadLatestUpdates(topics);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -44,6 +49,29 @@ class _TopicsScreenState extends ConsumerState<TopicsScreen> {
         _error = e.toString();
       });
     }
+  }
+
+  /// 并行拉取每个话题的详情，计算最新更新时间
+  /// （列表接口只返回创建时间，最新帖子时间需从详情里取）
+  Future<void> _loadLatestUpdates(List<dynamic> topics) async {
+    final results = await Future.wait(topics.map((t) async {
+      try {
+        final detail = await _service.getTopic(t.id);
+        DateTime latest = t.createdAt;
+        for (final p in detail.posts) {
+          if (p.createdAt.isAfter(latest)) latest = p.createdAt;
+        }
+        return MapEntry<String, DateTime>(t.id, latest);
+      } catch (_) {
+        return MapEntry<String, DateTime>(t.id, t.createdAt);
+      }
+    }));
+    if (!mounted) return;
+    setState(() {
+      for (final e in results) {
+        _latestUpdate[e.key] = e.value;
+      }
+    });
   }
 
   Future<void> _createTopic() async {
@@ -153,10 +181,23 @@ class _TopicsScreenState extends ConsumerState<TopicsScreen> {
         itemBuilder: (context, index) {
           final topic = _topics![index];
           return ListTile(
+            isThreeLine: true,
             title: Text(topic.title, style: const TextStyle(fontWeight: FontWeight.w500)),
-            subtitle: Text(
-              '由 ${_nickFor(topic.authorId)} 创建',
-              style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+            subtitle: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '由 ${_nickFor(topic.authorId)} 创建',
+                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  _latestUpdate[topic.id] != null
+                      ? '最新更新：${DateHelper.toFriendlyDateTime(_latestUpdate[topic.id]!)}'
+                      : '最新更新：加载中…',
+                  style: TextStyle(fontSize: 11, color: Colors.grey[400]),
+                ),
+              ],
             ),
             trailing: const Icon(Icons.chevron_right),
             onTap: () async {

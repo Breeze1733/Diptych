@@ -5,6 +5,7 @@ import '../models/topic.dart';
 import '../providers/auth_provider.dart';
 import '../services/topic_service.dart';
 import '../utils/date_helper.dart';
+import '../widgets/avatar_widget.dart';
 
 /// 话题讨论页（论坛风格）
 class TopicDetailScreen extends ConsumerStatefulWidget {
@@ -56,6 +57,15 @@ class _TopicDetailScreenState extends ConsumerState<TopicDetailScreen> {
     if (authorId == currentUser?.uid) return currentUser?.nickname ?? authorId;
     if (authorId == partner?.uid) return partner?.nickname ?? authorId;
     return authorId;
+  }
+
+  /// 从缓存的用户信息里取头像 URL（缓存优先，见 loadUsersProvider）
+  String _avatarFor(String authorId) {
+    final currentUser = ref.read(currentUserProvider);
+    final partner = ref.read(partnerUserProvider);
+    if (authorId == currentUser?.uid) return currentUser?.avatarUrl ?? '';
+    if (authorId == partner?.uid) return partner?.avatarUrl ?? '';
+    return '';
   }
 
   Future<void> _reply() async {
@@ -186,11 +196,17 @@ class _TopicDetailScreenState extends ConsumerState<TopicDetailScreen> {
                                       children: [
                                         Row(
                                           children: [
-                                            CircleAvatar(
-                                              radius: 14,
-                                              child: Text(
-                                                _nickFor(post.authorId)[0],
-                                                style: const TextStyle(fontSize: 12),
+                                            // 头像：从缓存加载（CachedNetworkImage）。
+                                            // key 绑定头像 URL —— URL 不变时元素被复用，
+                                            // 文字刷新不会触发图片重新加载/闪烁；
+                                            // 仅当头像 URL 变化时才会重新拉取图片。
+                                            KeyedSubtree(
+                                              key: ValueKey(
+                                                  'avatar_${post.authorId}_${_avatarFor(post.authorId)}'),
+                                              child: AvatarWidget(
+                                                avatarUrl: _avatarFor(post.authorId),
+                                                nickname: _nickFor(post.authorId),
+                                                size: 28,
                                               ),
                                             ),
                                             const SizedBox(width: 8),
@@ -279,12 +295,6 @@ class _TopicDetailScreenState extends ConsumerState<TopicDetailScreen> {
     );
   }
 
-  String _formatTime(DateTime dt) {
-    final now = DateTime.now();
-    final diff = now.difference(dt);
-    if (diff.inMinutes < 1) return '刚刚';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}分钟前';
-    if (diff.inHours < 24) return '${diff.inHours}小时前';
-    return DateHelper.toShortTime(dt);
-  }
+  // 评论时间：显示真实时间（不再用"X小时前"相对时间）
+  String _formatTime(DateTime dt) => DateHelper.toFriendlyDateTime(dt);
 }

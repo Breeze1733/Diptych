@@ -4,71 +4,122 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// 日记草稿服务：本地保存/加载/清除
+///
+/// 设计要点：
+/// - 图片由 [save] 统一负责复制进草稿目录，不再依赖调用方按顺序先调 [saveImage]。
+/// - prefs 里只记录「是否有草稿图」，不存绝对路径 —— 绝对路径（尤其 iOS 沙箱）
+///   在 App 更新/重装后会失效，导致草稿图片“丢失”。加载时用当前草稿目录重新解析。
+/// - 复制时若源路径与目标路径相同则跳过，避免 File.copy 到自身把文件清空成 0 字节。
 class DraftService {
   static const _prefix = 'draft_';
 
-  /// 保存草稿（文本 + 心情）
-  static Future<void> save(String dateStr, String feeling, int? mood) async {
+  /// 保存草稿（文本 + 心情 + 图片）
+  static Future<void> save(
+    String dateStr,
+    String feeling,
+    int? mood, {
+    File? selfImage,
+    File? partnerImage,
+  }) async {
+    // 1. 先把当前选中的图片复制进草稿目录（固定文件名）
+    final hasSelf = await _persistImage(dateStr, 'self', selfImage);
+    final hasPartner = await _persistImage(dateStr, 'partner', partnerImage);
+
+    // 2. prefs 只记录「是否有图」，图片路径运行时再解析
     final prefs = await SharedPreferences.getInstance();
     final data = {
       'feeling': feeling,
       if (mood != null) 'mood': mood,
-      'self_image': await _copyToDraft(dateStr, 'self'),
-      'partner_image': await _copyToDraft(dateStr, 'partner'),
+      'has_self_image': hasSelf,
+      'has_partner_image': hasPartner,
     };
     await prefs.setString('$_prefix$dateStr', jsonEncode(data));
   }
 
-  /// 加载草稿，无草稿返回 null
-  static Future<Map<String, dynamic>?> load(String dateStr) async {
+  /// 加载草稿，无草稿返回 null。图片以运行时重新解析的 File 返回。
+  static Future<DraftData?> load(String dateStr) async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString('$_prefix$dateStr');
     if (raw == null) return null;
     try {
       final data = jsonDecode(raw) as Map<String, dynamic>;
-      // 验证图片文件还存在
-      final selfPath = data['self_image'] as String?;
-      final partnerPath = data['partner_image'] as String?;
-      if (selfPath != null && !File(selfPath).existsSync()) {
-        data['self_image'] = null;
-      }
-      if (partnerPath != null && !File(partnerPath).existsSync()) {
-        data['partner_image'] = null;
-      }
-      return data;
+      return DraftData(
+        feeling: data['feeling'] as String? ?? '',
+        mood: data['mood'] as int?,
+        selfImage: await _resolveImage(dateStr, 'self'),
+        partnerImage: await _resolveImage(dateStr, 'partner'),
+      );
     } catch (_) {
       return null;
     }
   }
 
-  /// 清除草稿
+  /// 清除草稿（含图片文件）
   static Future<void> clear(String dateStr) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('$_prefix$dateStr');
-    // 清理草稿图片
     final dir = await _draftDir();
-    final selfFile = File('${dir.path}/${dateStr}_self.jpg');
-    final partnerFile = File('${dir.path}/${dateStr}_partner.jpg');
-    if (await selfFile.exists()) await selfFile.delete();
-    if (await partnerFile.exists()) await partnerFile.delete();
+    for (final slot in const ['self', 'partner']) {
+      final f = _slotFile(dir, dateStr, slot);
+      if (await f.exists()) await f.delete();
+    }
   }
 
-  /// 保存已选图片（原地复制，防止临时文件被清）
+  /// 选图时可即时调用，把图片先落地到草稿目录，防止临时文件被系统清理
   static Future<void> saveImage(String dateStr, String slot, File? file) async {
-    if (file == null) return;
-    final target = File('${(await _draftDir()).path}/${dateStr}_$slot.jpg');
-    await file.copy(target.path);
+    await _persistImage(dateStr, slot, file);
   }
 
-  static Future<String?> _copyToDraft(String dateStr, String slot) async {
-    final target = File('${(await _draftDir()).path}/${dateStr}_$slot.jpg');
-    if (await target.exists()) return target.path;
-    return null;
+  // ─── 私有辅助 ───
+
+  /// 把图片复制进草稿目录，返回复制后该草稿图是否存在。
+  /// - file == null：不改动，返回草稿目录里是否已有该图
+  /// - file 就是草稿文件本身：跳过复制（避免 copy 到自身清空文件）
+  static Future<bool> _persistImage(String dateStr, String slot, File? file) async {
+    final target = _slotFile(await _draftDir(), dateStr, slot);
+    if (file == null) {
+      return target.exists();
+    }
+    if (file.path == target.path) {
+      return target.exists();
+    }
+    try {
+      await file.copy(target.path);
+      return true;
+    } catch (_) {
+      return target.exists();
+    }
+  }
+
+  /// 运行时解析草稿图片：用当前草稿目录重新拼路径并校验存在
+  static Future<File?> _resolveImage(String dateStr, String slot) async {
+    final f = _slotFile(await _draftDir(), dateStr, slot);
+    return await f.exists() ? f : null;
+  }
+
+  static File _slotFile(Directory dir, String dateStr, String slot) {
+    return File('${dir.path}/${dateStr}_$slot.jpg');
   }
 
   static Future<Directory> _draftDir() async {
-    final dir = Directory('${(await getApplicationDocumentsDirectory()).path}/drafts');
+    final dir =
+        Directory('${(await getApplicationDocumentsDirectory()).path}/drafts');
     if (!await dir.exists()) await dir.create(recursive: true);
     return dir;
   }
+}
+
+/// 草稿数据：图片以运行时解析好的 File 提供（可能为 null）
+class DraftData {
+  final String feeling;
+  final int? mood;
+  final File? selfImage;
+  final File? partnerImage;
+
+  const DraftData({
+    required this.feeling,
+    this.mood,
+    this.selfImage,
+    this.partnerImage,
+  });
 }

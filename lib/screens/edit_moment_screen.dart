@@ -52,16 +52,10 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
     final draft = await DraftService.load(_dateStr);
     if (draft == null || !mounted) return;
     setState(() {
-      _feelingController.text = draft['feeling'] as String? ?? '';
-      _mood = draft['mood'] as int?;
-      final selfPath = draft['self_image'] as String?;
-      final partnerPath = draft['partner_image'] as String?;
-      if (selfPath != null && File(selfPath).existsSync()) {
-        _selfImageFile = File(selfPath);
-      }
-      if (partnerPath != null && File(partnerPath).existsSync()) {
-        _partnerImageFile = File(partnerPath);
-      }
+      _feelingController.text = draft.feeling;
+      _mood = draft.mood;
+      if (draft.selfImage != null) _selfImageFile = draft.selfImage;
+      if (draft.partnerImage != null) _partnerImageFile = draft.partnerImage;
     });
   }
 
@@ -221,14 +215,14 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
   Future<void> _handleSaveDraft() async {
     setState(() => _isSavingDraft = true);
     try {
-      // 复制图片到草稿目录（防止临时文件被清理）
-      if (_selfImageFile != null) {
-        await DraftService.saveImage(_dateStr, 'self', _selfImageFile);
-      }
-      if (_partnerImageFile != null) {
-        await DraftService.saveImage(_dateStr, 'partner', _partnerImageFile);
-      }
-      await DraftService.save(_dateStr, _feelingController.text, _mood);
+      // save 内部会把图片复制进草稿目录（单一可靠入口）
+      await DraftService.save(
+        _dateStr,
+        _feelingController.text,
+        _mood,
+        selfImage: _selfImageFile,
+        partnerImage: _partnerImageFile,
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('草稿已保存'), backgroundColor: AppTheme.primaryColor),
