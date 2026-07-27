@@ -1,17 +1,15 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import '../constants/app_theme.dart';
 import '../constants/strings.dart';
 import '../models/moment.dart';
 import '../utils/date_helper.dart';
-import '../utils/file_helper.dart';
 import 'avatar_widget.dart';
+import 'image_gallery.dart';
 
 /// 朋友圈风格动态卡片
-/// 展示：头像 + 昵称 + 心情分 + 自己的图 + 对方的图 + 感受文字 + 时间 + 编辑/评论按钮 + 评论列表
+/// 展示：头像 + 昵称 + 心情分 + 封面图（点击展开图片列表）+ 感受文字 + 时间 + 编辑/评论按钮 + 评论列表
 class MomentCard extends StatelessWidget {
   final Moment moment;
   final String nickname;
@@ -72,10 +70,8 @@ class MomentCard extends StatelessWidget {
           ),
           const SizedBox(height: 10),
 
-          // 两张图片：上下排列
-          _buildImageBox(context, moment.selfImageUrl, ''),
-          const SizedBox(height: 6),
-          _buildImageBox(context, moment.partnerImageUrl, ''),
+          // 封面图（第一张），点击展开全部图片
+          _buildCoverBox(context),
           const SizedBox(height: 10),
 
           // 感受文字
@@ -286,20 +282,52 @@ class MomentCard extends StatelessWidget {
     );
   }
 
-  Widget _buildImageBox(BuildContext context, String url, String label) {
-    final image = url.isNotEmpty
+  /// 封面图：第一张图片，右下角显示总张数，点击弹出图片列表
+  Widget _buildCoverBox(BuildContext context) {
+    final urls = moment.imageUrls;
+
+    final content = urls.isNotEmpty
         ? GestureDetector(
-            onTap: () => _openFullScreen(context, url),
-            child: CachedNetworkImage(
-              imageUrl: url,
-              fit: BoxFit.cover,
-              width: double.infinity,
-              height: double.infinity,
-              placeholder: (_, __) => _placeholder(label),
-              errorWidget: (_, __, ___) => _placeholder(label),
+            onTap: () => showImageGallery(context, urls),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                CachedNetworkImage(
+                  imageUrl: urls.first,
+                  fit: BoxFit.cover,
+                  placeholder: (_, _) => _placeholder(''),
+                  errorWidget: (_, _, _) => _placeholder(''),
+                ),
+                // 张数角标
+                if (urls.length > 1)
+                  Positioned(
+                    right: 6,
+                    bottom: 6,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.black54,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.photo_library,
+                              size: 12, color: Colors.white),
+                          const SizedBox(width: 3),
+                          Text(
+                            '${urls.length}',
+                            style: const TextStyle(
+                                color: Colors.white, fontSize: 11),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
             ),
           )
-        : _placeholder(label);
+        : _placeholder('');
 
     return Container(
       height: 140,
@@ -308,16 +336,7 @@ class MomentCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(6),
       ),
       clipBehavior: Clip.antiAlias,
-      child: image,
-    );
-  }
-
-  void _openFullScreen(BuildContext context, String url) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => _FullScreenImage(url: url),
-      ),
+      child: content,
     );
   }
 
@@ -332,93 +351,6 @@ class MomentCard extends StatelessWidget {
           if (label.isNotEmpty)
             Text(label, style: TextStyle(fontSize: 10, color: Colors.grey[400])),
         ],
-      ),
-    );
-  }
-}
-
-/// 全屏图片查看器：支持缩放 + 下载
-class _FullScreenImage extends StatefulWidget {
-  final String url;
-  const _FullScreenImage({required this.url});
-
-  @override
-  State<_FullScreenImage> createState() => _FullScreenImageState();
-}
-
-class _FullScreenImageState extends State<_FullScreenImage> {
-  bool _isDownloading = false;
-
-  Future<void> _download() async {
-    setState(() => _isDownloading = true);
-    try {
-      final res = await http.get(Uri.parse(widget.url));
-      final dir = await FileHelper.getDownloadsDirectory();
-      final name = widget.url.split('/').last;
-      final file = File('${dir.path}/$name');
-      await file.writeAsBytes(res.bodyBytes);
-      await FileHelper.scanFile(file.path);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('已保存到 ${file.path}')),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('下载失败: $e'), backgroundColor: Colors.red),
-      );
-    } finally {
-      if (mounted) setState(() => _isDownloading = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        iconTheme: const IconThemeData(color: Colors.white),
-        actions: [
-          IconButton(
-            icon: _isDownloading
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white,
-                    ),
-                  )
-                : const Icon(Icons.download),
-            tooltip: '下载',
-            onPressed: _isDownloading ? null : _download,
-          ),
-        ],
-      ),
-      body: InteractiveViewer(
-        minScale: 0.5,
-        maxScale: 4.0,
-        child: SizedBox.expand(
-          child: CachedNetworkImage(
-            imageUrl: widget.url,
-            fit: BoxFit.contain,
-            placeholder: (_, __) => const Center(
-              child: CircularProgressIndicator(color: Colors.white),
-            ),
-            errorWidget: (_, __, e) => Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.broken_image, size: 48, color: Colors.white54),
-                  const SizedBox(height: 8),
-                  const Text('图片加载失败', style: TextStyle(color: Colors.white54)),
-                  Text('$e', style: const TextStyle(color: Colors.white30, fontSize: 12)),
-                ],
-              ),
-            ),
-          ),
-        ),
       ),
     );
   }

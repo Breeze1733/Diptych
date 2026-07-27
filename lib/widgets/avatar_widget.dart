@@ -23,8 +23,8 @@ class AvatarWidget extends StatelessWidget {
           width: size,
           height: size,
           fit: BoxFit.cover,
-          placeholder: (_, __) => _buildFallback(),
-          errorWidget: (_, __, ___) => _buildFallback(),
+          placeholder: (_, _) => _buildFallback(),
+          errorWidget: (_, _, _) => _buildFallback(),
         ),
       );
     }

@@ -8,7 +8,7 @@ import '../providers/auth_provider.dart';
 import '../services/cache_service.dart';
 import '../services/draft_service.dart';
 import '../utils/date_helper.dart';
-import '../widgets/image_slot.dart';
+import '../widgets/photo_grid_picker.dart';
 
 /// 发布/编辑动态页
 class EditMomentScreen extends ConsumerStatefulWidget {
@@ -27,8 +27,7 @@ class EditMomentScreen extends ConsumerStatefulWidget {
 
 class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
   final _feelingController = TextEditingController();
-  File? _selfImageFile;
-  File? _partnerImageFile;
+  final List<PhotoEntry> _photos = [];
   int? _mood;
   bool _isSaving = false;
   bool _isSavingDraft = false;
@@ -37,12 +36,17 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
 
   String get _dateStr => DateHelper.toDateStr(widget.date);
 
+  /// 当前所有本地新选的图片文件（新建模式下全部都是本地文件）
+  List<File> get _localFiles =>
+      [for (final p in _photos.where((p) => p.isLocal)) p.file!];
+
   @override
   void initState() {
     super.initState();
     if (_isEdit) {
       _feelingController.text = widget.existingMoment!.feeling;
       _mood = widget.existingMoment!.mood;
+      _photos.addAll(widget.existingMoment!.imageUrls.map(PhotoEntry.url));
     } else {
       _loadDraft();
     }
@@ -54,8 +58,7 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
     setState(() {
       _feelingController.text = draft.feeling;
       _mood = draft.mood;
-      if (draft.selfImage != null) _selfImageFile = draft.selfImage;
-      if (draft.partnerImage != null) _partnerImageFile = draft.partnerImage;
+      _photos.addAll(draft.images.map(PhotoEntry.file));
     });
   }
 
@@ -65,8 +68,13 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
     super.dispose();
   }
 
+  /// 新建模式下图片变动后即时落地草稿目录，防临时文件被系统清理
+  void _syncDraftImages() {
+    if (!_isEdit) DraftService.saveImages(_dateStr, _localFiles);
+  }
+
   /// API 保存成功后更新本地缓存
-  Future<void> _updateCacheAfterSave(String authorId, String selfUrl, String partnerUrl) async {
+  Future<void> _updateCacheAfterSave(String authorId, List<String> imageUrls) async {
     final cached = await CacheService.loadDayMoments(_dateStr) ?? [];
     final feeling = _feelingController.text.trim();
 
@@ -76,8 +84,7 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
     final momentJson = <String, dynamic>{
       'date_str': _dateStr,
       'author_id': authorId,
-      'self_image_url': selfUrl,
-      'partner_image_url': partnerUrl,
+      'image_urls': imageUrls,
       'feeling': feeling,
       if (_mood != null) 'mood': _mood,
       'updated_at': now,
@@ -117,83 +124,58 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
       final storageService = ref.read(storageServiceProvider);
       final folder = 'user_${currentUser.uid}';
 
-      String selfImageUrl;
-      String partnerImageUrl;
+      // 按当前顺序上传新图片，保留已有网络图片
+      final imageUrls = await Future.wait(_photos.map(
+        (p) => p.isLocal
+            ? storageService.uploadImage(p.file!, folder)
+            : Future.value(p.url!),
+      ));
 
       if (_isEdit) {
-        final oldSelfUrl = widget.existingMoment!.selfImageUrl;
-        final oldPartnerUrl = widget.existingMoment!.partnerImageUrl;
-
-        final uploads = await Future.wait([
-          _selfImageFile != null
-              ? storageService.uploadImage(_selfImageFile!, folder)
-              : Future.value(oldSelfUrl),
-          _partnerImageFile != null
-              ? storageService.uploadImage(_partnerImageFile!, folder)
-              : Future.value(oldPartnerUrl),
-        ]);
-        selfImageUrl = uploads[0];
-        partnerImageUrl = uploads[1];
-
-        if (_selfImageFile != null && oldSelfUrl.isNotEmpty) {
-          storageService.deleteImage(oldSelfUrl);
-        }
-        if (_partnerImageFile != null && oldPartnerUrl.isNotEmpty) {
-          storageService.deleteImage(oldPartnerUrl);
+        // 删除被移除的旧图
+        for (final old in widget.existingMoment!.imageUrls) {
+          if (!imageUrls.contains(old)) storageService.deleteImage(old);
         }
 
         await apiService.updateMoment(
           widget.existingMoment!.id,
           {
-            'self_image_url': selfImageUrl,
-            'partner_image_url': partnerImageUrl,
+            'image_urls': imageUrls,
             'feeling': _feelingController.text.trim(),
             if (_mood != null) 'mood': _mood,
           },
         );
+        await _updateCacheAfterSave(currentUser.uid, imageUrls);
       } else {
-        final uploads = await Future.wait([
-          _selfImageFile != null
-              ? storageService.uploadImage(_selfImageFile!, folder)
-              : Future.value(''),
-          _partnerImageFile != null
-              ? storageService.uploadImage(_partnerImageFile!, folder)
-              : Future.value(''),
-        ]);
-        selfImageUrl = uploads[0];
-        partnerImageUrl = uploads[1];
-
+        // 防并发：其他设备可能已创建当天日记
         final existing = await apiService.getMomentByDate(currentUser.uid, _dateStr);
         if (existing != null) {
-          if (selfImageUrl.isNotEmpty && existing.selfImageUrl.isNotEmpty) {
-            storageService.deleteImage(existing.selfImageUrl);
-          }
-          if (partnerImageUrl.isNotEmpty && existing.partnerImageUrl.isNotEmpty) {
-            storageService.deleteImage(existing.partnerImageUrl);
+          final finalUrls = imageUrls.isNotEmpty ? imageUrls : existing.imageUrls;
+          for (final old in existing.imageUrls) {
+            if (!finalUrls.contains(old)) storageService.deleteImage(old);
           }
           await apiService.updateMoment(
             existing.id,
             {
-              'self_image_url': selfImageUrl.isNotEmpty ? selfImageUrl : existing.selfImageUrl,
-              'partner_image_url': partnerImageUrl.isNotEmpty ? partnerImageUrl : existing.partnerImageUrl,
+              'image_urls': finalUrls,
               'feeling': _feelingController.text.trim(),
               if (_mood != null) 'mood': _mood,
             },
           );
+          await _updateCacheAfterSave(currentUser.uid, finalUrls);
         } else {
           await apiService.createMoment(
             dateStr: _dateStr,
             authorId: currentUser.uid,
-            selfImageUrl: selfImageUrl,
-            partnerImageUrl: partnerImageUrl,
+            imageUrls: imageUrls,
             feeling: _feelingController.text.trim(),
             mood: _mood,
           );
+          await _updateCacheAfterSave(currentUser.uid, imageUrls);
         }
       }
 
-      // 发布成功 → 更新本地缓存 + 清除草稿
-      await _updateCacheAfterSave(currentUser.uid, selfImageUrl, partnerImageUrl);
+      // 发布成功 → 清除草稿
       await DraftService.clear(_dateStr);
 
       if (!mounted) return;
@@ -220,8 +202,7 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
         _dateStr,
         _feelingController.text,
         _mood,
-        selfImage: _selfImageFile,
-        partnerImage: _partnerImageFile,
+        images: _localFiles,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -262,34 +243,18 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
             _buildMoodSelector(),
             const SizedBox(height: 16),
 
-            // 图片插槽 1：关于自己
-            Text(AppStrings.selfPhotoLabel, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
+            // 图片九宫格（第一张为封面）
+            Text(AppStrings.photosLabel, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
             const SizedBox(height: 8),
-            ImageSlot(
-              imageFile: _selfImageFile,
-              existingUrl: widget.existingMoment?.selfImageUrl,
-              label: '自己',
-              onImagePicked: (file) {
-                setState(() => _selfImageFile = file);
-                if (!_isEdit && file != null) {
-                  DraftService.saveImage(_dateStr, 'self', file);
-                }
+            PhotoGridPicker(
+              entries: _photos,
+              onAdded: (files) {
+                setState(() => _photos.addAll(files.map(PhotoEntry.file)));
+                _syncDraftImages();
               },
-            ),
-            const SizedBox(height: 20),
-
-            // 图片插槽 2：关于对方
-            Text(AppStrings.partnerPhotoLabel, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
-            const SizedBox(height: 8),
-            ImageSlot(
-              imageFile: _partnerImageFile,
-              existingUrl: widget.existingMoment?.partnerImageUrl,
-              label: '对方',
-              onImagePicked: (file) {
-                setState(() => _partnerImageFile = file);
-                if (!_isEdit && file != null) {
-                  DraftService.saveImage(_dateStr, 'partner', file);
-                }
+              onRemoved: (index) {
+                setState(() => _photos.removeAt(index));
+                _syncDraftImages();
               },
             ),
             const SizedBox(height: 20),
@@ -309,7 +274,7 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
             // 已选图片提示
             Center(
               child: Text(
-                '已选 ${(_selfImageFile != null ? 1 : 0) + (_partnerImageFile != null ? 1 : 0)}/2 张照片',
+                '已选 ${_photos.length} 张照片，第一张为封面',
                 style: TextStyle(color: Colors.grey[500], fontSize: 13),
               ),
             ),

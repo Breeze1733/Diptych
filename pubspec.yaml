@@ -1,7 +1,7 @@
 name: diptych
 description: "Diptych - 双人私密日记"
 publish_to: 'none'
-version: 1.0.9+10
+version: 1.0.10+11
 
 environment:
   sdk: ^3.12.2
@@ -32,6 +32,7 @@ dependencies:
   package_info_plus: ^10.0.0
   # 打开文件（触发安装）
   open_filex: ^4.4.0
+  image_cropper: ^12.2.1
 
 dev_dependencies:
   flutter_test:

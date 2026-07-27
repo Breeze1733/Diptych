@@ -14,9 +14,8 @@ class AppStrings {
   static const String noPostPlaceholder = '未发布';
 
   // 编辑页
-  static const String selfPhotoLabel = '📷 关于自己的照片';
-  static const String partnerPhotoLabel = '📷 关于对方的照片';
-  static const String feelingLabel = '😊 今日心情（可选）';
+  static const String photosLabel = '📷 今日照片';
+  static const String feelingLabel = '😊 今日心情';
   static const String feelingHint = '记录今天的感受...';
   static const String saveButton = '保存';
   static const String createTitle = '写日记';

@@ -94,16 +94,14 @@ class ApiService {
   Future<String> createMoment({
     required String dateStr,
     required String authorId,
-    required String selfImageUrl,
-    required String partnerImageUrl,
+    required List<String> imageUrls,
     required String feeling,
     int? mood,
   }) async {
     final body = <String, dynamic>{
       'date_str': dateStr,
       'author_id': authorId,
-      'self_image_url': selfImageUrl,
-      'partner_image_url': partnerImageUrl,
+      'image_urls': imageUrls,
       'feeling': feeling,
     };
     if (mood != null) body['mood'] = mood;
