@@ -40,10 +40,4 @@ class AppUser {
       avatarUrl: avatarUrl ?? this.avatarUrl,
     );
   }
-
-  /// 预定义的两位用户
-  static const Map<String, AppUser> presetUsers = {
-    'A': AppUser(uid: 'A', nickname: '用户A', partnerUid: 'B'),
-    'B': AppUser(uid: 'B', nickname: '用户B', partnerUid: 'A'),
-  };
 }

@@ -10,7 +10,6 @@ class AppStrings {
   static const String loginError = '密钥错误，请重试';
 
   // 主页
-  static const String todayLabel = '今天';
   static const String noPostPlaceholder = '未发布';
 
   // 编辑页
@@ -20,8 +19,6 @@ class AppStrings {
   static const String saveButton = '保存';
   static const String createTitle = '写日记';
   static const String editTitle = '编辑日记';
-  static const String alreadyPosted = '今日已发布';
-  static const String moodHint = '选择 1-10 分';
 
   // 交互按钮
   static const String editButton = '编辑';

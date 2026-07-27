@@ -34,15 +34,6 @@ class ApiService {
     );
   }
 
-  /// 创建用户
-  Future<void> createUser(AppUser user) async {
-    await http.post(
-      Uri.parse('$_baseUrl/users'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode(user.toJson()),
-    );
-  }
-
   /// 确保预设用户存在
   Future<void> ensurePresetUsers() async {
     await http.post(Uri.parse('$_baseUrl/users/ensure'));
