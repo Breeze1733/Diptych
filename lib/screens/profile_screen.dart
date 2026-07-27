@@ -1,9 +1,11 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_cropper/image_cropper.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../constants/app_theme.dart';
+import '../models/app_user.dart';
 import '../providers/auth_provider.dart';
 import '../services/update_service.dart';
 import '../utils/cache_helper.dart';
@@ -51,7 +53,31 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
   Future<void> _pickAvatar() async {
     final picked = await ImagePicker().pickImage(source: ImageSource.gallery);
-    if (picked != null) setState(() => _avatarFile = File(picked.path));
+    if (picked == null) return;
+
+    final cropped = await ImageCropper().cropImage(
+      sourcePath: picked.path,
+      compressFormat: ImageCompressFormat.jpg,
+      compressQuality: 90,
+      uiSettings: [
+        AndroidUiSettings(
+          toolbarTitle: '裁剪头像',
+          toolbarColor: AppTheme.primaryColor,
+          toolbarWidgetColor: Colors.white,
+          activeControlsWidgetColor: AppTheme.primaryColor,
+          initAspectRatio: CropAspectRatioPreset.square,
+          lockAspectRatio: false,
+          aspectRatioPresets: const [
+            CropAspectRatioPreset.original,
+            CropAspectRatioPreset.square,
+            CropAspectRatioPreset.ratio3x2,
+            CropAspectRatioPreset.ratio4x3,
+            CropAspectRatioPreset.ratio16x9,
+          ],
+        ),
+      ],
+    );
+    if (cropped != null) setState(() => _avatarFile = File(cropped.path));
   }
 
   Future<void> _handleSave() async {
@@ -341,7 +367,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     return Text(title, style: TextStyle(fontSize: 13, color: Colors.grey[500], fontWeight: FontWeight.w500));
   }
 
-  Widget _buildUserInfoCard(user) {
+  Widget _buildUserInfoCard(AppUser user) {
     return Card(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(

@@ -53,8 +53,7 @@ class Moment {
   final String id;
   final String dateStr; // YYYY-MM-DD
   final String authorId; // "A" 或 "B"
-  final String selfImageUrl;
-  final String partnerImageUrl;
+  final List<String> imageUrls; // 图片列表，第一张为封面
   final String feeling;
   final int? mood; // 心情分数 1-10，可为空
   final List<Comment> comments; // 评论列表
@@ -65,8 +64,7 @@ class Moment {
     required this.id,
     required this.dateStr,
     required this.authorId,
-    required this.selfImageUrl,
-    required this.partnerImageUrl,
+    this.imageUrls = const [],
     required this.feeling,
     this.mood,
     this.comments = const [],
@@ -74,14 +72,29 @@ class Moment {
     required this.updatedAt,
   });
 
+  /// 解析图片列表：新格式 image_urls 数组，兼容旧的 self/partner 两字段
+  static List<String> _parseImageUrls(Map<String, dynamic> json) {
+    final raw = json['image_urls'];
+    if (raw is List) {
+      return raw
+          .whereType<String>()
+          .where((u) => u.isNotEmpty)
+          .map(UrlHelper.normalize)
+          .toList();
+    }
+    return [
+      json['self_image_url'] as String? ?? '',
+      json['partner_image_url'] as String? ?? '',
+    ].where((u) => u.isNotEmpty).map(UrlHelper.normalize).toList();
+  }
+
   /// 从 JSON 创建（后端 API 返回格式）
   factory Moment.fromJson(Map<String, dynamic> json) {
     return Moment(
       id: json['id']?.toString() ?? '',
       dateStr: json['date_str'] as String? ?? '',
       authorId: json['author_id'] as String? ?? '',
-      selfImageUrl: UrlHelper.normalize(json['self_image_url'] as String? ?? ''),
-      partnerImageUrl: UrlHelper.normalize(json['partner_image_url'] as String? ?? ''),
+      imageUrls: _parseImageUrls(json),
       feeling: json['feeling'] as String? ?? '',
       mood: json['mood'] as int?,
       comments: (json['comments'] as List<dynamic>?)
@@ -99,8 +112,7 @@ class Moment {
       'id': id,
       'date_str': dateStr,
       'author_id': authorId,
-      'self_image_url': selfImageUrl,
-      'partner_image_url': partnerImageUrl,
+      'image_urls': imageUrls,
       'feeling': feeling,
       if (mood != null) 'mood': mood,
       'comments': comments.map((c) => c.toJson()).toList(),
@@ -112,8 +124,7 @@ class Moment {
   /// 更新用的 JSON（仅可变字段）
   Map<String, dynamic> toUpdateJson() {
     return {
-      'self_image_url': selfImageUrl,
-      'partner_image_url': partnerImageUrl,
+      'image_urls': imageUrls,
       'feeling': feeling,
       if (mood != null) 'mood': mood,
       'comments': comments.map((c) => c.toJson()).toList(),
@@ -125,8 +136,7 @@ class Moment {
     String? id,
     String? dateStr,
     String? authorId,
-    String? selfImageUrl,
-    String? partnerImageUrl,
+    List<String>? imageUrls,
     String? feeling,
     int? mood,
     List<Comment>? comments,
@@ -137,8 +147,7 @@ class Moment {
       id: id ?? this.id,
       dateStr: dateStr ?? this.dateStr,
       authorId: authorId ?? this.authorId,
-      selfImageUrl: selfImageUrl ?? this.selfImageUrl,
-      partnerImageUrl: partnerImageUrl ?? this.partnerImageUrl,
+      imageUrls: imageUrls ?? this.imageUrls,
       feeling: feeling ?? this.feeling,
       mood: mood ?? this.mood,
       comments: comments ?? this.comments,
