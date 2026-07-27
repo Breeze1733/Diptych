@@ -1,7 +1,10 @@
-# ─── Split Moments 项目 .gitignore ───
+# ─── Diptych 项目 .gitignore ───
 
 # 密钥文件（包含硬编码密钥，绝对不能提交）
 lib/constants/secrets.dart
+
+# 临时文件
+/temp/
 
 # Spec workflow
 .spec-workflow/
@@ -38,7 +41,6 @@ migrate_working_dir/
 .pub-cache/
 .pub/
 /build/
-/docs
 /coverage/
 
 # Symbolication related
