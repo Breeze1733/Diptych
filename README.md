@@ -127,6 +127,20 @@ flutter build apk --release
 
 产物路径：`build/app/outputs/flutter-apk/app-release.apk`
 
+### 更新版本之后TODO
+
+```
+# 改文件
+pubspec.yaml  version: 1.0.2+3
+version.json  "version": "1.0.2", "version_code": 3
+
+# 构建 APK
+flutter build apk --release
+
+# 重启后端
+pm2 restart moments-backend
+```
+
 ---
 
 ## 后端

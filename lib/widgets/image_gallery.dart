@@ -2,6 +2,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:photo_view/photo_view.dart';
+import 'package:photo_view/photo_view_gallery.dart';
 import '../utils/file_helper.dart';
 
 /// 弹出半透明底色的图片列表（一行三张，可滑动），点击单张进入全屏查看
@@ -57,7 +59,10 @@ class _ImageGalleryOverlay extends StatelessWidget {
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => FullScreenImage(url: urls[index]),
+                  builder: (_) => FullScreenImage(
+                    urls: urls,
+                    initialIndex: index,
+                  ),
                 ),
               ),
               child: Container(
@@ -91,24 +96,46 @@ class _ImageGalleryOverlay extends StatelessWidget {
   }
 }
 
-/// 全屏图片查看器：支持缩放 + 右上角下载
+/// 全屏图片查看器：photo_view 驱动，手势与微信朋友圈一致
+/// - 单指 1.0 倍 → 左右切页
+/// - 单指放大后 → 图片内拖拽，到边缘继续拖 → 切页
+/// - 双指 → 以捏合点为中心缩放
 class FullScreenImage extends StatefulWidget {
-  final String url;
-  const FullScreenImage({super.key, required this.url});
+  final List<String> urls;
+  final int initialIndex;
+  const FullScreenImage({super.key, required this.urls, this.initialIndex = 0});
 
   @override
   State<FullScreenImage> createState() => _FullScreenImageState();
 }
 
 class _FullScreenImageState extends State<FullScreenImage> {
+  late int _currentIndex;
+  late PageController _pageController;
   bool _isDownloading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentIndex = widget.initialIndex;
+    _pageController = PageController(initialPage: widget.initialIndex);
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  String get _currentUrl => widget.urls[_currentIndex];
 
   Future<void> _download() async {
     setState(() => _isDownloading = true);
     try {
-      final res = await http.get(Uri.parse(widget.url));
+      final res = await http.get(Uri.parse(_currentUrl));
       final dir = await FileHelper.getDownloadsDirectory();
-      final name = widget.url.split('/').last;
+      String name = _currentUrl.split('/').last;
+      if (name.contains('?')) name = name.substring(0, name.indexOf('?'));
       final file = File('${dir.path}/$name');
       await file.writeAsBytes(res.bodyBytes);
       await FileHelper.scanFile(file.path);
@@ -133,6 +160,12 @@ class _FullScreenImageState extends State<FullScreenImage> {
       appBar: AppBar(
         backgroundColor: Colors.black,
         iconTheme: const IconThemeData(color: Colors.white),
+        title: widget.urls.length > 1
+            ? Text(
+                '${_currentIndex + 1} / ${widget.urls.length}',
+                style: const TextStyle(color: Colors.white, fontSize: 16),
+              )
+            : null,
         actions: [
           IconButton(
             icon: _isDownloading
@@ -140,9 +173,7 @@ class _FullScreenImageState extends State<FullScreenImage> {
                     width: 20,
                     height: 20,
                     child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white,
-                    ),
+                        strokeWidth: 2, color: Colors.white),
                   )
                 : const Icon(Icons.download),
             tooltip: '下载',
@@ -150,29 +181,59 @@ class _FullScreenImageState extends State<FullScreenImage> {
           ),
         ],
       ),
-      body: InteractiveViewer(
-        minScale: 0.5,
-        maxScale: 4.0,
-        child: SizedBox.expand(
-          child: CachedNetworkImage(
-            imageUrl: widget.url,
-            fit: BoxFit.contain,
-            placeholder: (_, _) => const Center(
-              child: CircularProgressIndicator(color: Colors.white),
-            ),
-            errorWidget: (_, _, e) => Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.broken_image, size: 48, color: Colors.white54),
-                  const SizedBox(height: 8),
-                  const Text('图片加载失败', style: TextStyle(color: Colors.white54)),
-                  Text('$e', style: const TextStyle(color: Colors.white30, fontSize: 12)),
-                ],
+      body: Stack(
+        children: [
+          PhotoViewGallery.builder(
+            itemCount: widget.urls.length,
+            builder: (context, index) => PhotoViewGalleryPageOptions(
+              imageProvider:
+                  CachedNetworkImageProvider(widget.urls[index]),
+              initialScale: PhotoViewComputedScale.contained,
+              minScale: PhotoViewComputedScale.contained,
+              maxScale: PhotoViewComputedScale.covered * 4.0,
+              errorBuilder: (_, error, _) => Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.broken_image,
+                        size: 48, color: Colors.white54),
+                    const SizedBox(height: 8),
+                    const Text('图片加载失败',
+                        style: TextStyle(color: Colors.white54)),
+                  ],
+                ),
               ),
             ),
+            pageController: _pageController,
+            onPageChanged: (index) =>
+                setState(() => _currentIndex = index),
+            backgroundDecoration:
+                const BoxDecoration(color: Colors.black),
+            gaplessPlayback: true,
           ),
-        ),
+          // 底部页码指示器
+          if (widget.urls.length > 1)
+            Positioned(
+              bottom: 24,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.black45,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    '${_currentIndex + 1} / ${widget.urls.length}',
+                    style: const TextStyle(
+                        color: Colors.white70, fontSize: 13),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
