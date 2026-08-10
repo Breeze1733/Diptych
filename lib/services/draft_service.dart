@@ -13,6 +13,44 @@ import 'package:shared_preferences/shared_preferences.dart';
 ///   删除旧序号文件后再改名，避免序号变动时互相覆盖或 copy 到自身清空文件。
 class DraftService {
   static const _prefix = 'draft_';
+  static const _commentPrefix = 'comment_draft_';
+  static const _topicPostPrefix = 'topic_post_draft_';
+
+  /// 保存评论草稿。key 由日记 ID 和回复目标 ID 组成。
+  static Future<void> saveComment(String key, String content) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('$_commentPrefix$key', content);
+  }
+
+  /// 加载评论草稿，无草稿返回 null。
+  static Future<String?> loadComment(String key) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('$_commentPrefix$key');
+  }
+
+  /// 仅在评论成功发布后清理草稿。
+  static Future<void> clearComment(String key) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('$_commentPrefix$key');
+  }
+
+  /// 保存话题发帖草稿。
+  static Future<void> saveTopicPost(String key, String content) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('$_topicPostPrefix$key', content);
+  }
+
+  /// 加载话题发帖草稿，无草稿返回 null。
+  static Future<String?> loadTopicPost(String key) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('$_topicPostPrefix$key');
+  }
+
+  /// 仅在话题发帖成功后清理草稿。
+  static Future<void> clearTopicPost(String key) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('$_topicPostPrefix$key');
+  }
 
   /// 保存草稿（文本 + 心情 + 图片列表，全量替换）
   static Future<void> save(

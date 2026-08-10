@@ -7,6 +7,7 @@ import '../providers/auth_provider.dart';
 import '../providers/day_moment_provider.dart';
 import '../providers/selected_date_provider.dart';
 import '../services/cache_service.dart';
+import '../services/draft_service.dart';
 import '../services/update_service.dart';
 import '../utils/date_helper.dart';
 import '../widgets/calendar_picker.dart';
@@ -18,6 +19,13 @@ import 'topics_screen.dart';
 
 /// 是否已静默检查过更新（仅触发一次）
 final _autoUpdateCheckedProvider = StateProvider<bool>((ref) => false);
+
+class _CommentDialogResult {
+  final String content;
+  final bool saveDraft;
+
+  const _CommentDialogResult(this.content, {required this.saveDraft});
+}
 
 /// 主页面：顶栏 + 日视图分屏 + FAB
 class FeedScreen extends ConsumerWidget {
@@ -239,6 +247,10 @@ class FeedScreen extends ConsumerWidget {
     return DateTime.now().millisecondsSinceEpoch.toString();
   }
 
+  String _commentDraftKey(String userId, Moment moment, Comment? replyTo) {
+    return '${userId}_${moment.id}_${replyTo?.id ?? 'root'}';
+  }
+
   /// 打开评论弹窗（新增 / 回复）
   Future<void> _openCommentDialog(
     BuildContext context,
@@ -246,9 +258,18 @@ class FeedScreen extends ConsumerWidget {
     Moment moment,
     Comment? replyTo, // null = 新增顶级评论，非 null = 回复某条
   ) async {
-    final controller = TextEditingController();
+    final currentUser = ref.read(currentUserProvider);
+    final draftKey = _commentDraftKey(
+      currentUser?.uid ?? 'anonymous',
+      moment,
+      replyTo,
+    );
+    final savedDraft = await DraftService.loadComment(draftKey);
+    if (!context.mounted) return;
+
+    final controller = TextEditingController(text: savedDraft ?? '');
     final title = replyTo != null ? '回复评论' : AppStrings.commentTitle;
-    final result = await showDialog<String>(
+    final result = await showDialog<_CommentDialogResult>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(title),
@@ -264,10 +285,21 @@ class FeedScreen extends ConsumerWidget {
             onPressed: () => Navigator.pop(ctx),
             child: Text(AppStrings.cancel, style: TextStyle(color: Colors.grey[600])),
           ),
+          TextButton(
+            onPressed: () {
+              final text = controller.text.trim();
+              if (text.isNotEmpty) {
+                Navigator.pop(ctx, _CommentDialogResult(text, saveDraft: true));
+              }
+            },
+            child: const Text('存草稿'),
+          ),
           FilledButton(
             onPressed: () {
               final text = controller.text.trim();
-              if (text.isNotEmpty) Navigator.pop(ctx, text);
+              if (text.isNotEmpty) {
+                Navigator.pop(ctx, _CommentDialogResult(text, saveDraft: false));
+              }
             },
             style: FilledButton.styleFrom(backgroundColor: AppTheme.primaryColor),
             child: Text(AppStrings.confirm),
@@ -275,13 +307,33 @@ class FeedScreen extends ConsumerWidget {
         ],
       ),
     );
+    controller.dispose();
 
-    if (result != null && result.isNotEmpty) {
-      final currentUser = ref.read(currentUserProvider);
+    if (result == null || result.content.isEmpty) return;
+
+    if (result.saveDraft) {
+      try {
+        await DraftService.saveComment(draftKey, result.content);
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('评论草稿已保存')),
+          );
+        }
+      } catch (e) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('评论草稿保存失败: $e'), backgroundColor: Colors.red),
+          );
+        }
+      }
+      return;
+    }
+
+    {
       final newComment = Comment(
         id: _makeCommentId(),
         authorId: currentUser?.uid ?? '',
-        content: result,
+        content: result.content,
         replyTo: replyTo?.id, // 如果是回复，记录父评论 id
         createdAt: DateTime.now(),
       );
@@ -312,6 +364,7 @@ class FeedScreen extends ConsumerWidget {
         await apiService.updateMoment(moment.id, {
           'comments': newComments.map((c) => c.toJson()).toList(),
         });
+        await DraftService.clearComment(draftKey);
         // 立即更新本地缓存，确保刷新后读到最新数据
         await _updateCachedMomentComments(ref, moment.id, newComments);
         _refresh(ref);

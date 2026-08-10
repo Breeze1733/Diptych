@@ -223,6 +223,40 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(_isEdit ? AppStrings.editTitle : AppStrings.createTitle),
+        actions: [
+          if (!_isEdit)
+            SizedBox(
+              width: 72,
+              child: TextButton(
+                onPressed:
+                    _isSavingDraft || _isSaving ? null : _handleSaveDraft,
+                child: _isSavingDraft
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('存草稿'),
+              ),
+            ),
+          SizedBox(
+            width: 56,
+            child: TextButton(
+              onPressed: _isSaving || _isSavingDraft ? null : _handleSave,
+              child: _isSaving
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text(
+                      AppStrings.saveButton,
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+            ),
+          ),
+          const SizedBox(width: 4),
+        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
@@ -256,67 +290,27 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
                 setState(() => _photos.removeAt(index));
                 _syncDraftImages();
               },
+              onReordered: (oldIndex, newIndex) {
+                setState(() {
+                  final photo = _photos.removeAt(oldIndex);
+                  _photos.insert(newIndex, photo);
+                });
+                _syncDraftImages();
+              },
             ),
             const SizedBox(height: 20),
 
             // 感受输入
-            Text('💭 今日感受', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
+            Text('今日感受', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
             const SizedBox(height: 8),
             TextField(
               controller: _feelingController,
-              maxLines: 5,
+              minLines: 5,
+              maxLines: null,
+              scrollPhysics: const NeverScrollableScrollPhysics(),
               decoration: InputDecoration(
                 hintText: AppStrings.feelingHint,
               ),
-            ),
-            const SizedBox(height: 12),
-
-            // 已选图片提示
-            Center(
-              child: Text(
-                '已选 ${_photos.length} 张照片，第一张为封面',
-                style: TextStyle(color: Colors.grey[500], fontSize: 13),
-              ),
-            ),
-            const SizedBox(height: 12),
-
-            // 保存 + 存草稿 按钮
-            Row(
-              children: [
-                // 存草稿（仅新建模式有）
-                if (!_isEdit) ...[
-                  Expanded(
-                    child: SizedBox(
-                      height: 48,
-                      child: OutlinedButton(
-                        onPressed: _isSavingDraft ? null : _handleSaveDraft,
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppTheme.primaryColor,
-                          side: const BorderSide(color: AppTheme.primaryColor),
-                        ),
-                        child: _isSavingDraft
-                            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                            : const Text('存草稿', style: TextStyle(fontSize: 16)),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                ],
-                Expanded(
-                  child: SizedBox(
-                    height: 48,
-                    child: FilledButton(
-                      onPressed: _isSaving ? null : _handleSave,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppTheme.primaryColor,
-                      ),
-                      child: _isSaving
-                          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                          : const Text(AppStrings.saveButton, style: TextStyle(fontSize: 16)),
-                    ),
-                  ),
-                ),
-              ],
             ),
           ],
         ),
@@ -325,32 +319,37 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
   }
 
   Widget _buildMoodSelector() {
-    return Wrap(
-      spacing: 6,
-      runSpacing: 6,
+    return Row(
       children: List.generate(10, (i) {
         final score = i + 1;
         final isSelected = _mood == score;
-        return GestureDetector(
-          onTap: () => setState(() => _mood = isSelected ? null : score),
-          child: Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: isSelected ? AppTheme.primaryColor : Colors.grey[100],
-              border: Border.all(
-                color: isSelected ? AppTheme.primaryColor : Colors.grey[300]!,
-                width: 1.5,
-              ),
-            ),
-            alignment: Alignment.center,
-            child: Text(
-              '$score',
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: isSelected ? Colors.white : Colors.grey[600],
+        final moodColor = AppTheme.moodColor(score);
+        return Expanded(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2),
+            child: AspectRatio(
+              aspectRatio: 1,
+              child: GestureDetector(
+                onTap: () => setState(() => _mood = isSelected ? null : score),
+                child: Container(
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: isSelected ? moodColor : Colors.grey[100],
+                    border: Border.all(
+                      color: isSelected ? moodColor : Colors.grey[300]!,
+                      width: 1.5,
+                    ),
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    '$score',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: isSelected ? Colors.white : Colors.grey[600],
+                    ),
+                  ),
+                ),
               ),
             ),
           ),

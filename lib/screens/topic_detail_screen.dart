@@ -6,6 +6,7 @@ import '../providers/auth_provider.dart';
 import '../services/topic_service.dart';
 import '../utils/date_helper.dart';
 import '../widgets/avatar_widget.dart';
+import 'topic_post_screen.dart';
 
 /// 话题讨论页（论坛风格）
 class TopicDetailScreen extends ConsumerStatefulWidget {
@@ -22,7 +23,6 @@ class _TopicDetailScreenState extends ConsumerState<TopicDetailScreen> {
   Topic? _topic;
   bool _loading = true;
   String? _error;
-  bool _isSending = false;
 
   @override
   void initState() {
@@ -68,52 +68,17 @@ class _TopicDetailScreenState extends ConsumerState<TopicDetailScreen> {
     return '';
   }
 
-  Future<void> _reply() async {
-    final currentUser = ref.read(currentUserProvider);
-    if (currentUser == null) return;
-
-    final controller = TextEditingController();
-    final result = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('发帖'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLines: 4,
-          decoration: const InputDecoration(hintText: '写下你的想法...'),
+  Future<void> _openPostEditor() async {
+    final result = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => TopicPostScreen(
+          topicId: widget.topicId,
+          topicTitle: _topic?.title ?? '话题',
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text('取消', style: TextStyle(color: Colors.grey[600])),
-          ),
-          FilledButton(
-            onPressed: () {
-              final text = controller.text.trim();
-              if (text.isNotEmpty) Navigator.pop(ctx, text);
-            },
-            style: FilledButton.styleFrom(backgroundColor: AppTheme.primaryColor),
-            child: const Text('发送'),
-          ),
-        ],
       ),
     );
-
-    if (result == null || result.isEmpty) return;
-
-    setState(() => _isSending = true);
-    try {
-      await _service.createPost(widget.topicId, currentUser.uid, result);
-      await _loadTopic();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('发送失败: $e'), backgroundColor: Colors.red),
-      );
-    } finally {
-      if (mounted) setState(() => _isSending = false);
-    }
+    if (result == true) await _loadTopic();
   }
 
   Future<void> _deletePost(Post post) async {
@@ -260,7 +225,7 @@ class _TopicDetailScreenState extends ConsumerState<TopicDetailScreen> {
                           children: [
                             Expanded(
                               child: InkWell(
-                                onTap: _isSending ? null : _reply,
+                                onTap: _openPostEditor,
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 12, vertical: 10),
@@ -276,16 +241,10 @@ class _TopicDetailScreenState extends ConsumerState<TopicDetailScreen> {
                               ),
                             ),
                             const SizedBox(width: 8),
-                            _isSending
-                                ? const SizedBox(
-                                    width: 24,
-                                    height: 24,
-                                    child: CircularProgressIndicator(strokeWidth: 2),
-                                  )
-                                : IconButton(
-                                    icon: Icon(Icons.send, color: AppTheme.primaryColor),
-                                    onPressed: _reply,
-                                  ),
+                            IconButton(
+                              icon: Icon(Icons.send, color: AppTheme.primaryColor),
+                              onPressed: _openPostEditor,
+                            ),
                           ],
                         ),
                       ),

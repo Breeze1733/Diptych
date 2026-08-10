@@ -108,14 +108,7 @@ class MomentCard extends StatelessWidget {
   /// 心情分数徽章
   Widget _buildMoodBadge() {
     final mood = moment.mood!;
-    Color moodColor;
-    if (mood >= 8) {
-      moodColor = const Color(0xFF07C160); // 开心绿
-    } else if (mood >= 5) {
-      moodColor = const Color(0xFFFFA726); // 一般橙
-    } else {
-      moodColor = const Color(0xFF78909C); // 低落灰蓝
-    }
+    final moodColor = AppTheme.moodColor(mood);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),

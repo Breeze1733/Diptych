@@ -4,6 +4,13 @@ import 'package:flutter/material.dart';
 class AppTheme {
   AppTheme._();
 
+  /// 心情分对应的展示颜色，与首页日记卡片保持一致。
+  static Color moodColor(int mood) {
+    if (mood >= 8) return const Color(0xFF07C160);
+    if (mood >= 5) return const Color(0xFFFFA726);
+    return const Color(0xFF78909C);
+  }
+
   // 品牌色
   static const Color primaryColor = Color(0xFF07C160); // 微信绿
   static const Color backgroundColor = Color(0xFFF5F5F5);

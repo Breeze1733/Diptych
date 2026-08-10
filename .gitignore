@@ -4,7 +4,8 @@
 lib/constants/secrets.dart
 
 # 临时文件
-/temp/
+temp/
+test/
 
 # Spec workflow
 .spec-workflow/

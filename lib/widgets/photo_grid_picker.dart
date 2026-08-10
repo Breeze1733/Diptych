@@ -20,12 +20,14 @@ class PhotoGridPicker extends StatelessWidget {
   final List<PhotoEntry> entries;
   final ValueChanged<List<File>> onAdded;
   final ValueChanged<int> onRemoved;
+  final void Function(int oldIndex, int newIndex) onReordered;
 
   const PhotoGridPicker({
     super.key,
     required this.entries,
     required this.onAdded,
     required this.onRemoved,
+    required this.onReordered,
   });
 
   Future<void> _pickImages(BuildContext context) async {
@@ -98,6 +100,54 @@ class PhotoGridPicker extends StatelessWidget {
 
   /// 图片缩略图 + 删除角标 + 封面标记
   Widget _buildPhotoTile(int index) {
+    return LayoutBuilder(
+      builder: (context, constraints) => DragTarget<int>(
+        onWillAcceptWithDetails: (details) => details.data != index,
+        onAcceptWithDetails: (details) => onReordered(details.data, index),
+        builder: (context, candidateData, rejectedData) {
+          final isDragTarget = candidateData.any((source) => source != index);
+
+          return LongPressDraggable<int>(
+            data: index,
+            feedback: Material(
+              color: Colors.transparent,
+              elevation: 6,
+              borderRadius: BorderRadius.circular(6),
+              child: SizedBox(
+                width: constraints.maxWidth,
+                height: constraints.maxHeight,
+                child: _buildPhotoContent(index, showDeleteButton: false),
+              ),
+            ),
+            childWhenDragging: Opacity(
+              opacity: 0.25,
+              child: _buildPhotoContent(index),
+            ),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                _buildPhotoContent(index),
+                if (isDragTarget)
+                  IgnorePointer(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: Theme.of(context).colorScheme.primary,
+                          width: 3,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildPhotoContent(int index, {bool showDeleteButton = true}) {
     final entry = entries[index];
     final image = entry.isLocal
         ? Image.file(entry.file!, fit: BoxFit.cover)
@@ -134,22 +184,24 @@ class PhotoGridPicker extends StatelessWidget {
               ),
             ),
           // 删除角标
-          Positioned(
-            top: 0,
-            right: 0,
-            child: GestureDetector(
-              onTap: () => onRemoved(index),
-              child: Container(
-                padding: const EdgeInsets.all(3),
-                decoration: const BoxDecoration(
-                  color: Colors.black54,
-                  borderRadius:
-                      BorderRadius.only(bottomLeft: Radius.circular(6)),
+          if (showDeleteButton)
+            Positioned(
+              top: 0,
+              right: 0,
+              child: GestureDetector(
+                onTap: () => onRemoved(index),
+                child: Container(
+                  padding: const EdgeInsets.all(3),
+                  decoration: const BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.only(
+                      bottomLeft: Radius.circular(6),
+                    ),
+                  ),
+                  child: const Icon(Icons.close, size: 14, color: Colors.white),
                 ),
-                child: const Icon(Icons.close, size: 14, color: Colors.white),
               ),
             ),
-          ),
         ],
       ),
     );

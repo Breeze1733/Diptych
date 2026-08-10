@@ -109,11 +109,14 @@ class ApiService {
 
   /// 更新动态
   Future<void> updateMoment(String momentId, Map<String, dynamic> data) async {
-    await http.put(
+    final res = await http.put(
       Uri.parse('$_baseUrl/moments/$momentId'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode(data),
     );
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw Exception('PUT /moments/$momentId 返回 ${res.statusCode}: ${res.body}');
+    }
   }
 
   /// 获取用户有动态的日期列表
