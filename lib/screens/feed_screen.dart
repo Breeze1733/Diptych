@@ -273,11 +273,18 @@ class FeedScreen extends ConsumerWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(title),
-        content: TextField(
-          controller: controller,
-          maxLines: 3,
-          decoration: InputDecoration(
-            hintText: replyTo != null ? '写下回复...' : AppStrings.commentHint,
+        content: SelectionContainer.disabled(
+          child: TextField(
+            controller: controller,
+            maxLines: 3,
+            contextMenuBuilder: (context, editableTextState) =>
+                AdaptiveTextSelectionToolbar.buttonItems(
+              anchors: editableTextState.contextMenuAnchors,
+              buttonItems: editableTextState.contextMenuButtonItems,
+            ),
+            decoration: InputDecoration(
+              hintText: replyTo != null ? '写下回复...' : AppStrings.commentHint,
+            ),
           ),
         ),
         actions: [
@@ -460,7 +467,8 @@ class FeedScreen extends ConsumerWidget {
     );
   }
 
-  /// 静默检查更新（后端不通不报错）
+  /// 静默检查更新（后端不通不报错）。
+  /// 全局提示只负责提醒 + 跳转设置页，下载入口仅在设置页提供。
   static Future<void> _silentCheckUpdate(BuildContext context) async {
     try {
       final service = UpdateService();
@@ -474,11 +482,13 @@ class FeedScreen extends ConsumerWidget {
 
       if (!context.mounted) return;
 
-      final ok = await showDialog<bool>(
+      final goSettings = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
           title: const Text('发现新版本'),
-          content: Text('最新版本 ${latest.version}，是否更新？\n\n${latest.releaseNotes}'),
+          content: Text(
+            '最新版本 ${latest.version}\n\n${latest.releaseNotes}\n\n请前往「设置」页面下载更新。',
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx, false),
@@ -487,16 +497,18 @@ class FeedScreen extends ConsumerWidget {
             FilledButton(
               onPressed: () => Navigator.pop(ctx, true),
               style: FilledButton.styleFrom(backgroundColor: AppTheme.primaryColor),
-              child: Text(AppStrings.confirm),
+              child: const Text('前往设置'),
             ),
           ],
         ),
       );
 
-      if (ok == true) {
-        final apkPath = await service.downloadApk(latest.downloadUrl, (_) {});
-        await service.installApk(apkPath);
-        await service.markForCleanup(apkPath);
+      if (goSettings == true) {
+        if (!context.mounted) return;
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const ProfileScreen()),
+        );
       }
       service.dispose();
     } catch (_) {

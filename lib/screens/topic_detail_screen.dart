@@ -175,7 +175,7 @@ class _TopicDetailScreenState extends ConsumerState<TopicDetailScreen> {
                                               ),
                                             ),
                                             const SizedBox(width: 8),
-                                            Text(
+                                            SelectableText(
                                               _nickFor(post.authorId),
                                               style: TextStyle(
                                                 fontSize: 13,
@@ -203,7 +203,7 @@ class _TopicDetailScreenState extends ConsumerState<TopicDetailScreen> {
                                           ],
                                         ),
                                         const SizedBox(height: 8),
-                                        Text(post.content,
+                                        SelectableText(post.content,
                                             style:
                                                 const TextStyle(fontSize: 14, height: 1.5)),
                                       ],

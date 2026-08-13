@@ -62,7 +62,7 @@ class MomentCard extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               Expanded(
-                child: Text(nickname, style: AppTheme.momentNickname),
+                child: SelectableText(nickname, style: AppTheme.momentNickname),
               ),
               // 心情分数
               if (moment.mood != null) _buildMoodBadge(),
@@ -74,9 +74,9 @@ class MomentCard extends StatelessWidget {
           _buildCoverBox(context),
           const SizedBox(height: 10),
 
-          // 感受文字
+          // 感受文字（可长按复制）
           if (moment.feeling.isNotEmpty)
-            Text(moment.feeling, style: AppTheme.momentContent),
+            SelectableText(moment.feeling, style: AppTheme.momentContent),
 
           const SizedBox(height: 8),
 
@@ -206,8 +206,8 @@ class MomentCard extends StatelessWidget {
           onTap: () => _showCommentActions(context, comment),
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 2),
-            child: RichText(
-              text: TextSpan(
+            child: SelectableText.rich(
+              TextSpan(
                 children: [
                   TextSpan(
                     text: '${_nickFor(comment.authorId)}：',

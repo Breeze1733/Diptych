@@ -29,6 +29,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   bool _isChecking = false;
   bool _isDownloading = false;
   double _downloadProgress = 0;
+  VersionInfo? _latestVersion;       // 检查到的最新版本；有值时下载按钮可用
 
   // 缓存相关
   String _cacheSizeText = '点击计算';
@@ -127,6 +128,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     setState(() {
       _isChecking = true;
       _updateStatus = '正在检查更新...';
+      _latestVersion = null; // 重新检查前清空，下载按钮先置灰
     });
 
     try {
@@ -136,9 +138,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       if (_updateService.needUpdate(current, latest)) {
         setState(() {
           _isChecking = false;
+          _latestVersion = latest;
           _updateStatus = '发现新版本 ${latest.version}\n${latest.releaseNotes}';
         });
-        _confirmUpdate(latest);
       } else {
         setState(() {
           _isChecking = false;
@@ -153,33 +155,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     }
   }
 
-  Future<void> _confirmUpdate(VersionInfo latest) async {
-    if (!mounted) return;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('发现新版本'),
-        content: Text('当前版本过低，是否更新到 ${latest.version}？\n\n${latest.releaseNotes}'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text('取消', style: TextStyle(color: Colors.grey[600])),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: FilledButton.styleFrom(backgroundColor: AppTheme.primaryColor),
-            child: const Text('立即更新'),
-          ),
-        ],
-      ),
-    );
+  /// 下载并安装（仅设置页内可触发）
+  Future<void> _downloadAndInstall() async {
+    final latest = _latestVersion;
+    if (latest == null || _isDownloading) return;
 
-    if (ok == true) {
-      await _downloadAndInstall(latest);
-    }
-  }
-
-  Future<void> _downloadAndInstall(VersionInfo latest) async {
     setState(() {
       _isDownloading = true;
       _downloadProgress = 0;
@@ -403,11 +383,18 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             ),
             const SizedBox(height: 16),
             // 昵称
-            TextField(
-              controller: _nicknameController,
-              decoration: const InputDecoration(
-                labelText: '昵称',
-                prefixIcon: Icon(Icons.person_outline),
+            SelectionContainer.disabled(
+              child: TextField(
+                controller: _nicknameController,
+                contextMenuBuilder: (context, editableTextState) =>
+                    AdaptiveTextSelectionToolbar.buttonItems(
+                  anchors: editableTextState.contextMenuAnchors,
+                  buttonItems: editableTextState.contextMenuButtonItems,
+                ),
+                decoration: const InputDecoration(
+                  labelText: '昵称',
+                  prefixIcon: Icon(Icons.person_outline),
+                ),
               ),
             ),
             const SizedBox(height: 16),
@@ -485,6 +472,43 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   }
 
   Widget _buildUpdateCard() {
+    // 下载中：两个按钮都消失，只显示进度条
+    if (_isDownloading) {
+      return Card(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.system_update, color: AppTheme.primaryColor),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Text('正在下载更新',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              LinearProgressIndicator(value: _downloadProgress, color: AppTheme.primaryColor),
+              const SizedBox(height: 8),
+              Text(
+                _updateStatus,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: _updateStatus.contains('失败') ? Colors.red : Colors.grey[600],
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // 常态：检查更新 + 下载更新两个按钮
     return Card(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
@@ -504,24 +528,44 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     ],
                   ),
                 ),
-                _isChecking || _isDownloading
-                    ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
-                    : FilledButton(
-                        onPressed: _isChecking ? null : _checkUpdate,
-                        style: FilledButton.styleFrom(
-                          backgroundColor: AppTheme.primaryColor,
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        ),
-                        child: const Text('检测', style: TextStyle(fontSize: 14)),
-                      ),
+                const SizedBox(width: 8),
+                FilledButton(
+                  onPressed: _isChecking ? null : _checkUpdate,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppTheme.primaryColor,
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  ),
+                  child: Text(_isChecking ? '检查中' : '检查更新',
+                      style: const TextStyle(fontSize: 14)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    '下载更新',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // 无可用更新时置灰，有更新（_latestVersion 非空）才可点
+                FilledButton(
+                  onPressed: _latestVersion == null ? null : _downloadAndInstall,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _latestVersion == null
+                        ? Colors.grey.shade300
+                        : AppTheme.primaryColor,
+                    foregroundColor: _latestVersion == null ? Colors.grey.shade500 : Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  ),
+                  child: const Text('下载更新', style: TextStyle(fontSize: 14)),
+                ),
               ],
             ),
             if (_updateStatus.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              if (_isDownloading) ...[
-                LinearProgressIndicator(value: _downloadProgress, color: AppTheme.primaryColor),
-                const SizedBox(height: 8),
-              ],
+              const SizedBox(height: 8),
               Text(
                 _updateStatus,
                 style: TextStyle(

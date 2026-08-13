@@ -87,19 +87,26 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   const SizedBox(height: 40),
 
                   // 密钥输入框
-                  TextFormField(
-                    controller: _keyController,
-                    decoration: InputDecoration(
-                      labelText: AppStrings.loginHint,
-                      prefixIcon: const Icon(Icons.vpn_key_outlined),
-                      errorText: _errorText,
+                  SelectionContainer.disabled(
+                    child: TextFormField(
+                      controller: _keyController,
+                      contextMenuBuilder: (context, editableTextState) =>
+                          AdaptiveTextSelectionToolbar.buttonItems(
+                        anchors: editableTextState.contextMenuAnchors,
+                        buttonItems: editableTextState.contextMenuButtonItems,
+                      ),
+                      decoration: InputDecoration(
+                        labelText: AppStrings.loginHint,
+                        prefixIcon: const Icon(Icons.vpn_key_outlined),
+                        errorText: _errorText,
+                      ),
+                      obscureText: true,
+                      validator: (v) {
+                        if (v == null || v.trim().isEmpty) return '请输入密钥';
+                        return null;
+                      },
+                      onFieldSubmitted: (_) => _handleLogin(),
                     ),
-                    obscureText: true,
-                    validator: (v) {
-                      if (v == null || v.trim().isEmpty) return '请输入密钥';
-                      return null;
-                    },
-                    onFieldSubmitted: (_) => _handleLogin(),
                   ),
                   const SizedBox(height: 24),
 

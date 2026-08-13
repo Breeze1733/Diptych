@@ -67,6 +67,9 @@ class DraftService {
       if (mood != null) 'mood': mood, // ignore: use_null_aware_elements
       'image_count': images.length,
     };
+    // 保留已持久化的断点续传进度，存草稿不应清掉它
+    final uploaded = _readUploaded(prefs.getString('$_prefix$dateStr'));
+    if (uploaded.isNotEmpty) data['uploaded'] = uploaded;
     await prefs.setString('$_prefix$dateStr', jsonEncode(data));
   }
 
@@ -81,6 +84,7 @@ class DraftService {
         feeling: data['feeling'] as String? ?? '',
         mood: data['mood'] as int?,
         images: await _resolveImages(dateStr),
+        uploaded: _readUploaded(raw),
       );
     } catch (_) {
       return null;
@@ -102,8 +106,20 @@ class DraftService {
   }
 
   /// 选图/删图后可即时调用，把当前图片列表先落地到草稿目录，防止临时文件被系统清理
-  static Future<void> saveImages(String dateStr, List<File> images) async {
+  /// [uploaded] 为断点续传进度（序号 → URL），一并持久化。
+  static Future<void> saveImages(
+    String dateStr,
+    List<File> images, {
+    Map<int, String> uploaded = const {},
+  }) async {
     await _persistImages(dateStr, images);
+    await _persistUploaded(dateStr, uploaded);
+  }
+
+  /// 只持久化断点续传进度，不重新复制图片（上传成功一张后调用）
+  static Future<void> saveUploadProgress(
+      String dateStr, Map<int, String> uploaded) async {
+    await _persistUploaded(dateStr, uploaded);
   }
 
   // ─── 私有辅助 ───
@@ -156,6 +172,45 @@ class DraftService {
     return [for (final i in indexes) files[i]!];
   }
 
+  /// 把断点续传进度（序号 → URL）写进草稿 JSON
+  static Future<void> _persistUploaded(
+      String dateStr, Map<int, String> uploaded) async {
+    if (uploaded.isEmpty) return; // 无进度时不动现有 JSON，避免建出空草稿
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString('$_prefix$dateStr');
+    final data = raw == null
+        ? <String, dynamic>{}
+        : _safeDecodeMap(raw, <String, dynamic>{});
+    data['uploaded'] = {
+      for (final e in uploaded.entries) '${e.key}': e.value,
+    };
+    await prefs.setString('$_prefix$dateStr', jsonEncode(data));
+  }
+
+  /// 从草稿 JSON 中读取断点续传进度，格式为 序号字符串 → URL
+  static Map<int, String> _readUploaded(String? raw) {
+    if (raw == null) return const {};
+    final data = _safeDecodeMap(raw, <String, dynamic>{});
+    final uploadedRaw = data['uploaded'];
+    if (uploadedRaw is! Map) return const {};
+    final uploaded = <int, String>{};
+    uploadedRaw.forEach((k, v) {
+      final idx = int.tryParse('$k');
+      if (idx != null && v is String && v.isNotEmpty) uploaded[idx] = v;
+    });
+    return uploaded;
+  }
+
+  static Map<String, dynamic> _safeDecodeMap(
+      String raw, Map<String, dynamic> fallback) {
+    try {
+      final decoded = jsonDecode(raw);
+      return decoded is Map<String, dynamic> ? decoded : fallback;
+    } catch (_) {
+      return fallback;
+    }
+  }
+
   static String _fileName(File f) => f.path.split(Platform.pathSeparator).last.split('/').last;
 
   static Future<Directory> _draftDir() async {
@@ -171,10 +226,13 @@ class DraftData {
   final String feeling;
   final int? mood;
   final List<File> images;
+  /// 断点续传进度：图片序号 → 已上传成功的 URL
+  final Map<int, String> uploaded;
 
   const DraftData({
     required this.feeling,
     this.mood,
     this.images = const [],
+    this.uploaded = const {},
   });
 }

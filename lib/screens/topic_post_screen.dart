@@ -160,13 +160,20 @@ class _TopicPostScreenState extends ConsumerState<TopicPostScreen> {
               style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
             ),
             const SizedBox(height: 8),
-            TextField(
-              controller: _contentController,
-              autofocus: true,
-              minLines: 8,
-              maxLines: null,
-              scrollPhysics: const NeverScrollableScrollPhysics(),
-              decoration: const InputDecoration(hintText: '写下你的想法...'),
+            SelectionContainer.disabled(
+              child: TextField(
+                controller: _contentController,
+                autofocus: true,
+                minLines: 8,
+                maxLines: null,
+                scrollPhysics: const NeverScrollableScrollPhysics(),
+                contextMenuBuilder: (context, editableTextState) =>
+                    AdaptiveTextSelectionToolbar.buttonItems(
+                  anchors: editableTextState.contextMenuAnchors,
+                  buttonItems: editableTextState.contextMenuButtonItems,
+                ),
+                decoration: const InputDecoration(hintText: '写下你的想法...'),
+              ),
             ),
           ],
         ),

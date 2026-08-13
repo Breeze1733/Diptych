@@ -83,10 +83,17 @@ class _TopicsScreenState extends ConsumerState<TopicsScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('新建话题'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(hintText: '输入话题标题'),
+        content: SelectionContainer.disabled(
+          child: TextField(
+            controller: controller,
+            autofocus: true,
+            contextMenuBuilder: (context, editableTextState) =>
+                AdaptiveTextSelectionToolbar.buttonItems(
+              anchors: editableTextState.contextMenuAnchors,
+              buttonItems: editableTextState.contextMenuButtonItems,
+            ),
+            decoration: const InputDecoration(hintText: '输入话题标题'),
+          ),
         ),
         actions: [
           TextButton(
@@ -182,7 +189,7 @@ class _TopicsScreenState extends ConsumerState<TopicsScreen> {
           final topic = _topics![index];
           return ListTile(
             isThreeLine: true,
-            title: Text(topic.title, style: const TextStyle(fontWeight: FontWeight.w500)),
+            title: SelectableText(topic.title, style: const TextStyle(fontWeight: FontWeight.w500)),
             subtitle: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
