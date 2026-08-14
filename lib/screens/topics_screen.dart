@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../constants/app_theme.dart';
 import '../providers/auth_provider.dart';
+import '../providers/wallpaper_provider.dart';
 import '../services/topic_service.dart';
 import '../utils/date_helper.dart';
+import '../widgets/wallpaper_layer.dart';
 import 'topic_detail_screen.dart';
 
 /// 话题列表页
@@ -135,13 +137,26 @@ class _TopicsScreenState extends ConsumerState<TopicsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('话题')),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _createTopic,
-        child: const Icon(Icons.add),
-      ),
-      body: _buildBody(),
+    final wallpaper = ref.watch(wallpaperSettingsProvider);
+    // 壁纸垫在整个 Scaffold 后面，Scaffold 保持正常布局，杜绝重叠/空档
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        WallpaperLayer(url: wallpaper.topicUrl, opacity: wallpaper.topicOpacity),
+        Scaffold(
+          backgroundColor: Colors.transparent,
+          appBar: AppBar(
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            title: const Text('话题'),
+          ),
+          floatingActionButton: FloatingActionButton(
+            onPressed: _createTopic,
+            child: const Icon(Icons.add),
+          ),
+          body: _buildBody(),
+        ),
+      ],
     );
   }
 

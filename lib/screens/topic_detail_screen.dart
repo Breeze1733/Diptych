@@ -3,9 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../constants/app_theme.dart';
 import '../models/topic.dart';
 import '../providers/auth_provider.dart';
+import '../providers/wallpaper_provider.dart';
 import '../services/topic_service.dart';
 import '../utils/date_helper.dart';
 import '../widgets/avatar_widget.dart';
+import '../widgets/wallpaper_layer.dart';
 import 'topic_post_screen.dart';
 
 /// 话题讨论页（论坛风格）
@@ -118,12 +120,23 @@ class _TopicDetailScreenState extends ConsumerState<TopicDetailScreen> {
   Widget build(BuildContext context) {
     final currentUser = ref.watch(currentUserProvider);
     final currentUid = currentUser?.uid ?? '';
+    final wallpaper = ref.watch(wallpaperSettingsProvider);
 
-    return Scaffold(
-      appBar: AppBar(title: Text(_topic?.title ?? '话题')),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
+    // 壁纸垫在整个 Scaffold 后面，Scaffold 保持正常布局，杜绝重叠/空档
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        WallpaperLayer(url: wallpaper.topicUrl, opacity: wallpaper.topicOpacity),
+        Scaffold(
+          backgroundColor: Colors.transparent,
+          appBar: AppBar(
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            title: Text(_topic?.title ?? '话题'),
+          ),
+          body: _loading
+              ? const Center(child: CircularProgressIndicator())
+              : _error != null
               ? Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -154,6 +167,8 @@ class _TopicDetailScreenState extends ConsumerState<TopicDetailScreen> {
                                   margin: const EdgeInsets.only(bottom: 8),
                                   shape: RoundedRectangleBorder(
                                       borderRadius: BorderRadius.circular(8)),
+                                  // 半透明白卡片：让话题壁纸能透过显示
+                                  color: const Color(0xD9FFFFFF),
                                   child: Padding(
                                     padding: const EdgeInsets.all(12),
                                     child: Column(
@@ -218,7 +233,7 @@ class _TopicDetailScreenState extends ConsumerState<TopicDetailScreen> {
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                         decoration: BoxDecoration(
-                          color: Colors.white,
+                          color: const Color(0xD9FFFFFF),
                           border: Border(top: BorderSide(color: Colors.grey[200]!)),
                         ),
                         child: Row(
@@ -251,6 +266,8 @@ class _TopicDetailScreenState extends ConsumerState<TopicDetailScreen> {
                     ),
                   ],
                 ),
+        ),
+      ],
     );
   }
 

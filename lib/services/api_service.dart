@@ -22,11 +22,23 @@ class ApiService {
     return AppUser.fromJson(body['data']);
   }
 
-  /// 更新用户信息（昵称 / 头像）
-  Future<void> updateUser(String uid, {String? nickname, String? avatarUrl}) async {
+  /// 更新用户信息（昵称 / 头像 / 壁纸）
+  Future<void> updateUser(
+    String uid, {
+    String? nickname,
+    String? avatarUrl,
+    String? wallpaperDiaryUrl,
+    String? wallpaperTopicUrl,
+    double? wallpaperDiaryOpacity,
+    double? wallpaperTopicOpacity,
+  }) async {
     final Map<String, dynamic> data = {};
     if (nickname != null) data['nickname'] = nickname;
     if (avatarUrl != null) data['avatar_url'] = avatarUrl;
+    if (wallpaperDiaryUrl != null) data['wallpaper_diary_url'] = wallpaperDiaryUrl;
+    if (wallpaperTopicUrl != null) data['wallpaper_topic_url'] = wallpaperTopicUrl;
+    if (wallpaperDiaryOpacity != null) data['wallpaper_diary_opacity'] = wallpaperDiaryOpacity;
+    if (wallpaperTopicOpacity != null) data['wallpaper_topic_opacity'] = wallpaperTopicOpacity;
     await http.put(
       Uri.parse('$_baseUrl/users/$uid'),
       headers: {'Content-Type': 'application/json'},

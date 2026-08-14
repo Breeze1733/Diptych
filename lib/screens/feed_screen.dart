@@ -6,6 +6,7 @@ import '../models/moment.dart';
 import '../providers/auth_provider.dart';
 import '../providers/day_moment_provider.dart';
 import '../providers/selected_date_provider.dart';
+import '../providers/wallpaper_provider.dart';
 import '../services/cache_service.dart';
 import '../services/draft_service.dart';
 import '../services/update_service.dart';
@@ -13,6 +14,7 @@ import '../utils/date_helper.dart';
 import '../widgets/calendar_picker.dart';
 import '../widgets/date_header.dart';
 import '../widgets/day_split_view.dart';
+import '../widgets/wallpaper_layer.dart';
 import 'edit_moment_screen.dart';
 import 'profile_screen.dart';
 import 'topics_screen.dart';
@@ -41,6 +43,9 @@ class FeedScreen extends ConsumerWidget {
     final loadUsersAsync = ref.watch(loadUsersProvider);
     // 预加载日历圆点数据
     ref.watch(markedDatesProvider);
+    // 触发壁纸初始化（本地优先，云端兜底）
+    ref.watch(initWallpaperProvider);
+    final wallpaper = ref.watch(wallpaperSettingsProvider);
 
     // 用户数据加载完成后，静默检查更新（仅一次）
     final hasChecked = ref.watch(_autoUpdateCheckedProvider);
@@ -49,30 +54,41 @@ class FeedScreen extends ConsumerWidget {
       _silentCheckUpdate(context);
     }
 
-    return Scaffold(
-      backgroundColor: AppTheme.backgroundColor,
-      appBar: AppBar(
-        title: const Text(AppStrings.appTitle),
-        actions: [
-          // 话题
-          IconButton(
-            icon: const Icon(Icons.forum_outlined, size: 20),
-            tooltip: '话题',
-            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const TopicsScreen())),
+    // 壁纸垫在整个 Scaffold 后面（顶栏底下也能透出），
+    // Scaffold 保持正常布局：不 extendBodyBehindAppBar、不做手动避让，杜绝重叠/空档
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        WallpaperLayer(url: wallpaper.diaryUrl, opacity: wallpaper.diaryOpacity),
+        Scaffold(
+          backgroundColor: Colors.transparent,
+          appBar: AppBar(
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            title: const Text(AppStrings.appTitle),
+            actions: [
+              // 话题
+              IconButton(
+                icon: const Icon(Icons.forum_outlined, size: 20),
+                tooltip: '话题',
+                onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const TopicsScreen())),
+              ),
+              // 刷新按钮
+              _buildRefreshButton(ref),
+              // 个人设置
+              IconButton(
+                icon: const Icon(Icons.settings_outlined, size: 20),
+                tooltip: '个人设置',
+                onPressed: () => _openProfile(context),
+              ),
+            ],
           ),
-          // 刷新按钮
-          _buildRefreshButton(ref),
-          // 个人设置
-          IconButton(
-            icon: const Icon(Icons.settings_outlined, size: 20),
-            tooltip: '个人设置',
-            onPressed: () => _openProfile(context),
-          ),
-        ],
-      ),
-      body: _buildBody(ref, loadUsersAsync, currentUser, partner, selectedDate, context),
-      // FAB 仅在没有自己的动态时显示（用于新建）
-      floatingActionButton: _buildFabIfNeeded(ref, currentUser, context),
+          body: _buildBody(
+              ref, loadUsersAsync, currentUser, partner, selectedDate, context),
+          // FAB 仅在没有自己的动态时显示（用于新建）
+          floatingActionButton: _buildFabIfNeeded(ref, currentUser, context),
+        ),
+      ],
     );
   }
 

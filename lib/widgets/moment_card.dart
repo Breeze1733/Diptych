@@ -44,7 +44,8 @@ class MomentCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: const BoxDecoration(
-        color: AppTheme.cardColor,
+        // 半透明白卡片：让壁纸能透过卡片显示（85% 不透明白）
+        color: Color(0xD9FFFFFF),
         border: Border(
           bottom: BorderSide(color: AppTheme.dividerColor, width: 0.5),
         ),
@@ -186,7 +187,8 @@ class MomentCard extends StatelessWidget {
             width: double.infinity,
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: Colors.grey[50],
+              // 半透明评论气泡：让壁纸透出
+              color: const Color(0xE6FFFFFF),
               borderRadius: BorderRadius.circular(6),
             ),
             child: _buildCommentTree(context, topLevel[i], replies),
@@ -325,7 +327,8 @@ class MomentCard extends StatelessWidget {
     return Container(
       height: 140,
       decoration: BoxDecoration(
-        color: Colors.grey[100],
+        // 半透明白封面底：让壁纸透出
+        color: const Color(0xE6FFFFFF),
         borderRadius: BorderRadius.circular(6),
       ),
       clipBehavior: Clip.antiAlias,
@@ -335,7 +338,7 @@ class MomentCard extends StatelessWidget {
 
   Widget _placeholder(String label) {
     return Container(
-      color: Colors.grey[100],
+      color: const Color(0xE6FFFFFF),
       alignment: Alignment.center,
       child: Column(
         mainAxisSize: MainAxisSize.min,

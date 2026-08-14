@@ -16,7 +16,8 @@ class DateHeader extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: const BoxDecoration(
-        color: Colors.white,
+        // 半透明白顶栏：让壁纸能透过显示
+        color: Color(0xD9FFFFFF),
         border: Border(
           bottom: BorderSide(color: Color(0xFFE5E5E5), width: 0.5),
         ),

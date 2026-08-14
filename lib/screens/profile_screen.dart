@@ -7,8 +7,10 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../constants/app_theme.dart';
 import '../models/app_user.dart';
 import '../providers/auth_provider.dart';
+import '../providers/wallpaper_provider.dart';
 import '../services/update_service.dart';
 import '../utils/cache_helper.dart';
+import 'wallpaper_settings_screen.dart';
 
 /// 个人设置页：修改用户信息 + 检查更新
 class ProfileScreen extends ConsumerStatefulWidget {
@@ -320,6 +322,12 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 _buildUserInfoCard(user),
                 const SizedBox(height: 32),
 
+                // ═══ 外观 ═══
+                _buildSectionHeader('外观'),
+                const SizedBox(height: 12),
+                _buildWallpaperCard(),
+                const SizedBox(height: 32),
+
                 // ═══ 系统 ═══
                 _buildSectionHeader('系统'),
                 const SizedBox(height: 12),
@@ -345,6 +353,29 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
   Widget _buildSectionHeader(String title) {
     return Text(title, style: TextStyle(fontSize: 13, color: Colors.grey[500], fontWeight: FontWeight.w500));
+  }
+
+  /// 壁纸设置入口
+  Widget _buildWallpaperCard() {
+    final wallpaper = ref.watch(wallpaperSettingsProvider);
+    final hasAny = wallpaper.diaryUrl.isNotEmpty || wallpaper.topicUrl.isNotEmpty;
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        leading: const Icon(Icons.wallpaper, color: AppTheme.primaryColor),
+        title: const Text('壁纸', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
+        subtitle: Text(
+          hasAny ? '日记与话题壁纸' : '设置日记与话题背景壁纸',
+          style: const TextStyle(fontSize: 13, color: Colors.grey),
+        ),
+        trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const WallpaperSettingsScreen()),
+        ),
+      ),
+    );
   }
 
   Widget _buildUserInfoCard(AppUser user) {
