@@ -117,7 +117,8 @@ class DaySplitView extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.edit_note, size: 40, color: Colors.grey[300]),
+              Image.asset('assets/not_posted_self.png',
+                  width: 80, height: 80, fit: BoxFit.contain),
               const SizedBox(height: 8),
               Text(
                 AppStrings.noPostPlaceholder,
@@ -136,7 +137,8 @@ class DaySplitView extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.image_outlined, size: 40, color: Colors.grey[300]),
+            Image.asset('assets/not_posted_partner.png',
+                width: 80, height: 80, fit: BoxFit.contain),
             const SizedBox(height: 8),
             Text(
               AppStrings.noPostPlaceholder,

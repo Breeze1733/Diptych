@@ -1,7 +1,7 @@
 name: diptych
 description: "Diptych - 双人私密日记"
 publish_to: 'none'
-version: 1.0.14+15
+version: 1.0.15+16
 
 environment:
   sdk: ^3.12.2
@@ -44,3 +44,5 @@ flutter:
   uses-material-design: true
   assets:
     - assets/icon.png
+    - assets/not_posted_self.png
+    - assets/not_posted_partner.png

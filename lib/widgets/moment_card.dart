@@ -202,33 +202,33 @@ class MomentCard extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        GestureDetector(
-          onTap: () => _showCommentActions(context, comment),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 2),
-            child: SelectableText.rich(
-              TextSpan(
-                children: [
-                  TextSpan(
-                    text: '${_nickFor(comment.authorId)}：',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.primaryColor,
-                      height: 1.4,
-                    ),
+        // 短按弹操作菜单、长按框选复制，用 SelectableText 自带的 onTap，
+        // 与外层 GestureDetector 叠放会让 tap 被选择手势抢走（竞技场冲突）
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: SelectableText.rich(
+            TextSpan(
+              children: [
+                TextSpan(
+                  text: '${_nickFor(comment.authorId)}：',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.primaryColor,
+                    height: 1.4,
                   ),
-                  TextSpan(
-                    text: comment.content,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      color: AppTheme.textPrimary,
-                      height: 1.4,
-                    ),
+                ),
+                TextSpan(
+                  text: comment.content,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: AppTheme.textPrimary,
+                    height: 1.4,
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
+            onTap: () => _showCommentActions(context, comment),
           ),
         ),
         if (children != null && children.isNotEmpty)
