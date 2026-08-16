@@ -29,10 +29,8 @@ class AppStrings {
   static const String deleteCommentConfirm = '确定删除这条评论？';
 
   // 通用
-  static const String logout = '退出登录';
   static const String cancel = '取消';
   static const String confirm = '确定';
-  static const String loading = '加载中...';
   static const String uploadSuccess = '保存成功';
   static const String uploadFailed = '保存失败，请重试';
 

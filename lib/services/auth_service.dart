@@ -27,10 +27,4 @@ class AuthService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_keyUserRole);
   }
-
-  /// 是否已登录
-  Future<bool> isLoggedIn() async {
-    final role = await getUserRole();
-    return role != null;
-  }
 }

@@ -109,7 +109,7 @@ class _WallpaperPreviewScreenState extends ConsumerState<WallpaperPreviewScreen>
         Comment(
           id: 'preview_c1',
           authorId: 'B',
-          content: '示例评论：看看壁纸下文字是否清晰可读',
+          content: '示例评论：壁纸下文字清晰可读',
           createdAt: now,
         ),
       ],
@@ -136,13 +136,9 @@ class _WallpaperPreviewScreenState extends ConsumerState<WallpaperPreviewScreen>
     return (self, partner);
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final user = ref.watch(currentUserProvider);
-    final partner = ref.watch(partnerUserProvider);
-    final (selfMoment, partnerMoment) = _sampleMoments();
-
-    final body = Column(
+  /// 日记壁纸预览：与日记页一致的示例布局，昵称/头像固定为占位，不显示真实用户
+  Widget _buildDiaryPreview(Moment selfMoment, Moment partnerMoment) {
+    return Column(
       children: [
         // 与日记页一致的日期顶栏（示例日期）
         DateHeader(
@@ -150,15 +146,54 @@ class _WallpaperPreviewScreenState extends ConsumerState<WallpaperPreviewScreen>
           onCalendarTap: () {}, // 预览页日历不响应
         ),
         const Divider(height: 1, thickness: 1, color: AppTheme.dividerColor),
-        // 与日记页一致的分屏卡片
+        // 与日记页一致的分屏卡片，昵称固定「用户A/用户B」，头像留空
         DaySplitView(
           myMoment: selfMoment,
           partnerMoment: partnerMoment,
-          myNickname: user?.nickname ?? '我',
-          partnerNickname: partner?.nickname ?? '对方',
+          myNickname: '用户A',
+          partnerNickname: '用户B',
         ),
       ],
     );
+  }
+
+  /// 话题壁纸预览：与话题列表页一致的示例布局
+  Widget _buildTopicPreview() {
+    const samples = [
+      ('示例话题文字', '用户A'),
+      ('周末去哪儿玩', '用户B'),
+      ('推荐一部值得看的电影', '用户A'),
+    ];
+    return ListView.separated(
+      itemCount: samples.length,
+      separatorBuilder: (_, _) => const Divider(height: 1),
+      itemBuilder: (context, index) {
+        final (title, author) = samples[index];
+        return ListTile(
+          isThreeLine: true,
+          title: SelectableText(title, style: const TextStyle(fontWeight: FontWeight.w500)),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('由 $author 创建', style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+              const SizedBox(height: 2),
+              Text('最新更新：示例时间', style: TextStyle(fontSize: 11, color: Colors.grey[400])),
+            ],
+          ),
+          trailing: const Icon(Icons.chevron_right),
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final (selfMoment, partnerMoment) = _sampleMoments();
+    final isDiary = widget.type == WallpaperType.diary;
+
+    final body = isDiary
+        ? _buildDiaryPreview(selfMoment, partnerMoment)
+        : _buildTopicPreview();
 
     // 壁纸垫在整个 Scaffold 后面，Scaffold 保持正常布局，杜绝重叠/空档
     return Stack(
@@ -170,7 +205,7 @@ class _WallpaperPreviewScreenState extends ConsumerState<WallpaperPreviewScreen>
           appBar: AppBar(
             backgroundColor: Colors.transparent,
             elevation: 0,
-            title: Text(widget.type == WallpaperType.diary ? '日记壁纸预览' : '话题壁纸预览'),
+            title: Text(isDiary ? '日记壁纸预览' : '话题壁纸预览'),
             actions: [
               TextButton(
                 onPressed: _applying ? null : _apply,
@@ -185,6 +220,12 @@ class _WallpaperPreviewScreenState extends ConsumerState<WallpaperPreviewScreen>
             ],
           ),
           body: body,
+          floatingActionButton: isDiary
+              ? null
+              : FloatingActionButton(
+                  onPressed: () {}, // 预览页不响应
+                  child: const Icon(Icons.add),
+                ),
           bottomNavigationBar: SafeArea(
             child: Container(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),

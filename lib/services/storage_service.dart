@@ -51,8 +51,4 @@ class StorageService {
       body: jsonEncode({'url': url}),
     );
   }
-
-  void dispose() {
-    _client.close();
-  }
 }

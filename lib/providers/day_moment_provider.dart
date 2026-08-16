@@ -6,9 +6,6 @@ import '../utils/date_helper.dart';
 import 'auth_provider.dart';
 import 'selected_date_provider.dart';
 
-/// 后端是否在线（能否连上）
-final backendOnlineProvider = StateProvider<bool>((ref) => true);
-
 /// 解析动态列表，分出自己和对方的
 Map<String, Moment?> _splitMoments(List<Moment> moments, String myUid, String partnerUid) {
   Moment? myMoment;
@@ -39,8 +36,6 @@ final FutureProvider<Map<String, Moment?>> dayMomentsProvider = FutureProvider<M
 
   if (cached != null) {
     // 缓存命中（包括空数据）→ 秒返，后台静默刷新
-    ref.read(backendOnlineProvider.notifier).state = true;
-
     // 后台拉取最新（不阻塞，有变化才刷新 UI）
     final apiService = ref.read(apiServiceProvider);
     final oldJson = jsonEncode(cached);
@@ -67,10 +62,8 @@ final FutureProvider<Map<String, Moment?>> dayMomentsProvider = FutureProvider<M
     final moments = await apiService.getDayMoments(dateStr, [currentUser.uid, partner.uid]);
     // 即使空也保存，下次秒开
     await CacheService.saveDayMoments(dateStr, moments.map((m) => m.toJson()).toList());
-    ref.read(backendOnlineProvider.notifier).state = true;
     return _splitMoments(moments, currentUser.uid, partner.uid);
   } catch (_) {
-    ref.read(backendOnlineProvider.notifier).state = false;
     return {'myMoment': null, 'partnerMoment': null};
   }
 });
@@ -84,7 +77,6 @@ final FutureProvider<List<DateTime>> markedDatesProvider = FutureProvider<List<D
 
   if (cached != null) {
     // 缓存命中（包括空数据）→ 秒返
-    ref.read(backendOnlineProvider.notifier).state = true;
     return cached.map((s) => DateHelper.parseDateStr(s)).toList();
   }
 
@@ -93,10 +85,8 @@ final FutureProvider<List<DateTime>> markedDatesProvider = FutureProvider<List<D
     final apiService = ref.read(apiServiceProvider);
     final dateStrs = await apiService.getDatesWithMoments(currentUser.uid);
     await CacheService.saveMarkedDates(currentUser.uid, dateStrs);
-    ref.read(backendOnlineProvider.notifier).state = true;
     return dateStrs.map((s) => DateHelper.parseDateStr(s)).toList();
   } catch (_) {
-    ref.read(backendOnlineProvider.notifier).state = false;
     return [];
   }
 });

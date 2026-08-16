@@ -185,7 +185,6 @@ class _TopicDetailScreenState extends ConsumerState<TopicDetailScreen> {
                                                   'avatar_${post.authorId}_${_avatarFor(post.authorId)}'),
                                               child: AvatarWidget(
                                                 avatarUrl: _avatarFor(post.authorId),
-                                                nickname: _nickFor(post.authorId),
                                                 size: 28,
                                               ),
                                             ),

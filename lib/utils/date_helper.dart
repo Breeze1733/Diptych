@@ -34,19 +34,9 @@ class DateHelper {
     return a.year == b.year && a.month == b.month && a.day == b.day;
   }
 
-  /// 判断是否是今天（以 6:00 为界）
-  static bool isToday(DateTime date) {
-    return isSameDay(date, effectiveNow);
-  }
-
   /// 日期字符串转 DateTime
   static DateTime parseDateStr(String dateStr) {
     return DateFormat('yyyy-MM-dd').parse(dateStr);
-  }
-
-  /// 格式化时间戳为简短时间
-  static String toShortTime(DateTime date) {
-    return DateFormat('HH:mm').format(date.toLocal());
   }
 
   /// 日期时间：统一显示为 "yyyy-MM-dd HH:mm"

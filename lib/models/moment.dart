@@ -36,16 +36,6 @@ class Comment {
       'created_at': DateHelper.toIsoString(createdAt),
     };
   }
-
-  Comment copyWith({String? id, String? authorId, String? content, String? replyTo, DateTime? createdAt}) {
-    return Comment(
-      id: id ?? this.id,
-      authorId: authorId ?? this.authorId,
-      content: content ?? this.content,
-      replyTo: replyTo ?? this.replyTo,
-      createdAt: createdAt ?? this.createdAt,
-    );
-  }
 }
 
 /// 动态数据模型（每天每条用户一条）
@@ -130,29 +120,5 @@ class Moment {
       'comments': comments.map((c) => c.toJson()).toList(),
       'updated_at': DateHelper.toIsoString(updatedAt),
     };
-  }
-
-  Moment copyWith({
-    String? id,
-    String? dateStr,
-    String? authorId,
-    List<String>? imageUrls,
-    String? feeling,
-    int? mood,
-    List<Comment>? comments,
-    DateTime? createdAt,
-    DateTime? updatedAt,
-  }) {
-    return Moment(
-      id: id ?? this.id,
-      dateStr: dateStr ?? this.dateStr,
-      authorId: authorId ?? this.authorId,
-      imageUrls: imageUrls ?? this.imageUrls,
-      feeling: feeling ?? this.feeling,
-      mood: mood ?? this.mood,
-      comments: comments ?? this.comments,
-      createdAt: createdAt ?? this.createdAt,
-      updatedAt: updatedAt ?? this.updatedAt,
-    );
   }
 }

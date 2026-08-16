@@ -58,7 +58,6 @@ class MomentCard extends StatelessWidget {
             children: [
               AvatarWidget(
                 avatarUrl: avatarUrl,
-                nickname: nickname,
                 size: 32,
               ),
               const SizedBox(width: 8),
