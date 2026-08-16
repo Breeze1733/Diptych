@@ -4,11 +4,11 @@
 
 # Diptych
 
-> **双人私密日记** — 两个人，各自的视角，一起的日子。
+双人日记 —— 两个人，各自的视角，共同的日子。
 
-Diptych 是一款专为两人设计的私密日记 App。每天双方各记一条日记，包含照片、心情分与文字感受；主界面以**左右分屏**同时展示两人的当日内容，如同一幅双联画（Diptych）。
-
-仅支持 Android · 数据存储于自托管后端，不经过任何第三方云服务。
+><div align="left">
+>Diptych 是一款专为两人设计的日记 App。每天双方各记一条日记，包含照片、心情分与文字感受；主界面以左右分屏同时展示两人的当日内容，如同一幅双联画 —— Diptych。
+></div>
 
 [![Flutter](https://img.shields.io/badge/Flutter-3.x-02569B?style=flat-square&logo=flutter&logoColor=white)]()
 [![Dart](https://img.shields.io/badge/Dart-3.12%2B-0175C2?style=flat-square&logo=dart&logoColor=white)]()
