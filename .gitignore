@@ -8,7 +8,7 @@ lib/constants/api_config.dart
 
 # 临时文件
 temp/
-test/
+latest-apk/
 
 # Spec workflow
 .spec-workflow/

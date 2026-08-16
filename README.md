@@ -20,10 +20,23 @@ Diptych 是一款专为两人设计的私密日记 App。每天双方各记一�
 
 </div>
 
+## 预览
+
+<div align="center">
+  <img src="assets/homepage.png" width="30%" alt="软件主页" />
+  &nbsp;&nbsp;&nbsp;
+  <img src="assets/moment.png" width="30%" alt="分屏日记" />
+  &nbsp;&nbsp;&nbsp;
+  <img src="assets/topic.png" width="30%" alt="话题广场" />
+  <br/>
+  <em>软件主页 · 分屏日记 · 话题广场</em>
+</div>
+
 ---
 
 ## 目录
 
+- [预览](#预览)
 - [功能特性](#功能特性)
 - [技术栈](#技术栈)
 - [项目结构](#项目结构)
