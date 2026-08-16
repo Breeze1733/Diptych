@@ -35,7 +35,6 @@ Diptych 是一款专为两人设计的私密日记 App。每天双方各记一�
   - [安装依赖](#安装依赖)
   - [本地运行](#本地运行)
   - [构建 Release APK](#构建-release-apk)
-- [后端配置](#后端配置)
 - [隐私与数据](#隐私与数据)
 - [贡献指南](#贡献指南)
 - [License](#license)
@@ -150,9 +149,11 @@ class Secrets {
 }
 ```
 
+> 登录时通过 `Secrets.validateKey()` 校验密钥，仓库内不包含任何真实密钥。
+
 ### 配置后端地址
 
-在 `lib/constants/` 下创建 `api_config.dart`（该文件已在 `.gitignore` 中排除，不会提交到仓库），用于维护实际的后端地址：
+App 对接自托管 REST API，后端代码不在本仓库中。在 `lib/constants/` 下创建 `api_config.dart`（该文件已在 `.gitignore` 中排除，不会提交到仓库）：
 
 ```dart
 class ApiConfig {
@@ -166,7 +167,7 @@ class ApiConfig {
 }
 ```
 
-代码中所有网络请求均通过 `ApiConfig.apiBaseUrl` / `ApiConfig.siteUrl` 引用，仓库内不包含任何实际地址。
+> 全部网络请求均通过 `ApiConfig.apiBaseUrl` / `ApiConfig.siteUrl` 读取地址，无需逐个修改，仓库内不包含任何实际后端地址。
 
 ### 安装依赖
 
@@ -187,18 +188,6 @@ flutter build apk --release
 ```
 
 产物路径：`build/app/outputs/flutter-apk/app-release.apk`
-
-## 后端配置
-
-App 对接自托管 REST API，后端代码不在本仓库中。实际后端地址不写入仓库，而是通过本地维护的 [api_config.dart](lib/constants/api_config.dart)（已被 `.gitignore` 排除）统一配置。
-
-所有服务均从 `ApiConfig` 读取地址，无需逐个修改：
-
-- [lib/services/api_service.dart](lib/services/api_service.dart)
-- [lib/services/storage_service.dart](lib/services/storage_service.dart)
-- [lib/services/topic_service.dart](lib/services/topic_service.dart)
-- [lib/services/update_service.dart](lib/services/update_service.dart)
-- [lib/utils/url_helper.dart](lib/utils/url_helper.dart)
 
 ## 隐私与数据
 
