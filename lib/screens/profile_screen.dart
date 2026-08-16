@@ -279,7 +279,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
   // ─── 退出登录 ───
 
-  Future<void> _handleLogout(BuildContext context, WidgetRef ref) async {
+  Future<void> _handleLogout(WidgetRef ref) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -301,6 +301,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     if (confirmed == true) {
       final logout = ref.read(logoutActionProvider);
       await logout();
+      if (!mounted) return;
+      // 清空导航栈回到根路由：此时根路由已因登出切换为登录页
+      Navigator.of(context).popUntil((route) => route.isFirst);
     }
   }
 
@@ -338,7 +341,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 // 退出登录（小字，不常用）
                 Center(
                   child: GestureDetector(
-                    onTap: () => _handleLogout(context, ref),
+                    onTap: () => _handleLogout(ref),
                     child: Text(
                       '退出登录',
                       style: TextStyle(fontSize: 13, color: Colors.grey[400]),
