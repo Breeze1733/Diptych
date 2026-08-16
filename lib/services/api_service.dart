@@ -2,10 +2,11 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../models/app_user.dart';
 import '../models/moment.dart';
+import '../constants/api_config.dart';
 
 /// 后端 API 服务 — 替换 Firebase Firestore
 class ApiService {
-  static const String _baseUrl = 'https://example.com/api';
+  static const String _baseUrl = ApiConfig.apiBaseUrl;
 
   // ─── 用户相关 ───
 

@@ -31,6 +31,7 @@ Diptych 是一款专为两人设计的私密日记 App。每天双方各记一�
   - [环境要求](#环境要求)
   - [获取代码](#获取代码)
   - [配置密钥](#配置密钥)
+  - [配置后端地址](#配置后端地址)
   - [安装依赖](#安装依赖)
   - [本地运行](#本地运行)
   - [构建 Release APK](#构建-release-apk)
@@ -149,6 +150,24 @@ class Secrets {
 }
 ```
 
+### 配置后端地址
+
+在 `lib/constants/` 下创建 `api_config.dart`（该文件已在 `.gitignore` 中排除，不会提交到仓库），用于维护实际的后端地址：
+
+```dart
+class ApiConfig {
+  ApiConfig._();
+
+  /// 站点根地址（用于拼接图片等相对路径）
+  static const String siteUrl = '<你的站点根地址>';
+
+  /// REST API 基础地址
+  static const String apiBaseUrl = '$siteUrl/api';
+}
+```
+
+代码中所有网络请求均通过 `ApiConfig.apiBaseUrl` / `ApiConfig.siteUrl` 引用，仓库内不包含任何实际地址。
+
 ### 安装依赖
 
 ```bash
@@ -171,9 +190,9 @@ flutter build apk --release
 
 ## 后端配置
 
-App 对接自托管 REST API，基础地址为 `https://example.com/api`。后端代码不在本仓库中。
+App 对接自托管 REST API，后端代码不在本仓库中。实际后端地址不写入仓库，而是通过本地维护的 [api_config.dart](lib/constants/api_config.dart)（已被 `.gitignore` 排除）统一配置。
 
-如需对接自己的后端，修改以下文件中的 `_baseUrl` 或 `baseUrl` 常量：
+所有服务均从 `ApiConfig` 读取地址，无需逐个修改：
 
 - [lib/services/api_service.dart](lib/services/api_service.dart)
 - [lib/services/storage_service.dart](lib/services/storage_service.dart)

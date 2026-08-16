@@ -1,9 +1,10 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../models/topic.dart';
+import '../constants/api_config.dart';
 
 class TopicService {
-  static const String _baseUrl = 'https://example.com/api';
+  static const String _baseUrl = ApiConfig.apiBaseUrl;
 
   Future<List<Topic>> getTopics() async {
     final res = await http.get(Uri.parse('$_baseUrl/topics'));

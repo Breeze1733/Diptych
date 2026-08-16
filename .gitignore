@@ -3,6 +3,9 @@
 # 密钥文件（包含硬编码密钥，绝对不能提交）
 lib/constants/secrets.dart
 
+# 后端地址配置（本地维护，不暴露实际地址）
+lib/constants/api_config.dart
+
 # 临时文件
 temp/
 test/

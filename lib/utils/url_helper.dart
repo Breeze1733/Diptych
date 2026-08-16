@@ -1,6 +1,8 @@
+import '../constants/api_config.dart';
+
 /// URL 工具
 class UrlHelper {
-  static const String _siteUrl = 'https://example.com';
+  static const String _siteUrl = ApiConfig.siteUrl;
 
   /// 补全相对路径为完整 URL
   static String normalize(String url) {

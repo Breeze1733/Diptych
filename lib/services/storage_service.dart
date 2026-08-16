@@ -2,10 +2,11 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import '../utils/url_helper.dart';
+import '../constants/api_config.dart';
 
 /// 图片上传服务
 class StorageService {
-  static const String _baseUrl = 'https://example.com/api';
+  static const String _baseUrl = ApiConfig.apiBaseUrl;
 
   // 复用 HTTP 连接，避免每次建立新连接
   final http.Client _client = http.Client();

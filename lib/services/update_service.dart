@@ -5,6 +5,7 @@ import 'package:open_filex/open_filex.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../constants/api_config.dart';
 
 /// 版本信息
 class VersionInfo {
@@ -32,7 +33,7 @@ class VersionInfo {
 
 /// 更新检测与安装服务
 class UpdateService {
-  static const String baseUrl = 'https://example.com/api';
+  static const String baseUrl = ApiConfig.apiBaseUrl;
   final http.Client _client = http.Client();
 
   dynamic _safeDecode(String body) {
