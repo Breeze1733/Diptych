@@ -10,6 +10,7 @@ import '../providers/auth_provider.dart';
 import '../providers/wallpaper_provider.dart';
 import '../services/update_service.dart';
 import '../utils/cache_helper.dart';
+import '../utils/wakelock_helper.dart';
 import 'wallpaper_settings_screen.dart';
 
 /// 个人设置页：修改用户信息 + 检查更新
@@ -85,6 +86,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
   Future<void> _handleSave() async {
     setState(() => _isSaving = true);
+    if (_avatarFile != null) {
+      await WakelockHelper.acquire(timeout: const Duration(minutes: 5));
+    }
     try {
       final user = ref.read(currentUserProvider);
       if (user == null) return;
@@ -104,10 +108,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         avatarUrl: avatarUrl,
       );
 
-      ref.read(currentUserProvider.notifier).state = user.copyWith(
+      ref.read(currentUserProvider.notifier).setUser(user.copyWith(
         nickname: newNickname.isNotEmpty ? newNickname : user.nickname,
         avatarUrl: avatarUrl ?? user.avatarUrl,
-      );
+      ));
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -120,6 +124,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         SnackBar(content: Text('保存失败: $e'), backgroundColor: Colors.red),
       );
     } finally {
+      if (_avatarFile != null) {
+        await WakelockHelper.release();
+      }
       if (mounted) setState(() => _isSaving = false);
     }
   }
@@ -157,7 +164,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     }
   }
 
-  /// 下载并安装（仅设置页内可触发）
+  /// 下载并安装（交给 Android 系统 DownloadManager 处理，状态栏原生显示进度，切后台不中断）
   Future<void> _downloadAndInstall() async {
     final latest = _latestVersion;
     if (latest == null || _isDownloading) return;
@@ -165,37 +172,63 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     setState(() {
       _isDownloading = true;
       _downloadProgress = 0;
-      _updateStatus = '正在下载...';
+      _updateStatus = '正在发起系统后台下载，状态栏已显示进度...';
     });
 
-    String? apkPath;
+    int? downloadId;
 
     try {
-      apkPath = await _updateService.downloadApk(latest.downloadUrl, (progress) {
-        setState(() {
-          _downloadProgress = progress;
-          _updateStatus = '正在下载 ${(progress * 100).toStringAsFixed(0)}%';
-        });
-      });
+      downloadId = await _updateService.startSystemDownload(
+        latest.downloadUrl,
+        version: latest.version,
+      );
 
-      setState(() {
-        _isDownloading = false;
-        _updateStatus = '正在安装...';
-      });
+      // 轮询下载进度更新界面；即使切到后台或退出页面，系统也依然在后台平稳下载
+      while (_isDownloading && mounted) {
+        await Future.delayed(const Duration(milliseconds: 500));
+        if (!mounted) break;
 
-      await _updateService.installApk(apkPath);
+        final status = await _updateService.getSystemDownloadStatus(downloadId);
+        if (status.isSuccessful) {
+          final filePath = status.filePath;
+          setState(() {
+            _isDownloading = false;
+            _downloadProgress = 1.0;
+            _updateStatus = '下载完成，正在调起系统安装...';
+          });
 
-      // 安装完成后，下次打开 APP 时自动清理安装包
-      setState(() => _updateStatus = '请在安装完成后重新打开 APP');
-      // 记录待清理的文件路径
-      _updateService.markForCleanup(apkPath);
+          // 标记待清理（下次启动时自动彻底删除安装包）
+          await _updateService.markForCleanup(downloadId, filePath);
+
+          if (filePath != null) {
+            await _updateService.installApk(filePath);
+          }
+          break;
+        } else if (status.isFailed) {
+          setState(() {
+            _isDownloading = false;
+            _updateStatus = '下载失败，请检查网络后重试';
+          });
+          await _updateService.removeSystemDownload(downloadId);
+          break;
+        } else if (status.isRunning) {
+          setState(() {
+            _downloadProgress = status.progress;
+            final percent = (status.progress * 100).toStringAsFixed(0);
+            _updateStatus = '系统后台下载中 $percent% (切后台不影响)';
+          });
+        }
+      }
     } catch (e) {
-      setState(() {
-        _isDownloading = false;
-        _updateStatus = '更新失败: $e';
-      });
-      // 清理失败的下载
-      if (apkPath != null) _updateService.deleteApk(apkPath);
+      if (mounted) {
+        setState(() {
+          _isDownloading = false;
+          _updateStatus = '下载异常: $e';
+        });
+      }
+      if (downloadId != null) {
+        _updateService.removeSystemDownload(downloadId);
+      }
     }
   }
 

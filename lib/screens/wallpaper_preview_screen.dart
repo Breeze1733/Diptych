@@ -66,7 +66,7 @@ class _WallpaperPreviewScreenState extends ConsumerState<WallpaperPreviewScreen>
         diaryOpacity: isDiary ? _opacity : null,
         topicOpacity: isDiary ? null : _opacity,
       );
-      ref.read(wallpaperSettingsProvider.notifier).state = newSettings;
+      ref.read(wallpaperSettingsProvider.notifier).setSettings(newSettings);
       await saveWallpaperSettings(newSettings);
       await CacheService.saveUser(_withWallpaper(user, newSettings));
 

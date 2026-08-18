@@ -20,7 +20,15 @@ import 'profile_screen.dart';
 import 'topics_screen.dart';
 
 /// 是否已静默检查过更新（仅触发一次）
-final _autoUpdateCheckedProvider = StateProvider<bool>((ref) => false);
+class AutoUpdateCheckedNotifier extends Notifier<bool> {
+  @override
+  bool build() => false;
+
+  void markChecked() => state = true;
+}
+
+final _autoUpdateCheckedProvider =
+    NotifierProvider<AutoUpdateCheckedNotifier, bool>(AutoUpdateCheckedNotifier.new);
 
 class _CommentDialogResult {
   final String content;
@@ -50,7 +58,7 @@ class FeedScreen extends ConsumerWidget {
     // 用户数据加载完成后，静默检查更新（仅一次）
     final hasChecked = ref.watch(_autoUpdateCheckedProvider);
     if (!hasChecked && loadUsersAsync is AsyncData) {
-      ref.read(_autoUpdateCheckedProvider.notifier).state = true;
+      ref.read(_autoUpdateCheckedProvider.notifier).markChecked();
       _silentCheckUpdate(context);
     }
 
@@ -210,7 +218,7 @@ class FeedScreen extends ConsumerWidget {
   /// 打开日历选择器
   Future<void> _openCalendar(BuildContext context, WidgetRef ref) async {
     final markedDatesAsync = ref.read(markedDatesProvider);
-    final markedDates = markedDatesAsync.valueOrNull ?? [];
+    final markedDates = markedDatesAsync.value ?? [];
 
     final picked = await CalendarPicker.show(
       context,
@@ -219,7 +227,7 @@ class FeedScreen extends ConsumerWidget {
     );
 
     if (picked != null) {
-      ref.read(selectedDateProvider.notifier).state = picked;
+      ref.read(selectedDateProvider.notifier).setDate(picked);
     }
   }
 
@@ -392,9 +400,17 @@ class FeedScreen extends ConsumerWidget {
         await _updateCachedMomentComments(ref, moment.id, newComments);
         _refresh(ref);
       } catch (e) {
+        // 上传失败自动保存为草稿，避免用户输入的内容丢失
+        try {
+          await DraftService.saveComment(draftKey, result.content);
+        } catch (_) {}
+
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('评论失败: $e'), backgroundColor: Colors.red),
+            SnackBar(
+              content: Text('评论失败，已自动为您保存为草稿: $e'),
+              backgroundColor: Colors.red,
+            ),
           );
         }
       }

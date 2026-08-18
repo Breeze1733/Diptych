@@ -9,6 +9,7 @@ import '../services/cache_service.dart';
 import '../services/draft_service.dart';
 import '../services/storage_service.dart';
 import '../utils/date_helper.dart';
+import '../utils/wakelock_helper.dart';
 import '../widgets/photo_grid_picker.dart';
 
 /// 发布/编辑动态页
@@ -146,6 +147,9 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
   Future<void> _handleSave() async {
     setState(() => _isSaving = true);
 
+    // 申请 CPU 唤醒锁（默认 10 分钟），防止传图过程中用户切后台/锁屏时被系统挂起
+    await WakelockHelper.acquire(timeout: const Duration(minutes: 10));
+
     try {
       final currentUser = ref.read(currentUserProvider);
       if (currentUser == null) throw Exception('未登录');
@@ -219,11 +223,29 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
       );
       Navigator.pop(context, true);
     } catch (e) {
+      // 发布失败时自动保存草稿（文本、心情、图片及断点续传进度），防止用户内容丢失
+      if (!_isEdit) {
+        try {
+          await DraftService.save(
+            _dateStr,
+            _feelingController.text.trim(),
+            _mood,
+            images: _localFiles,
+          );
+          await DraftService.saveUploadProgress(_dateStr, _currentUploadProgress());
+        } catch (_) {}
+      }
+
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${AppStrings.uploadFailed}: $e'), backgroundColor: Colors.red),
+        SnackBar(
+          content: Text('${AppStrings.uploadFailed}，已自动保存为草稿: $e'),
+          backgroundColor: Colors.red,
+        ),
       );
     } finally {
+      // 无论成功还是失败，务必释放 CPU 唤醒锁
+      await WakelockHelper.release();
       if (mounted) setState(() => _isSaving = false);
     }
   }

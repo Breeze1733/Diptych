@@ -15,20 +15,44 @@ final apiServiceProvider = Provider<ApiService>((ref) => ApiService());
 final storageServiceProvider = Provider<StorageService>((ref) => StorageService());
 
 /// 当前登录用户角色 ("A" 或 "B")，null 表示未登录
-final currentUserRoleProvider = StateProvider<String?>((ref) => null);
+class CurrentUserRoleNotifier extends Notifier<String?> {
+  @override
+  String? build() => null;
+
+  void setRole(String? role) => state = role;
+}
+
+final currentUserRoleProvider =
+    NotifierProvider<CurrentUserRoleNotifier, String?>(CurrentUserRoleNotifier.new);
 
 /// 当前用户信息
-final currentUserProvider = StateProvider<AppUser?>((ref) => null);
+class CurrentUserNotifier extends Notifier<AppUser?> {
+  @override
+  AppUser? build() => null;
+
+  void setUser(AppUser? user) => state = user;
+}
+
+final currentUserProvider =
+    NotifierProvider<CurrentUserNotifier, AppUser?>(CurrentUserNotifier.new);
 
 /// 对方信息
-final partnerUserProvider = StateProvider<AppUser?>((ref) => null);
+class PartnerUserNotifier extends Notifier<AppUser?> {
+  @override
+  AppUser? build() => null;
+
+  void setUser(AppUser? user) => state = user;
+}
+
+final partnerUserProvider =
+    NotifierProvider<PartnerUserNotifier, AppUser?>(PartnerUserNotifier.new);
 
 /// 尝试自动登录：从 SharedPreferences 读取已保存的角色
 final autoLoginProvider = FutureProvider<String?>((ref) async {
   final authService = ref.read(authServiceProvider);
   final role = await authService.getUserRole();
   if (role != null) {
-    ref.read(currentUserRoleProvider.notifier).state = role;
+    ref.read(currentUserRoleProvider.notifier).setRole(role);
   }
   return role;
 });
@@ -40,7 +64,7 @@ final loginActionProvider = Provider<Future<String?> Function(String key)>((ref)
     final role = authService.validateKey(key);
     if (role != null) {
       await authService.saveUserRole(role);
-      ref.read(currentUserRoleProvider.notifier).state = role;
+      ref.read(currentUserRoleProvider.notifier).setRole(role);
     }
     return role;
   };
@@ -51,9 +75,9 @@ final logoutActionProvider = Provider<Future<void> Function()>((ref) {
   return () async {
     final authService = ref.read(authServiceProvider);
     await authService.logout();
-    ref.read(currentUserRoleProvider.notifier).state = null;
-    ref.read(currentUserProvider.notifier).state = null;
-    ref.read(partnerUserProvider.notifier).state = null;
+    ref.read(currentUserRoleProvider.notifier).setRole(null);
+    ref.read(currentUserProvider.notifier).setUser(null);
+    ref.read(partnerUserProvider.notifier).setUser(null);
   };
 });
 
@@ -65,10 +89,10 @@ final loadUsersProvider = FutureProvider<void>((ref) async {
   // 1. 先尝试从缓存加载（毫秒级，不阻塞 UI）
   final cachedCurrent = await CacheService.loadUser(role);
   if (cachedCurrent != null) {
-    ref.read(currentUserProvider.notifier).state = cachedCurrent;
+    ref.read(currentUserProvider.notifier).setUser(cachedCurrent);
     final cachedPartner = await CacheService.loadUser(cachedCurrent.partnerUid);
     if (cachedPartner != null) {
-      ref.read(partnerUserProvider.notifier).state = cachedPartner;
+      ref.read(partnerUserProvider.notifier).setUser(cachedPartner);
     }
     // 缓存命中 → 立即返回，后台静默更新
     final apiService = ref.read(apiServiceProvider);
@@ -81,11 +105,11 @@ final loadUsersProvider = FutureProvider<void>((ref) async {
   await apiService.ensurePresetUsers();
 
   final currentUser = await apiService.getUser(role);
-  ref.read(currentUserProvider.notifier).state = currentUser;
+  ref.read(currentUserProvider.notifier).setUser(currentUser);
   await CacheService.saveUser(currentUser);
 
   final partner = await apiService.getUser(currentUser.partnerUid);
-  ref.read(partnerUserProvider.notifier).state = partner;
+  ref.read(partnerUserProvider.notifier).setUser(partner);
   await CacheService.saveUser(partner);
 });
 

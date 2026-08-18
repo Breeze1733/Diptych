@@ -98,9 +98,17 @@ class _TopicPostScreenState extends ConsumerState<TopicPostScreen> {
       );
       Navigator.pop(context, true);
     } catch (e) {
+      // 发布失败时自动保存草稿，确保用户输入的内容不丢失
+      try {
+        await DraftService.saveTopicPost(_draftKey, content);
+      } catch (_) {}
+
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('发布失败: $e'), backgroundColor: Colors.red),
+        SnackBar(
+          content: Text('发布失败，已自动为您保存为草稿: $e'),
+          backgroundColor: Colors.red,
+        ),
       );
     } finally {
       if (mounted) setState(() => _isSaving = false);

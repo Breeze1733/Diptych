@@ -8,6 +8,7 @@ import '../models/app_user.dart';
 import '../providers/auth_provider.dart';
 import '../providers/wallpaper_provider.dart';
 import '../services/cache_service.dart';
+import '../utils/wakelock_helper.dart';
 import 'wallpaper_preview_screen.dart';
 import 'wallpaper_zoom_screen.dart';
 
@@ -47,6 +48,8 @@ class _WallpaperSettingsScreenState extends ConsumerState<WallpaperSettingsScree
     if (file == null) return;
 
     setState(() => _uploading = type);
+    await WakelockHelper.acquire(timeout: const Duration(minutes: 5));
+
     try {
       final storageService = ref.read(storageServiceProvider);
       final apiService = ref.read(apiServiceProvider);
@@ -71,7 +74,7 @@ class _WallpaperSettingsScreenState extends ConsumerState<WallpaperSettingsScree
         diaryUrl: type == WallpaperType.diary ? url : null,
         topicUrl: type == WallpaperType.topic ? url : null,
       );
-      ref.read(wallpaperSettingsProvider.notifier).state = newSettings;
+      ref.read(wallpaperSettingsProvider.notifier).setSettings(newSettings);
       await saveWallpaperSettings(newSettings);
       await CacheService.saveUser(_withWallpaper(user, newSettings));
 
@@ -99,6 +102,7 @@ class _WallpaperSettingsScreenState extends ConsumerState<WallpaperSettingsScree
         SnackBar(content: Text('上传失败: $e'), backgroundColor: Colors.red),
       );
     } finally {
+      await WakelockHelper.release();
       if (mounted) setState(() => _uploading = null);
     }
   }
@@ -150,7 +154,7 @@ class _WallpaperSettingsScreenState extends ConsumerState<WallpaperSettingsScree
       diaryOpacity: type == WallpaperType.diary ? 0.0 : null,
       topicOpacity: type == WallpaperType.topic ? 0.0 : null,
     );
-    ref.read(wallpaperSettingsProvider.notifier).state = newSettings;
+    ref.read(wallpaperSettingsProvider.notifier).setSettings(newSettings);
     await saveWallpaperSettings(newSettings);
     await CacheService.saveUser(_withWallpaper(user, newSettings));
 

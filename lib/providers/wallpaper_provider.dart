@@ -42,16 +42,23 @@ const _keyDiaryOpacity = 'wallpaper_diary_opacity';
 const _keyTopicOpacity = 'wallpaper_topic_opacity';
 
 /// 壁纸状态 Provider：启动时由 [initWallpaperProvider] 填充
-final wallpaperSettingsProvider = StateProvider<WallpaperSettings>((ref) {
-  return const WallpaperSettings();
-});
+class WallpaperSettingsNotifier extends Notifier<WallpaperSettings> {
+  @override
+  WallpaperSettings build() => const WallpaperSettings();
+
+  void setSettings(WallpaperSettings settings) => state = settings;
+}
+
+final wallpaperSettingsProvider =
+    NotifierProvider<WallpaperSettingsNotifier, WallpaperSettings>(
+        WallpaperSettingsNotifier.new);
 
 /// 启动初始化壁纸（依赖当前用户：登录后本地优先，云端兜底）。
 /// currentUser 从 null → 有值时自动重跑一次，保证登录后能取到云端壁纸。
 final initWallpaperProvider = FutureProvider<void>((ref) async {
   final user = ref.watch(currentUserProvider);
   final settings = await buildWallpaperSettings(user);
-  ref.read(wallpaperSettingsProvider.notifier).state = settings;
+  ref.read(wallpaperSettingsProvider.notifier).setSettings(settings);
   await saveWallpaperSettings(settings);
 });
 

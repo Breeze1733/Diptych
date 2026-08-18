@@ -1,10 +1,42 @@
 import 'dart:convert';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/moment.dart';
 import '../services/cache_service.dart';
 import '../utils/date_helper.dart';
+import '../utils/wakelock_helper.dart';
 import 'auth_provider.dart';
 import 'selected_date_provider.dart';
+
+/// 预加载当天日记的所有图片（双方所有图片）并在此期间申请 10 分钟 CPU WakeLock 保活
+void preloadDayImages(List<Moment> moments) {
+  final urls = <String>{};
+  for (final m in moments) {
+    for (final url in m.imageUrls) {
+      if (url.isNotEmpty) urls.add(url);
+    }
+  }
+
+  if (urls.isEmpty) return;
+
+  // 异步下载，附带 CPU 唤醒锁保活（最长 10 分钟）
+  Future(() async {
+    await WakelockHelper.acquire(timeout: const Duration(minutes: 10));
+    try {
+      final cacheManager = DefaultCacheManager();
+      await Future.wait(
+        urls.map((url) async {
+          try {
+            await cacheManager.getSingleFile(url);
+          } catch (_) {}
+        }),
+      );
+    } catch (_) {
+    } finally {
+      await WakelockHelper.release();
+    }
+  });
+}
 
 /// 解析动态列表，分出自己和对方的
 Map<String, Moment?> _splitMoments(List<Moment> moments, String myUid, String partnerUid) {
@@ -44,13 +76,16 @@ final FutureProvider<Map<String, Moment?>> dayMomentsProvider = FutureProvider<M
       final newRaw = moments.map((m) => m.toJson()).toList();
       if (jsonEncode(newRaw) != oldJson) {
         await CacheService.saveDayMoments(dateStr, newRaw);
+        preloadDayImages(moments);
         selfRef.invalidate(dayMomentsProvider);
       }
     }).catchError((_) {});
 
     if (cached.isEmpty) return {'myMoment': null, 'partnerMoment': null};
+    final moments = cached.map((e) => Moment.fromJson(e)).toList();
+    preloadDayImages(moments);
     return _splitMoments(
-      cached.map((e) => Moment.fromJson(e)).toList(),
+      moments,
       currentUser.uid,
       partner.uid,
     );
@@ -62,6 +97,7 @@ final FutureProvider<Map<String, Moment?>> dayMomentsProvider = FutureProvider<M
     final moments = await apiService.getDayMoments(dateStr, [currentUser.uid, partner.uid]);
     // 即使空也保存，下次秒开
     await CacheService.saveDayMoments(dateStr, moments.map((m) => m.toJson()).toList());
+    preloadDayImages(moments);
     return _splitMoments(moments, currentUser.uid, partner.uid);
   } catch (_) {
     return {'myMoment': null, 'partnerMoment': null};
