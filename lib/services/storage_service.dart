@@ -21,25 +21,43 @@ class StorageService {
     }
   }
 
-  /// 上传图片文件，返回下载 URL（流式上传，不预读内存）
+  /// 上传图片文件，返回下载 URL（流式上传，支持 3 次网络重连重试）
   Future<String> uploadImage(File file, String folder) async {
-    final request = http.MultipartRequest('POST', Uri.parse('$_baseUrl/upload'));
-    request.files.add(await http.MultipartFile.fromPath(
-      'file',
-      file.path,
-      filename: file.path.split('/').last,
-    ));
-    request.fields['folder'] = folder;
+    int attempts = 0;
+    const maxAttempts = 3;
 
-    final streamed = await _client.send(request);
-    final body = await streamed.stream.bytesToString();
-    final decoded = _safeDecode(streamed, body: body);
-    if (decoded['ok'] != true) {
-      throw Exception(decoded['error'] ?? '服务器返回失败');
+    while (true) {
+      attempts++;
+      http.Client? client;
+      try {
+        client = http.Client();
+        final request = http.MultipartRequest('POST', Uri.parse('$_baseUrl/upload'));
+        request.files.add(await http.MultipartFile.fromPath(
+          'file',
+          file.path,
+          filename: file.path.split('/').last,
+        ));
+        request.fields['folder'] = folder;
+
+        final streamed = await client.send(request);
+        final body = await streamed.stream.bytesToString();
+        final decoded = _safeDecode(streamed, body: body);
+        if (decoded['ok'] != true) {
+          throw Exception(decoded['error'] ?? '服务器返回失败');
+        }
+        final url = decoded['data']['url'] as String;
+        if (url.isEmpty) throw Exception('上传成功但未返回图片 URL');
+        return UrlHelper.normalize(url);
+      } catch (e) {
+        if (attempts >= maxAttempts) {
+          rethrow;
+        }
+        // 遇到网络抖动/切后台断开，等待 500ms 自动重试
+        await Future.delayed(const Duration(milliseconds: 500));
+      } finally {
+        client?.close();
+      }
     }
-    final url = decoded['data']['url'] as String;
-    if (url.isEmpty) throw Exception('上传成功但未返回图片 URL');
-    return UrlHelper.normalize(url);
   }
 
   /// 删除服务器上的旧图片

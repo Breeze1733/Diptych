@@ -5,6 +5,8 @@ import '../constants/app_theme.dart';
 import '../providers/auth_provider.dart';
 import '../services/draft_service.dart';
 import '../services/topic_service.dart';
+import '../utils/foreground_service_helper.dart';
+import '../utils/wakelock_helper.dart';
 
 /// 话题发帖页：独立页面，仅编辑文字内容。
 class TopicPostScreen extends ConsumerStatefulWidget {
@@ -89,6 +91,14 @@ class _TopicPostScreenState extends ConsumerState<TopicPostScreen> {
     if (currentUser == null) return;
 
     setState(() => _isSaving = true);
+    await WakelockHelper.acquire(timeout: const Duration(minutes: 5));
+    await ForegroundServiceHelper.start(
+      title: 'Diptych 话题发帖',
+      content: '正在发布帖子内容...',
+      maxProgress: 1,
+      progress: 0,
+    );
+
     try {
       await _service.createPost(widget.topicId, currentUser.uid, content);
       await DraftService.clearTopicPost(_draftKey);
@@ -111,6 +121,8 @@ class _TopicPostScreenState extends ConsumerState<TopicPostScreen> {
         ),
       );
     } finally {
+      await ForegroundServiceHelper.stop();
+      await WakelockHelper.release();
       if (mounted) setState(() => _isSaving = false);
     }
   }

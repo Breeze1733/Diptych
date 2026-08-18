@@ -6,8 +6,10 @@ import android.content.Intent
 import android.database.Cursor
 import android.media.MediaScannerConnection
 import android.net.Uri
+import android.os.Build
 import android.os.Environment
 import android.os.PowerManager
+import android.provider.Settings
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -23,6 +25,13 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
+        // Android 13+ (API 33+) 自动申请通知栏运行时权限，确保前台服务通知正常显示
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 101)
+            }
+        }
 
         // 1. Media Scanner Channel
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, MEDIA_CHANNEL).setMethodCallHandler { call, result ->
@@ -180,17 +189,33 @@ class MainActivity : FlutterActivity() {
                             return@setMethodCallHandler
                         }
 
+                        // 检查 Android 8.0+ 是否允许安装未知来源应用
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            if (!packageManager.canRequestPackageInstalls()) {
+                                val manageIntent = Intent(
+                                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                    android.net.Uri.parse("package:$packageName")
+                                ).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                startActivity(manageIntent)
+                                result.error("NEED_PERMISSION", "请在系统设置中允许 Diptych 安装应用", null)
+                                return@setMethodCallHandler
+                            }
+                        }
+
                         val uri = FileProvider.getUriForFile(
-                            context,
-                            "${context.packageName}.fileprovider",
+                            this,
+                            "${packageName}.fileprovider",
                             file
                         )
                         val intent = Intent(Intent.ACTION_VIEW).apply {
                             setDataAndType(uri, "application/vnd.android.package-archive")
                             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
                         }
-                        context.startActivity(intent)
+                        startActivity(intent)
                         result.success(true)
                     } catch (e: Exception) {
                         result.error("INSTALL_ERROR", e.message, null)
@@ -232,6 +257,34 @@ class MainActivity : FlutterActivity() {
                 }
                 "isHeld" -> {
                     result.success(wakeLock?.isHeld == true)
+                }
+                else -> result.notImplemented()
+            }
+        }
+
+        // 4. Foreground Service Channel (前台保活服务：获取 Linux 内核网络豁免权，防止切后台断流)
+        val FOREGROUND_CHANNEL = "com.splitmoments.split_moments/foreground_service"
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, FOREGROUND_CHANNEL).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "start" -> {
+                    val title = call.argument<String>("title") ?: "Diptych"
+                    val content = call.argument<String>("content") ?: "正在传输数据..."
+                    val maxProgress = (call.argument<Number>("maxProgress"))?.toInt() ?: 0
+                    val progress = (call.argument<Number>("progress"))?.toInt() ?: 0
+                    TransferForegroundService.startService(context, title, content, maxProgress, progress)
+                    result.success(true)
+                }
+                "update" -> {
+                    val title = call.argument<String>("title") ?: "Diptych"
+                    val content = call.argument<String>("content") ?: "正在传输数据..."
+                    val maxProgress = (call.argument<Number>("maxProgress"))?.toInt() ?: 0
+                    val progress = (call.argument<Number>("progress"))?.toInt() ?: 0
+                    TransferForegroundService.updateProgress(context, title, content, maxProgress, progress)
+                    result.success(true)
+                }
+                "stop" -> {
+                    TransferForegroundService.stopService(context)
+                    result.success(true)
                 }
                 else -> result.notImplemented()
             }

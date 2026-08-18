@@ -33,6 +33,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   bool _isDownloading = false;
   double _downloadProgress = 0;
   VersionInfo? _latestVersion;       // 检查到的最新版本；有值时下载按钮可用
+  String? _downloadedApkPath;        // 已下载完成的 APK 路径，支持随时直接点「立即安装」
 
   // 缓存相关
   String _cacheSizeText = '点击计算';
@@ -164,7 +165,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     }
   }
 
-  /// 下载并安装（交给 Android 系统 DownloadManager 处理，状态栏原生显示进度，切后台不中断）
+  /// 全速下载并安装（直连流式满速下载 + 10 分钟 WakeLock 后台防中断）
   Future<void> _downloadAndInstall() async {
     final latest = _latestVersion;
     if (latest == null || _isDownloading) return;
@@ -172,62 +173,46 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     setState(() {
       _isDownloading = true;
       _downloadProgress = 0;
-      _updateStatus = '正在发起系统后台下载，状态栏已显示进度...';
+      _updateStatus = '正在全速下载...';
     });
 
-    int? downloadId;
+    String? apkPath;
 
     try {
-      downloadId = await _updateService.startSystemDownload(
+      apkPath = await _updateService.downloadApk(
         latest.downloadUrl,
-        version: latest.version,
+        onProgress: (progress, downloaded, total) {
+          if (!mounted) return;
+          final percent = (progress * 100).toStringAsFixed(0);
+          final downloadedMB = (downloaded / (1024 * 1024)).toStringAsFixed(1);
+          final totalMB = (total / (1024 * 1024)).toStringAsFixed(1);
+          setState(() {
+            _downloadProgress = progress;
+            _updateStatus = '正在下载 $percent% ($downloadedMB MB / $totalMB MB)';
+          });
+        },
       );
 
-      // 轮询下载进度更新界面；即使切到后台或退出页面，系统也依然在后台平稳下载
-      while (_isDownloading && mounted) {
-        await Future.delayed(const Duration(milliseconds: 500));
-        if (!mounted) break;
+      setState(() {
+        _isDownloading = false;
+        _downloadProgress = 1.0;
+        _downloadedApkPath = apkPath;
+        _updateStatus = '下载完成，已调起安装。若未弹出可直接点击「立即安装」';
+      });
 
-        final status = await _updateService.getSystemDownloadStatus(downloadId);
-        if (status.isSuccessful) {
-          final filePath = status.filePath;
-          setState(() {
-            _isDownloading = false;
-            _downloadProgress = 1.0;
-            _updateStatus = '下载完成，正在调起系统安装...';
-          });
+      // 标记待清理（下次启动时自动彻底删除安装包）
+      await _updateService.markForCleanup(apkPath);
 
-          // 标记待清理（下次启动时自动彻底删除安装包）
-          await _updateService.markForCleanup(downloadId, filePath);
-
-          if (filePath != null) {
-            await _updateService.installApk(filePath);
-          }
-          break;
-        } else if (status.isFailed) {
-          setState(() {
-            _isDownloading = false;
-            _updateStatus = '下载失败，请检查网络后重试';
-          });
-          await _updateService.removeSystemDownload(downloadId);
-          break;
-        } else if (status.isRunning) {
-          setState(() {
-            _downloadProgress = status.progress;
-            final percent = (status.progress * 100).toStringAsFixed(0);
-            _updateStatus = '系统后台下载中 $percent% (切后台不影响)';
-          });
-        }
-      }
+      await _updateService.installApk(apkPath);
     } catch (e) {
       if (mounted) {
         setState(() {
           _isDownloading = false;
-          _updateStatus = '下载异常: $e';
+          _updateStatus = '下载失败: $e';
         });
       }
-      if (downloadId != null) {
-        _updateService.removeSystemDownload(downloadId);
+      if (apkPath != null) {
+        _updateService.deleteApk(apkPath);
       }
     }
   }
@@ -610,25 +595,37 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             const SizedBox(height: 8),
             Row(
               children: [
-                const Expanded(
+                Expanded(
                   child: Text(
-                    '下载更新',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+                    _downloadedApkPath != null ? '安装新版本' : '下载更新',
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
                   ),
                 ),
                 const SizedBox(width: 8),
-                // 无可用更新时置灰，有更新（_latestVersion 非空）才可点
-                FilledButton(
-                  onPressed: _latestVersion == null ? null : _downloadAndInstall,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: _latestVersion == null
-                        ? Colors.grey.shade300
-                        : AppTheme.primaryColor,
-                    foregroundColor: _latestVersion == null ? Colors.grey.shade500 : Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                if (_downloadedApkPath != null)
+                  FilledButton.icon(
+                    onPressed: () => _updateService.installApk(_downloadedApkPath!),
+                    icon: const Icon(Icons.install_mobile, size: 16),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Colors.green.shade600,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    ),
+                    label: const Text('立即安装', style: TextStyle(fontSize: 14)),
+                  )
+                else
+                  // 无可用更新时置灰，有更新（_latestVersion 非空）才可点
+                  FilledButton(
+                    onPressed: _latestVersion == null ? null : _downloadAndInstall,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: _latestVersion == null
+                          ? Colors.grey.shade300
+                          : AppTheme.primaryColor,
+                      foregroundColor: _latestVersion == null ? Colors.grey.shade500 : Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    ),
+                    child: const Text('下载更新', style: TextStyle(fontSize: 14)),
                   ),
-                  child: const Text('下载更新', style: TextStyle(fontSize: 14)),
-                ),
               ],
             ),
             if (_updateStatus.isNotEmpty) ...[

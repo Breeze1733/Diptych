@@ -9,6 +9,7 @@ import '../services/cache_service.dart';
 import '../services/draft_service.dart';
 import '../services/storage_service.dart';
 import '../utils/date_helper.dart';
+import '../utils/foreground_service_helper.dart';
 import '../utils/wakelock_helper.dart';
 import '../widgets/photo_grid_picker.dart';
 
@@ -147,8 +148,17 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
   Future<void> _handleSave() async {
     setState(() => _isSaving = true);
 
-    // 申请 CPU 唤醒锁（默认 10 分钟），防止传图过程中用户切后台/锁屏时被系统挂起
+    // 1. 申请 CPU 唤醒锁（默认 10 分钟），防止传图过程中用户切后台/锁屏时被系统挂起
     await WakelockHelper.acquire(timeout: const Duration(minutes: 10));
+
+    final localCount = _photos.where((p) => p.isLocal).length;
+    // 2. 启动 Android 前台保活服务并在通知栏常驻进度，获得 Linux 内核网络豁免权（100% 阻止切后台断流）
+    await ForegroundServiceHelper.start(
+      title: 'Diptych 日记发布',
+      content: localCount > 0 ? '正在上传照片 (0/$localCount)...' : '正在同步日记内容...',
+      maxProgress: localCount > 0 ? localCount : 1,
+      progress: 0,
+    );
 
     try {
       final currentUser = ref.read(currentUserProvider);
@@ -161,9 +171,16 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
       // 串行上传：一张一张传；失败重试时已成功的图片直接复用 URL（断点续传）
       setState(() {
         _uploadDone = 0;
-        _uploadTotal = _photos.where((p) => p.isLocal).length;
+        _uploadTotal = localCount;
       });
       final imageUrls = await _uploadImages(storageService, folder);
+
+      ForegroundServiceHelper.update(
+        title: 'Diptych 日记发布',
+        content: '图片已上传完毕，正在发布日记...',
+        maxProgress: 1,
+        progress: 1,
+      );
 
       if (_isEdit) {
         // 删除被移除的旧图
@@ -244,7 +261,8 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
         ),
       );
     } finally {
-      // 无论成功还是失败，务必释放 CPU 唤醒锁
+      // 无论成功还是失败，务必清除前台保活通知并释放 CPU 唤醒锁
+      await ForegroundServiceHelper.stop();
       await WakelockHelper.release();
       if (mounted) setState(() => _isSaving = false);
     }
@@ -266,6 +284,12 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
         urls.add(cached); // 断点续传：复用上次已上传成功的 URL
         _uploadDone++;
         if (mounted) setState(() {});
+        ForegroundServiceHelper.update(
+          title: 'Diptych 日记发布',
+          content: '正在上传照片 ($_uploadDone/$_uploadTotal)',
+          maxProgress: _uploadTotal,
+          progress: _uploadDone,
+        );
         continue;
       }
       final url = await storageService.uploadImage(p.file!, folder);
@@ -273,6 +297,12 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
       urls.add(url);
       _uploadDone++;
       if (mounted) setState(() {});
+      ForegroundServiceHelper.update(
+        title: 'Diptych 日记发布',
+        content: '正在上传照片 ($_uploadDone/$_uploadTotal)',
+        maxProgress: _uploadTotal,
+        progress: _uploadDone,
+      );
       // 每传成功一张就持久化进度，App 退出/被杀后再进来仍能断点续传
       if (!_isEdit) {
         DraftService.saveUploadProgress(_dateStr, _currentUploadProgress());
