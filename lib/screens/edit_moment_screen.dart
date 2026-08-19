@@ -11,6 +11,7 @@ import '../services/storage_service.dart';
 import '../utils/date_helper.dart';
 import '../utils/foreground_service_helper.dart';
 import '../utils/wakelock_helper.dart';
+import '../widgets/image_gallery.dart';
 import '../widgets/photo_grid_picker.dart';
 
 /// 发布/编辑动态页
@@ -221,6 +222,24 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
       if (mounted) setState(() {});
       _processUploadQueue();
       _updateKeepAliveState();
+
+      // 当所有图片传输任务全部完成（队列与进行中均为空），自动触发一次完整草稿保存
+      if (!_isEdit &&
+          _inFlightUploads.isEmpty &&
+          _pendingUploadQueue.isEmpty &&
+          mounted) {
+        try {
+          await DraftService.save(
+            _dateStr,
+            _feelingController.text.trim(),
+            _mood,
+            images: _localFiles,
+            uploaded: _currentUploadProgress(),
+          );
+        } catch (e) {
+          debugPrint('[UploadQueue] 传输完毕自动存草稿异常: $e');
+        }
+      }
     }
   }
 
@@ -572,7 +591,21 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
         .where((p) => p.isLocal && _uploadedUrls.containsKey(p.file!.path))
         .length;
 
-    return Scaffold(
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!_isEdit) {
+          // 退出页面时自动存一次完整草稿，保留已录入的文本、心情、图片及已上传的进度
+          DraftService.save(
+            _dateStr,
+            _feelingController.text.trim(),
+            _mood,
+            images: _localFiles,
+            uploaded: _currentUploadProgress(),
+          );
+        }
+      },
+      child: Scaffold(
       appBar: AppBar(
         title: Text(_isEdit ? AppStrings.editTitle : AppStrings.createTitle),
         actions: [
@@ -655,6 +688,13 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
                         : PhotoUploadStatus.idle);
               },
               onRetry: _handleRetryUpload,
+              onTap: (index) {
+                showFullScreenPreview(
+                  context,
+                  entries: _photos,
+                  initialIndex: index,
+                );
+              },
               onAdded: (files) {
                 setState(() => _photos.addAll(files.map(PhotoEntry.file)));
                 _syncDraftImages();
@@ -699,6 +739,7 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
           ],
         ),
       ),
+    ),
     );
   }
 

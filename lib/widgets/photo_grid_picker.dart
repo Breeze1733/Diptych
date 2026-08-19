@@ -31,6 +31,7 @@ class PhotoGridPicker extends StatelessWidget {
   final void Function(int oldIndex, int newIndex) onReordered;
   final PhotoUploadStatus Function(PhotoEntry entry)? statusProvider;
   final ValueChanged<int>? onRetry;
+  final ValueChanged<int>? onTap;
 
   const PhotoGridPicker({
     super.key,
@@ -40,6 +41,7 @@ class PhotoGridPicker extends StatelessWidget {
     required this.onReordered,
     this.statusProvider,
     this.onRetry,
+    this.onTap,
   });
 
   Future<void> _pickImages(BuildContext context) async {
@@ -112,6 +114,18 @@ class PhotoGridPicker extends StatelessWidget {
 
   /// 图片缩略图 + 删除角标 + 封面标记 + 上传状态
   Widget _buildPhotoTile(int index) {
+    final entry = entries[index];
+    final status = statusProvider?.call(entry) ?? PhotoUploadStatus.success;
+
+    void handleTap() {
+      if (status == PhotoUploadStatus.failed) {
+        onRetry?.call(index);
+      } else if (status == PhotoUploadStatus.success || status == PhotoUploadStatus.idle) {
+        onTap?.call(index);
+      }
+      // 上传中时不触发打开大图
+    }
+
     return LayoutBuilder(
       builder: (context, constraints) => DragTarget<int>(
         onWillAcceptWithDetails: (details) => details.data != index,
@@ -128,30 +142,34 @@ class PhotoGridPicker extends StatelessWidget {
               child: SizedBox(
                 width: constraints.maxWidth,
                 height: constraints.maxHeight,
-                child: _buildPhotoContent(index, showDeleteButton: false),
+                child: _buildPhotoContent(index, status, showDeleteButton: false),
               ),
             ),
             childWhenDragging: Opacity(
               opacity: 0.25,
-              child: _buildPhotoContent(index),
+              child: _buildPhotoContent(index, status),
             ),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                _buildPhotoContent(index),
-                if (isDragTarget)
-                  IgnorePointer(
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(
-                          color: Theme.of(context).colorScheme.primary,
-                          width: 3,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: handleTap,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  _buildPhotoContent(index, status),
+                  if (isDragTarget)
+                    IgnorePointer(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: Theme.of(context).colorScheme.primary,
+                            width: 3,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
           );
         },
@@ -159,7 +177,8 @@ class PhotoGridPicker extends StatelessWidget {
     );
   }
 
-  Widget _buildPhotoContent(int index, {bool showDeleteButton = true}) {
+  Widget _buildPhotoContent(int index, PhotoUploadStatus status,
+      {bool showDeleteButton = true}) {
     final entry = entries[index];
     final image = entry.isLocal
         ? Image.file(entry.file!, fit: BoxFit.cover)
@@ -171,8 +190,6 @@ class PhotoGridPicker extends StatelessWidget {
                 Icon(Icons.broken_image, color: Colors.grey[300]),
           );
 
-    final status = statusProvider?.call(entry) ?? PhotoUploadStatus.success;
-
     return Container(
       decoration: BoxDecoration(borderRadius: BorderRadius.circular(6)),
       clipBehavior: Clip.antiAlias,
@@ -183,7 +200,7 @@ class PhotoGridPicker extends StatelessWidget {
           // 上传中半透明遮罩与进度环
           if (status == PhotoUploadStatus.uploading)
             Container(
-              color: Colors.black26,
+              color: Colors.black38,
               alignment: Alignment.center,
               child: const SizedBox(
                 width: 24,
@@ -194,27 +211,24 @@ class PhotoGridPicker extends StatelessWidget {
                 ),
               ),
             ),
-          // 上传失败半透明遮罩与点击重试
+          // 上传失败半透明遮罩与轻点重试提示
           if (status == PhotoUploadStatus.failed)
-            Positioned.fill(
-              child: Material(
-                color: Colors.black45,
-                child: InkWell(
-                  onTap: () => onRetry?.call(index),
-                  child: const Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.refresh, color: Colors.white, size: 22),
-                        SizedBox(height: 2),
-                        Text(
-                          '重试',
-                          style: TextStyle(color: Colors.white, fontSize: 11),
-                        ),
-                      ],
-                    ),
+            Container(
+              color: Colors.black54,
+              alignment: Alignment.center,
+              child: const Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.refresh, color: Colors.white, size: 24),
+                  SizedBox(height: 3),
+                  Text(
+                    '轻点重试',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500),
                   ),
-                ),
+                ],
               ),
             ),
           // 封面标记（第一张）

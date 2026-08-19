@@ -5,6 +5,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:photo_view/photo_view_gallery.dart';
 import '../utils/file_helper.dart';
+import 'photo_grid_picker.dart';
 
 /// 弹出半透明底色的图片列表（一行三张，可滑动），点击单张进入全屏查看
 void showImageGallery(BuildContext context, List<String> urls) {
@@ -17,6 +18,25 @@ void showImageGallery(BuildContext context, List<String> urls) {
       pageBuilder: (_, _, _) => _ImageGalleryOverlay(urls: urls),
       transitionsBuilder: (_, animation, _, child) =>
           FadeTransition(opacity: animation, child: child),
+    ),
+  );
+}
+
+/// 全屏查看图片（支持网络 URL 列表 或 PhotoEntry 列表）
+void showFullScreenPreview(
+  BuildContext context, {
+  List<String>? urls,
+  List<PhotoEntry>? entries,
+  int initialIndex = 0,
+}) {
+  Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => FullScreenImage(
+        urls: urls,
+        entries: entries,
+        initialIndex: initialIndex,
+      ),
     ),
   );
 }
@@ -101,9 +121,16 @@ class _ImageGalleryOverlay extends StatelessWidget {
 /// - 单指放大后 → 图片内拖拽，到边缘继续拖 → 切页
 /// - 双指 → 以捏合点为中心缩放
 class FullScreenImage extends StatefulWidget {
-  final List<String> urls;
+  final List<String>? urls;
+  final List<PhotoEntry>? entries;
   final int initialIndex;
-  const FullScreenImage({super.key, required this.urls, this.initialIndex = 0});
+
+  const FullScreenImage({
+    super.key,
+    this.urls,
+    this.entries,
+    this.initialIndex = 0,
+  }) : assert(urls != null || entries != null, 'urls 与 entries 至少提供一个');
 
   @override
   State<FullScreenImage> createState() => _FullScreenImageState();
@@ -113,6 +140,8 @@ class _FullScreenImageState extends State<FullScreenImage> {
   late int _currentIndex;
   late PageController _pageController;
   bool _isDownloading = false;
+
+  int get _totalCount => widget.entries?.length ?? widget.urls?.length ?? 0;
 
   @override
   void initState() {
@@ -127,14 +156,35 @@ class _FullScreenImageState extends State<FullScreenImage> {
     super.dispose();
   }
 
-  String get _currentUrl => widget.urls[_currentIndex];
+  String? get _currentUrl {
+    if (widget.urls != null) return widget.urls![_currentIndex];
+    final entry = widget.entries![_currentIndex];
+    return entry.url;
+  }
+
+  bool get _canDownload => _currentUrl != null && _currentUrl!.isNotEmpty;
+
+  ImageProvider _getImageProvider(int index) {
+    if (widget.entries != null) {
+      final entry = widget.entries![index];
+      if (entry.isLocal) {
+        return FileImage(entry.file!);
+      } else {
+        return CachedNetworkImageProvider(entry.url!);
+      }
+    }
+    return CachedNetworkImageProvider(widget.urls![index]);
+  }
 
   Future<void> _download() async {
+    final url = _currentUrl;
+    if (url == null || url.isEmpty) return;
+
     setState(() => _isDownloading = true);
     try {
-      final res = await http.get(Uri.parse(_currentUrl));
+      final res = await http.get(Uri.parse(url));
       final dir = await FileHelper.getDownloadsDirectory();
-      String name = _currentUrl.split('/').last;
+      String name = url.split('/').last;
       if (name.contains('?')) name = name.substring(0, name.indexOf('?'));
       final file = File('${dir.path}/$name');
       await file.writeAsBytes(res.bodyBytes);
@@ -160,34 +210,34 @@ class _FullScreenImageState extends State<FullScreenImage> {
       appBar: AppBar(
         backgroundColor: Colors.black,
         iconTheme: const IconThemeData(color: Colors.white),
-        title: widget.urls.length > 1
+        title: _totalCount > 1
             ? Text(
-                '${_currentIndex + 1} / ${widget.urls.length}',
+                '${_currentIndex + 1} / $_totalCount',
                 style: const TextStyle(color: Colors.white, fontSize: 16),
               )
             : null,
         actions: [
-          IconButton(
-            icon: _isDownloading
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2, color: Colors.white),
-                  )
-                : const Icon(Icons.download),
-            tooltip: '下载',
-            onPressed: _isDownloading ? null : _download,
-          ),
+          if (_canDownload)
+            IconButton(
+              icon: _isDownloading
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Icon(Icons.download),
+              tooltip: '下载',
+              onPressed: _isDownloading ? null : _download,
+            ),
         ],
       ),
       body: Stack(
         children: [
           PhotoViewGallery.builder(
-            itemCount: widget.urls.length,
+            itemCount: _totalCount,
             builder: (context, index) => PhotoViewGalleryPageOptions(
-              imageProvider:
-                  CachedNetworkImageProvider(widget.urls[index]),
+              imageProvider: _getImageProvider(index),
               initialScale: PhotoViewComputedScale.contained,
               minScale: PhotoViewComputedScale.contained,
               maxScale: PhotoViewComputedScale.covered * 4.0,
@@ -212,7 +262,7 @@ class _FullScreenImageState extends State<FullScreenImage> {
             gaplessPlayback: true,
           ),
           // 底部页码指示器
-          if (widget.urls.length > 1)
+          if (_totalCount > 1)
             Positioned(
               bottom: 24,
               left: 0,
@@ -226,7 +276,7 @@ class _FullScreenImageState extends State<FullScreenImage> {
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
-                    '${_currentIndex + 1} / ${widget.urls.length}',
+                    '${_currentIndex + 1} / $_totalCount',
                     style: const TextStyle(
                         color: Colors.white70, fontSize: 13),
                   ),
