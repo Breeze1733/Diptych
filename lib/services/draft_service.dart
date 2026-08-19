@@ -53,11 +53,13 @@ class DraftService {
   }
 
   /// 保存草稿（文本 + 心情 + 图片列表，全量替换）
+  /// [uploaded] 为断点续传进度（序号 → URL），若未传入则保留已持久化的进度
   static Future<void> save(
     String dateStr,
     String feeling,
     int? mood, {
     List<File> images = const [],
+    Map<int, String>? uploaded,
   }) async {
     await _persistImages(dateStr, images);
 
@@ -67,9 +69,14 @@ class DraftService {
       if (mood != null) 'mood': mood, // ignore: use_null_aware_elements
       'image_count': images.length,
     };
-    // 保留已持久化的断点续传进度，存草稿不应清掉它
-    final uploaded = _readUploaded(prefs.getString('$_prefix$dateStr'));
-    if (uploaded.isNotEmpty) data['uploaded'] = uploaded;
+    // 优先使用传入的断点续传进度，未传入时保留已持久化的进度，存草稿不应清掉它
+    final finalUploaded =
+        uploaded ?? _readUploaded(prefs.getString('$_prefix$dateStr'));
+    if (finalUploaded.isNotEmpty) {
+      data['uploaded'] = {
+        for (final e in finalUploaded.entries) '${e.key}': e.value,
+      };
+    }
     await prefs.setString('$_prefix$dateStr', jsonEncode(data));
   }
 

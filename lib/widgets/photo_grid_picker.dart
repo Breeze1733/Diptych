@@ -3,6 +3,14 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 
+/// 图片上传状态
+enum PhotoUploadStatus {
+  idle,
+  uploading,
+  success,
+  failed,
+}
+
 /// 一张图片条目：本地新选的文件，或编辑时已上传的网络图
 class PhotoEntry {
   final File? file;
@@ -21,6 +29,8 @@ class PhotoGridPicker extends StatelessWidget {
   final ValueChanged<List<File>> onAdded;
   final ValueChanged<int> onRemoved;
   final void Function(int oldIndex, int newIndex) onReordered;
+  final PhotoUploadStatus Function(PhotoEntry entry)? statusProvider;
+  final ValueChanged<int>? onRetry;
 
   const PhotoGridPicker({
     super.key,
@@ -28,6 +38,8 @@ class PhotoGridPicker extends StatelessWidget {
     required this.onAdded,
     required this.onRemoved,
     required this.onReordered,
+    this.statusProvider,
+    this.onRetry,
   });
 
   Future<void> _pickImages(BuildContext context) async {
@@ -98,7 +110,7 @@ class PhotoGridPicker extends StatelessWidget {
     );
   }
 
-  /// 图片缩略图 + 删除角标 + 封面标记
+  /// 图片缩略图 + 删除角标 + 封面标记 + 上传状态
   Widget _buildPhotoTile(int index) {
     return LayoutBuilder(
       builder: (context, constraints) => DragTarget<int>(
@@ -159,6 +171,8 @@ class PhotoGridPicker extends StatelessWidget {
                 Icon(Icons.broken_image, color: Colors.grey[300]),
           );
 
+    final status = statusProvider?.call(entry) ?? PhotoUploadStatus.success;
+
     return Container(
       decoration: BoxDecoration(borderRadius: BorderRadius.circular(6)),
       clipBehavior: Clip.antiAlias,
@@ -166,6 +180,43 @@ class PhotoGridPicker extends StatelessWidget {
         fit: StackFit.expand,
         children: [
           image,
+          // 上传中半透明遮罩与进度环
+          if (status == PhotoUploadStatus.uploading)
+            Container(
+              color: Colors.black26,
+              alignment: Alignment.center,
+              child: const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          // 上传失败半透明遮罩与点击重试
+          if (status == PhotoUploadStatus.failed)
+            Positioned.fill(
+              child: Material(
+                color: Colors.black45,
+                child: InkWell(
+                  onTap: () => onRetry?.call(index),
+                  child: const Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.refresh, color: Colors.white, size: 22),
+                        SizedBox(height: 2),
+                        Text(
+                          '重试',
+                          style: TextStyle(color: Colors.white, fontSize: 11),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
           // 封面标记（第一张）
           if (index == 0)
             Positioned(

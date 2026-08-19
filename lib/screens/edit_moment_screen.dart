@@ -35,11 +35,27 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
   bool _isSaving = false;
   bool _isSavingDraft = false;
 
-  /// 断点续传：本次会话中已成功上传的本地图片路径 → URL，重试时直接复用
+  /// 断点续传/预上传：本地图片路径 → 已成功上传的远端 URL
   final Map<String, String> _uploadedUrls = {};
-  /// 串行上传进度（按钮上显示 上传中 已传/总数）
-  int _uploadDone = 0;
-  int _uploadTotal = 0;
+
+  /// 本地图片路径 → 当前上传状态 (uploading, success, failed, idle)
+  final Map<String, PhotoUploadStatus> _uploadStatuses = {};
+
+  /// 待上传队列（本地图片路径列表）
+  final List<String> _pendingUploadQueue = [];
+
+  /// 正在进行网络请求的本地图片路径集合
+  final Set<String> _inFlightUploads = {};
+
+  /// 已被用户删除/取消、但仍在网络上传中的图片路径集合
+  final Set<String> _cancelledUploads = {};
+
+  /// 待异步删除的远端 URL 队列
+  final List<String> _pendingDeleteUrls = [];
+  bool _isDeleting = false;
+
+  /// 是否正在持有 CPU 唤醒锁与前台保活服务
+  bool _hasForegroundKeepAlive = false;
 
   bool get _isEdit => widget.existingMoment != null;
 
@@ -71,15 +87,35 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
       // 恢复断点续传：草稿图片按序号与持久化的进度一一对应
       for (final e in draft.uploaded.entries) {
         if (e.key >= 0 && e.key < draft.images.length) {
-          _uploadedUrls[draft.images[e.key].path] = e.value;
+          final path = draft.images[e.key].path;
+          _uploadedUrls[path] = e.value;
+          _uploadStatuses[path] = PhotoUploadStatus.success;
         }
       }
     });
+
+    // 对草稿中尚未上传成功的本地图片，自动加入预上传队列
+    final unUploaded = <File>[];
+    for (final p in _photos) {
+      if (p.isLocal && !_uploadedUrls.containsKey(p.file!.path)) {
+        unUploaded.add(p.file!);
+      }
+    }
+    if (unUploaded.isNotEmpty) {
+      _enqueueUploads(unUploaded);
+    }
   }
 
   @override
   void dispose() {
     _feelingController.dispose();
+    // 页面销毁时清理未完成的上传标记与保活通知
+    _cancelledUploads.addAll(_inFlightUploads);
+    _pendingUploadQueue.clear();
+    if (_hasForegroundKeepAlive) {
+      ForegroundServiceHelper.stop();
+      WakelockHelper.release();
+    }
     super.dispose();
   }
 
@@ -105,8 +141,203 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
     return uploaded;
   }
 
+  /// 将本地文件加入上传队列
+  void _enqueueUploads(List<File> files) {
+    for (final f in files) {
+      final path = f.path;
+      if (_uploadedUrls.containsKey(path)) {
+        _uploadStatuses[path] = PhotoUploadStatus.success;
+        continue;
+      }
+      _cancelledUploads.remove(path);
+      _uploadStatuses[path] = PhotoUploadStatus.uploading;
+      if (!_pendingUploadQueue.contains(path) && !_inFlightUploads.contains(path)) {
+        _pendingUploadQueue.add(path);
+      }
+    }
+    _processUploadQueue();
+  }
+
+  /// 调度上传队列（最大并发数 2）
+  static const int _maxConcurrentUploads = 2;
+
+  Future<void> _processUploadQueue() async {
+    if (!mounted) return;
+
+    final currentUser = ref.read(currentUserProvider);
+    if (currentUser == null) return;
+    final folder = 'user_${currentUser.uid}';
+    final storageService = ref.read(storageServiceProvider);
+
+    _updateKeepAliveState();
+
+    while (_inFlightUploads.length < _maxConcurrentUploads &&
+        _pendingUploadQueue.isNotEmpty) {
+      final path = _pendingUploadQueue.removeAt(0);
+      _inFlightUploads.add(path);
+      _uploadStatuses[path] = PhotoUploadStatus.uploading;
+      if (mounted) setState(() {});
+      _updateKeepAliveState();
+
+      _uploadSingle(path, storageService, folder);
+    }
+  }
+
+  /// 单张上传
+  Future<void> _uploadSingle(
+      String path, StorageService storageService, String folder) async {
+    try {
+      final file = File(path);
+      if (!await file.exists()) {
+        throw Exception('文件不存在');
+      }
+
+      final url = await storageService.uploadImage(file, folder);
+
+      if (_cancelledUploads.contains(path)) {
+        _cancelledUploads.remove(path);
+        _inFlightUploads.remove(path);
+        _uploadStatuses.remove(path);
+        // 上传期间已被用户删除，立即清理云端孤儿文件
+        _enqueueDelete(url);
+      } else {
+        _inFlightUploads.remove(path);
+        _uploadedUrls[path] = url;
+        _uploadStatuses[path] = PhotoUploadStatus.success;
+        if (!_isEdit) {
+          DraftService.saveUploadProgress(_dateStr, _currentUploadProgress());
+        }
+      }
+    } catch (e) {
+      debugPrint('[UploadQueue] 上传失败: $path, $e');
+      _inFlightUploads.remove(path);
+      if (_cancelledUploads.contains(path)) {
+        _cancelledUploads.remove(path);
+        _uploadStatuses.remove(path);
+      } else {
+        _uploadStatuses[path] = PhotoUploadStatus.failed;
+      }
+    } finally {
+      if (mounted) setState(() {});
+      _processUploadQueue();
+      _updateKeepAliveState();
+    }
+  }
+
+  /// 删图处理
+  void _handleRemovePhoto(int index) {
+    final photo = _photos.removeAt(index);
+    setState(() {});
+
+    if (photo.isLocal) {
+      final path = photo.file!.path;
+      _pendingUploadQueue.remove(path);
+      if (_inFlightUploads.contains(path)) {
+        _cancelledUploads.add(path);
+      }
+      final existingUrl = _uploadedUrls.remove(path);
+      _uploadStatuses.remove(path);
+      if (existingUrl != null) {
+        _enqueueDelete(existingUrl);
+      }
+    }
+
+    _syncDraftImages();
+    _updateKeepAliveState();
+  }
+
+  /// 异步删除队列
+  void _enqueueDelete(String url) {
+    if (url.isEmpty) return;
+    _pendingDeleteUrls.add(url);
+    _processDeleteQueue();
+  }
+
+  Future<void> _processDeleteQueue() async {
+    if (_isDeleting || _pendingDeleteUrls.isEmpty) return;
+    _isDeleting = true;
+    _updateKeepAliveState();
+
+    try {
+      final storageService = ref.read(storageServiceProvider);
+      while (_pendingDeleteUrls.isNotEmpty) {
+        final url = _pendingDeleteUrls.removeAt(0);
+        try {
+          await storageService.deleteImage(url);
+        } catch (e) {
+          debugPrint('[DeleteQueue] 删除图片失败: $url, $e');
+        }
+      }
+    } finally {
+      _isDeleting = false;
+      _updateKeepAliveState();
+    }
+  }
+
+  /// 重试单张上传
+  void _handleRetryUpload(int index) {
+    final photo = _photos[index];
+    if (photo.isLocal) {
+      final path = photo.file!.path;
+      _uploadStatuses[path] = PhotoUploadStatus.uploading;
+      if (!_pendingUploadQueue.contains(path) && !_inFlightUploads.contains(path)) {
+        _pendingUploadQueue.add(path);
+      }
+      setState(() {});
+      _processUploadQueue();
+    }
+  }
+
+  /// 保活通知与唤醒锁生命周期同步
+  Future<void> _updateKeepAliveState() async {
+    final isBusy = _inFlightUploads.isNotEmpty ||
+        _pendingUploadQueue.isNotEmpty ||
+        _isDeleting ||
+        _isSaving;
+
+    final localCount = _photos.where((p) => p.isLocal).length;
+    final doneCount = _photos
+        .where((p) => p.isLocal && _uploadedUrls.containsKey(p.file!.path))
+        .length;
+
+    if (isBusy) {
+      if (!_hasForegroundKeepAlive) {
+        _hasForegroundKeepAlive = true;
+        await WakelockHelper.acquire(timeout: const Duration(minutes: 10));
+        await ForegroundServiceHelper.start(
+          title: 'Diptych 图片同步',
+          content: _isSaving
+              ? '正在发布日记...'
+              : (_isDeleting
+                  ? '正在清理图片...'
+                  : '正在上传照片 ($doneCount/$localCount)...'),
+          maxProgress: localCount > 0 ? localCount : 1,
+          progress: doneCount,
+        );
+      } else {
+        await ForegroundServiceHelper.update(
+          title: 'Diptych 图片同步',
+          content: _isSaving
+              ? '正在发布日记...'
+              : (_isDeleting
+                  ? '正在清理图片...'
+                  : '正在上传照片 ($doneCount/$localCount)...'),
+          maxProgress: localCount > 0 ? localCount : 1,
+          progress: doneCount,
+        );
+      }
+    } else {
+      if (_hasForegroundKeepAlive) {
+        _hasForegroundKeepAlive = false;
+        await ForegroundServiceHelper.stop();
+        await WakelockHelper.release();
+      }
+    }
+  }
+
   /// API 保存成功后更新本地缓存
-  Future<void> _updateCacheAfterSave(String authorId, List<String> imageUrls) async {
+  Future<void> _updateCacheAfterSave(
+      String authorId, List<String> imageUrls) async {
     final cached = await CacheService.loadDayMoments(_dateStr) ?? [];
     final feeling = _feelingController.text.trim();
 
@@ -124,16 +355,18 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
 
     if (_isEdit) {
       momentJson['id'] = widget.existingMoment!.id;
-      momentJson['created_at'] = DateHelper.toIsoString(widget.existingMoment!.createdAt);
-      momentJson['comments'] = widget.existingMoment!.comments.map((c) => c.toJson()).toList();
+      momentJson['created_at'] =
+          DateHelper.toIsoString(widget.existingMoment!.createdAt);
+      momentJson['comments'] =
+          widget.existingMoment!.comments.map((c) => c.toJson()).toList();
     } else {
       momentJson['created_at'] = now;
       momentJson['comments'] = <Map<String, dynamic>>[];
     }
 
     // 替换或追加到缓存列表
-    final idx = cached.indexWhere((m) =>
-        m['date_str'] == _dateStr && m['author_id'] == authorId);
+    final idx = cached.indexWhere(
+        (m) => m['date_str'] == _dateStr && m['author_id'] == authorId);
     if (idx >= 0) {
       // 保留已有的 id（创建时可能还不知道）
       momentJson['id'] ??= cached[idx]['id'];
@@ -148,17 +381,22 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
   Future<void> _handleSave() async {
     setState(() => _isSaving = true);
 
-    // 1. 申请 CPU 唤醒锁（默认 10 分钟），防止传图过程中用户切后台/锁屏时被系统挂起
-    await WakelockHelper.acquire(timeout: const Duration(minutes: 10));
+    // 0. 点击发布立即执行一次存草稿，存好草稿再发，以免发布过程中被系统杀后台导致进度完全丢失
+    if (!_isEdit) {
+      try {
+        await DraftService.save(
+          _dateStr,
+          _feelingController.text.trim(),
+          _mood,
+          images: _localFiles,
+          uploaded: _currentUploadProgress(),
+        );
+      } catch (e) {
+        debugPrint('发布前自动存草稿异常: $e');
+      }
+    }
 
-    final localCount = _photos.where((p) => p.isLocal).length;
-    // 2. 启动 Android 前台保活服务并在通知栏常驻进度，获得 Linux 内核网络豁免权（100% 阻止切后台断流）
-    await ForegroundServiceHelper.start(
-      title: 'Diptych 日记发布',
-      content: localCount > 0 ? '正在上传照片 (0/$localCount)...' : '正在同步日记内容...',
-      maxProgress: localCount > 0 ? localCount : 1,
-      progress: 0,
-    );
+    _updateKeepAliveState();
 
     try {
       final currentUser = ref.read(currentUserProvider);
@@ -166,18 +404,48 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
 
       final apiService = ref.read(apiServiceProvider);
       final storageService = ref.read(storageServiceProvider);
-      final folder = 'user_${currentUser.uid}';
 
-      // 串行上传：一张一张传；失败重试时已成功的图片直接复用 URL（断点续传）
-      setState(() {
-        _uploadDone = 0;
-        _uploadTotal = localCount;
-      });
-      final imageUrls = await _uploadImages(storageService, folder);
+      // 1. 将所有尚未成功上传的本地图片（包括失败的项）重新推入上传队列并调度
+      for (final p in _photos) {
+        if (p.isLocal) {
+          final path = p.file!.path;
+          if (!_uploadedUrls.containsKey(path) &&
+              !_pendingUploadQueue.contains(path) &&
+              !_inFlightUploads.contains(path)) {
+            _pendingUploadQueue.add(path);
+            _uploadStatuses[path] = PhotoUploadStatus.uploading;
+          }
+        }
+      }
+      _processUploadQueue();
+
+      // 2. 等待队列中所有图片上传完毕
+      while (_inFlightUploads.isNotEmpty || _pendingUploadQueue.isNotEmpty) {
+        await Future.delayed(const Duration(milliseconds: 100));
+        if (!mounted) return;
+      }
+
+      // 3. 检查是否有图片上传失败
+      final hasFailed = _photos.any(
+          (p) => p.isLocal && !_uploadedUrls.containsKey(p.file!.path));
+      if (hasFailed) {
+        throw Exception('部分图片上传失败，请点击图片重试后发布');
+      }
+
+      // 4. 按当前 UI 图片顺序组装 imageUrls
+      final imageUrls = <String>[];
+      for (final p in _photos) {
+        if (p.isLocal) {
+          final url = _uploadedUrls[p.file!.path];
+          if (url != null) imageUrls.add(url);
+        } else if (p.url != null) {
+          imageUrls.add(p.url!);
+        }
+      }
 
       ForegroundServiceHelper.update(
         title: 'Diptych 日记发布',
-        content: '图片已上传完毕，正在发布日记...',
+        content: '图片已就绪，正在发布日记...',
         maxProgress: 1,
         progress: 1,
       );
@@ -199,9 +467,11 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
         await _updateCacheAfterSave(currentUser.uid, imageUrls);
       } else {
         // 防并发：其他设备可能已创建当天日记
-        final existing = await apiService.getMomentByDate(currentUser.uid, _dateStr);
+        final existing =
+            await apiService.getMomentByDate(currentUser.uid, _dateStr);
         if (existing != null) {
-          final finalUrls = imageUrls.isNotEmpty ? imageUrls : existing.imageUrls;
+          final finalUrls =
+              imageUrls.isNotEmpty ? imageUrls : existing.imageUrls;
           for (final old in existing.imageUrls) {
             if (!finalUrls.contains(old)) storageService.deleteImage(old);
           }
@@ -236,11 +506,13 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text(AppStrings.uploadSuccess), backgroundColor: AppTheme.primaryColor),
+        const SnackBar(
+            content: Text(AppStrings.uploadSuccess),
+            backgroundColor: AppTheme.primaryColor),
       );
       Navigator.pop(context, true);
     } catch (e) {
-      // 发布失败时自动保存草稿（文本、心情、图片及断点续传进度），防止用户内容丢失
+      // 发布失败时再次保存草稿（包含最新断点续传进度），防止用户内容丢失
       if (!_isEdit) {
         try {
           await DraftService.save(
@@ -248,8 +520,8 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
             _feelingController.text.trim(),
             _mood,
             images: _localFiles,
+            uploaded: _currentUploadProgress(),
           );
-          await DraftService.saveUploadProgress(_dateStr, _currentUploadProgress());
         } catch (_) {}
       }
 
@@ -261,54 +533,9 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
         ),
       );
     } finally {
-      // 无论成功还是失败，务必清除前台保活通知并释放 CPU 唤醒锁
-      await ForegroundServiceHelper.stop();
-      await WakelockHelper.release();
       if (mounted) setState(() => _isSaving = false);
+      _updateKeepAliveState();
     }
-  }
-
-  /// 串行上传所有图片，返回按 [_photos] 顺序的 URL 列表。
-  /// 一旦某张失败会抛出异常，中断后续上传；再次点上传时，
-  /// 已成功过的图片从 [_uploadedUrls] 复用 URL，只重传失败的（断点续传）。
-  Future<List<String>> _uploadImages(
-      StorageService storageService, String folder) async {
-    final urls = <String>[];
-    for (final p in _photos) {
-      if (!p.isLocal) {
-        urls.add(p.url!); // 编辑模式下保留的旧网络图，无需上传
-        continue;
-      }
-      final cached = _uploadedUrls[p.file!.path];
-      if (cached != null) {
-        urls.add(cached); // 断点续传：复用上次已上传成功的 URL
-        _uploadDone++;
-        if (mounted) setState(() {});
-        ForegroundServiceHelper.update(
-          title: 'Diptych 日记发布',
-          content: '正在上传照片 ($_uploadDone/$_uploadTotal)',
-          maxProgress: _uploadTotal,
-          progress: _uploadDone,
-        );
-        continue;
-      }
-      final url = await storageService.uploadImage(p.file!, folder);
-      _uploadedUrls[p.file!.path] = url;
-      urls.add(url);
-      _uploadDone++;
-      if (mounted) setState(() {});
-      ForegroundServiceHelper.update(
-        title: 'Diptych 日记发布',
-        content: '正在上传照片 ($_uploadDone/$_uploadTotal)',
-        maxProgress: _uploadTotal,
-        progress: _uploadDone,
-      );
-      // 每传成功一张就持久化进度，App 退出/被杀后再进来仍能断点续传
-      if (!_isEdit) {
-        DraftService.saveUploadProgress(_dateStr, _currentUploadProgress());
-      }
-    }
-    return urls;
   }
 
   /// 存草稿
@@ -321,10 +548,12 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
         _feelingController.text,
         _mood,
         images: _localFiles,
+        uploaded: _currentUploadProgress(),
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('草稿已保存'), backgroundColor: AppTheme.primaryColor),
+        const SnackBar(
+            content: Text('草稿已保存'), backgroundColor: AppTheme.primaryColor),
       );
     } catch (e) {
       if (!mounted) return;
@@ -338,6 +567,11 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final localCount = _photos.where((p) => p.isLocal).length;
+    final doneCount = _photos
+        .where((p) => p.isLocal && _uploadedUrls.containsKey(p.file!.path))
+        .length;
+
     return Scaffold(
       appBar: AppBar(
         title: Text(_isEdit ? AppStrings.editTitle : AppStrings.createTitle),
@@ -358,16 +592,16 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
               ),
             ),
           SizedBox(
-            width: 80,
+            width: 84,
             child: TextButton(
               style: TextButton.styleFrom(padding: EdgeInsets.zero),
               onPressed: _isSaving || _isSavingDraft ? null : _handleSave,
               child: _isSaving
-                  ? (_uploadTotal > 0 && _uploadDone < _uploadTotal
+                  ? (_inFlightUploads.isNotEmpty || _pendingUploadQueue.isNotEmpty
                       ? FittedBox(
                           fit: BoxFit.scaleDown,
                           child: Text(
-                            '上传中 $_uploadDone/$_uploadTotal',
+                            '上传中 $doneCount/$localCount',
                             style: const TextStyle(fontSize: 12),
                           ),
                         )
@@ -392,29 +626,42 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
             Center(
               child: Text(
                 DateHelper.toChineseDate(widget.date),
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                style:
+                    const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
               ),
             ),
             const SizedBox(height: 20),
 
             // 心情打分
-            Text(AppStrings.feelingLabel, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
+            Text(AppStrings.feelingLabel,
+                style:
+                    const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
             const SizedBox(height: 8),
             _buildMoodSelector(),
             const SizedBox(height: 16),
 
             // 图片九宫格（第一张为封面）
-            Text(AppStrings.photosLabel, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
+            Text(AppStrings.photosLabel,
+                style:
+                    const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
             const SizedBox(height: 8),
             PhotoGridPicker(
               entries: _photos,
+              statusProvider: (entry) {
+                if (!entry.isLocal) return PhotoUploadStatus.success;
+                return _uploadStatuses[entry.file!.path] ??
+                    (_uploadedUrls.containsKey(entry.file!.path)
+                        ? PhotoUploadStatus.success
+                        : PhotoUploadStatus.idle);
+              },
+              onRetry: _handleRetryUpload,
               onAdded: (files) {
                 setState(() => _photos.addAll(files.map(PhotoEntry.file)));
                 _syncDraftImages();
+                _enqueueUploads(files);
               },
               onRemoved: (index) {
-                setState(() => _photos.removeAt(index));
-                _syncDraftImages();
+                _handleRemovePhoto(index);
               },
               onReordered: (oldIndex, newIndex) {
                 setState(() {
@@ -427,7 +674,9 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
             const SizedBox(height: 20),
 
             // 感受输入
-            Text('今日感受', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
+            Text('今日感受',
+                style:
+                    const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
             const SizedBox(height: 8),
             // 排除全局选择容器：输入框用自己的原生选择（与输入法兼容）
             SelectionContainer.disabled(
