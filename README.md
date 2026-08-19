@@ -13,7 +13,7 @@
 [![Flutter](https://img.shields.io/badge/Flutter-3.x-02569B?style=flat-square&logo=flutter&logoColor=white)]()
 [![Dart](https://img.shields.io/badge/Dart-3.12%2B-0175C2?style=flat-square&logo=dart&logoColor=white)]()
 [![Platform](https://img.shields.io/badge/Platform-Android-3DDC84?style=flat-square&logo=android&logoColor=white)]()
-[![Version](https://img.shields.io/badge/Version-1.1.1-4B8BBE?style=flat-square)]()
+[![Version](https://img.shields.io/badge/Version-1.1.5-4B8BBE?style=flat-square)]()
 [![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)]()
 [![Repo Size](https://img.shields.io/github/repo-size/Breeze1733/Diptych?style=flat-square&label=repo%20size)]()
 [![Last Commit](https://img.shields.io/github/last-commit/Breeze1733/Diptych?style=flat-square&label=last%20commit)]()
@@ -60,28 +60,33 @@
 - 💬 **互动评论** — 在对方（或自己）的日记下留言、回复，支持多级嵌套
 - 📅 **日历视图** — 按日期跳转历史，已记录的日期以小圆点标记
 - 🗂️ **话题广场** — 发起 / 参与话题讨论，不局限于当日内容
-- 📡 **离线可用** — 本地缓存策略：已读内容断网也能查看，后台静默同步
-- ⬆️ **应用内更新** — 自动检测新版本并下载安装（Android APK）
-- ✂️ **头像裁剪** — 支持自定义头像，内置裁剪功能
+- 🎨 **壁纸与视觉定制** — 支持日记主页与话题广场自定义壁纸，自由调节模糊度与透明度，提供全屏实时预览与区域调整
+- 📤 **智能上传与画廊预览** — 选图即触发后台异步上传，支持状态感知（等待/上传中/重试）、断点续传与全屏手势大图预览/缩放/删除
+- 🛡️ **草稿防丢与容灾机制** — 自动持久化草稿文字与已上传图片 URL 映射，异常退出或发布失败时不丢进度、不重复上传
+- 🔋 **前台保活与 WakeLock** — 引入 Android 前台常驻通知服务与系统级 CPU/屏幕唤醒锁，防止大文件传输与后台下载被系统休眠中断
+- ⚡ **满速断点下载更新** — 集成系统级满速多线程/分块断点续传下载引擎，支持通知栏与应用内进度实时展示，下载完毕自动触发安装
+- 📡 **离线可用** — 本地多级缓存策略：已读内容断网也能查看，网络恢复后静默同步
+- ✂️ **头像裁剪** — 支持自定义头像，内置多比例裁剪功能
 
 ## 技术栈
 
 | 层 | 技术 |
 |---|---|
 | 框架 | Flutter 3.x / Dart 3.12+ |
-| 状态管理 | [Riverpod](https://riverpod.dev/) 2.x |
-| 网络 | `package:http` — REST API |
+| 状态管理 | [Riverpod](https://riverpod.dev/) 3.x (`flutter_riverpod 3.4.2`) |
+| 网络与传输 | `package:http` — REST API + 分片断点上传 |
 | 图片缓存 | `cached_network_image` + `flutter_cache_manager` |
-| 本地存储 | `shared_preferences`（缓存 + 登录态 + 草稿元数据） |
-| 图片选择 / 裁剪 | `image_picker` + `image_cropper` |
+| 本地存储 | `shared_preferences`（缓存 + 登录态 + 草稿与上传状态元数据） |
+| 图片选择 / 裁剪 / 预览 | `image_picker` + `image_cropper` + `photo_view` |
 | 日历 | `table_calendar` |
-| 版本检测 | `package_info_plus` + `open_filex` |
+| 版本更新与下载 | `package_info_plus` + `open_filex` + 系统级满速断点下载引擎 |
+| 传输保活 | Android Foreground Service（前台通知服务） + WakeLock 唤醒锁 |
 
 ## 项目结构
 
 ```
 lib/
-├── main.dart                  # 入口，启动时清理旧安装包
+├── main.dart                  # 入口，启动时清理旧安装包与初始化
 ├── app.dart                   # 根组件，根据登录状态路由
 ├── constants/
 │   ├── app_theme.dart         # 全局主题（颜色、文字样式）
@@ -93,35 +98,43 @@ lib/
 ├── providers/
 │   ├── auth_provider.dart     # 认证状态、用户数据加载
 │   ├── day_moment_provider.dart   # 当日日记（缓存优先 + 后台刷新）
-│   └── selected_date_provider.dart
+│   ├── selected_date_provider.dart
+│   └── wallpaper_provider.dart    # 背景壁纸与透明度/模糊度状态
 ├── screens/
 │   ├── login_screen.dart
 │   ├── feed_screen.dart       # 主页（分屏 + 日历 + 评论逻辑）
-│   ├── edit_moment_screen.dart
-│   ├── profile_screen.dart
-│   ├── topics_screen.dart
-│   └── topic_detail_screen.dart
+│   ├── edit_moment_screen.dart # 日记编辑（异步上传 + 断点续传 + 容灾）
+│   ├── profile_screen.dart    # 个人中心（设置 / 更新 / 缓存清理）
+│   ├── topics_screen.dart     # 话题列表
+│   ├── topic_detail_screen.dart # 话题详情与互动
+│   ├── topic_post_screen.dart # 话题发布（图片预览 + 异步上传）
+│   ├── wallpaper_settings_screen.dart # 壁纸参数配置
+│   ├── wallpaper_preview_screen.dart  # 壁纸全屏实时效果预览
+│   └── wallpaper_zoom_screen.dart     # 壁纸缩放与区域调整
 ├── services/
 │   ├── api_service.dart       # REST API 调用（用户、日记）
 │   ├── auth_service.dart      # 密钥验证 + SharedPreferences 持久化
 │   ├── cache_service.dart     # 日记 / 用户 / 日历圆点本地缓存
-│   ├── draft_service.dart     # 草稿（文本 + 图片文件）
-│   ├── storage_service.dart   # 图片上传
+│   ├── draft_service.dart     # 草稿（文本 + 本地与已上传图片元数据）
+│   ├── storage_service.dart   # 图片上传与分片断点续传
 │   ├── topic_service.dart     # 话题 REST API
-│   └── update_service.dart    # 版本检测与 APK 下载安装
+│   └── update_service.dart    # 版本检测与 APK 满速断点下载安装
 ├── utils/
 │   ├── cache_helper.dart      # 缓存大小计算与清理
 │   ├── date_helper.dart       # 日期格式化工具
 │   ├── file_helper.dart       # 文件工具
-│   └── url_helper.dart        # 相对路径转完整 URL
+│   ├── foreground_service_helper.dart # Android 前台保活服务通信通道
+│   ├── url_helper.dart        # 相对路径转完整 URL
+│   └── wakelock_helper.dart   # 屏幕与 CPU WakeLock 保活
 └── widgets/
     ├── avatar_widget.dart
     ├── calendar_picker.dart
     ├── date_header.dart
     ├── day_split_view.dart    # 左右分屏容器
-    ├── image_gallery.dart
+    ├── image_gallery.dart     # 全屏图片手势画廊与预览查看器
     ├── moment_card.dart       # 单条日记卡片（含评论树）
-    └── photo_grid_picker.dart
+    ├── photo_grid_picker.dart # 九宫格图片选择器（实时上传状态徽标）
+    └── wallpaper_layer.dart   # 全局/局部壁纸背景渲染层
 ```
 
 ## 快速开始
