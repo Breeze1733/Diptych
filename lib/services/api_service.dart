@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../models/app_user.dart';
 import '../models/moment.dart';
+import '../models/app_notification.dart';
 import '../constants/api_config.dart';
 
 /// 后端 API 服务 — 替换 Firebase Firestore
@@ -139,5 +140,25 @@ class ApiService {
     final body = _safeDecode(res);
     if (body['ok'] != true || body['data'] == null) return [];
     return (body['data'] as List).map((e) => e.toString()).toList();
+  }
+
+  // ─── 通知相关（单次请求：取出并自毁） ───
+
+  /// 获取待读通知列表（服务端读取后即自毁，超时 4 秒自动跳过防卡顿）
+  Future<List<AppNotification>> getPendingNotifications(String userId) async {
+    try {
+      final res = await http
+          .get(Uri.parse('$_baseUrl/notifications?user_id=$userId'))
+          .timeout(const Duration(seconds: 4));
+      if (res.statusCode != 200) return [];
+      final body = _safeDecode(res);
+      if (body['ok'] != true || body['data'] == null) return [];
+      return (body['data'] as List)
+          .map((e) => AppNotification.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (_) {
+      // 离线/网络超时/解析异常静默返回空，不阻塞 UI、不报错
+      return [];
+    }
   }
 }

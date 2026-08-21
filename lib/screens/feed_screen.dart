@@ -5,6 +5,7 @@ import '../constants/strings.dart';
 import '../models/moment.dart';
 import '../providers/auth_provider.dart';
 import '../providers/day_moment_provider.dart';
+import '../providers/notification_provider.dart';
 import '../providers/selected_date_provider.dart';
 import '../providers/wallpaper_provider.dart';
 import '../services/cache_service.dart';
@@ -16,6 +17,7 @@ import '../widgets/date_header.dart';
 import '../widgets/day_split_view.dart';
 import '../widgets/wallpaper_layer.dart';
 import 'edit_moment_screen.dart';
+import 'notification_screen.dart';
 import 'profile_screen.dart';
 import 'topics_screen.dart';
 
@@ -54,6 +56,8 @@ class FeedScreen extends ConsumerWidget {
     // 触发壁纸初始化（本地优先，云端兜底）
     ref.watch(initWallpaperProvider);
     final wallpaper = ref.watch(wallpaperSettingsProvider);
+    // 监听未读通知数量
+    final unreadNotificationCount = ref.watch(unreadNotificationCountProvider);
 
     // 用户数据加载完成后，静默检查更新（仅一次）
     final hasChecked = ref.watch(_autoUpdateCheckedProvider);
@@ -80,6 +84,22 @@ class FeedScreen extends ConsumerWidget {
                 icon: const Icon(Icons.forum_outlined, size: 20),
                 tooltip: '话题',
                 onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const TopicsScreen())),
+              ),
+              // 信箱通知（带未读角标）
+              IconButton(
+                icon: Badge(
+                  isLabelVisible: unreadNotificationCount > 0,
+                  label: Text(
+                    unreadNotificationCount > 99 ? '99+' : '$unreadNotificationCount',
+                    style: const TextStyle(fontSize: 10),
+                  ),
+                  child: const Icon(Icons.mail_outline, size: 20),
+                ),
+                tooltip: '信箱',
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const NotificationScreen()),
+                ),
               ),
               // 刷新按钮
               _buildRefreshButton(ref),
@@ -108,7 +128,12 @@ class FeedScreen extends ConsumerWidget {
           ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
           : const Icon(Icons.refresh, size: 20),
       tooltip: '刷新',
-      onPressed: isLoading ? null : () => ref.invalidate(dayMomentsProvider),
+      onPressed: isLoading
+          ? null
+          : () {
+              ref.invalidate(dayMomentsProvider);
+              ref.read(notificationListProvider.notifier).sync();
+            },
     );
   }
 
@@ -485,10 +510,11 @@ class FeedScreen extends ConsumerWidget {
     }
   }
 
-  /// 刷新数据（清除 Provider 缓存强制重读 + 更新日历圆点）
+  /// 刷新数据（清除 Provider 缓存强制重读 + 更新日历圆点 + 同步信箱）
   void _refresh(WidgetRef ref) {
     ref.invalidate(dayMomentsProvider);
     updateMarkedDateCache(ref);
+    ref.read(notificationListProvider.notifier).sync();
   }
 
   /// 打开个人设置
