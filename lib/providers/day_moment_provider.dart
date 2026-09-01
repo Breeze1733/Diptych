@@ -4,38 +4,104 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/moment.dart';
 import '../services/cache_service.dart';
 import '../utils/date_helper.dart';
+import '../utils/foreground_service_helper.dart';
 import '../utils/wakelock_helper.dart';
 import 'auth_provider.dart';
 import 'selected_date_provider.dart';
 
-/// 预加载当天日记的所有图片（双方所有图片）并在此期间申请 10 分钟 CPU WakeLock 保活
+/// 后台图片预加载队列管理：
+/// 异步并行下载未缓存图片，同时持有 CPU WakeLock 和前台通知保活服务，确保切后台时网络不中断
+final Set<String> _pendingPreloadUrls = {};
+final Set<String> _inFlightPreloadUrls = {};
+bool _isPreloadWorkerRunning = false;
+int _preloadTotalCount = 0;
+int _preloadDoneCount = 0;
+
+/// 异步并行预加载当天日记的所有图片（双方所有图片），切后台不断流
 void preloadDayImages(List<Moment> moments) {
-  final urls = <String>{};
+  final targetUrls = <String>{};
   for (final m in moments) {
     for (final url in m.imageUrls) {
-      if (url.isNotEmpty) urls.add(url);
+      if (url.isNotEmpty) targetUrls.add(url);
     }
   }
 
-  if (urls.isEmpty) return;
+  if (targetUrls.isEmpty) return;
 
-  // 异步下载，附带 CPU 唤醒锁保活（最长 10 分钟）
+  // 异步处理，绝不阻塞 UI 渲染
   Future(() async {
-    await WakelockHelper.acquire(timeout: const Duration(minutes: 10));
-    try {
-      final cacheManager = DefaultCacheManager();
-      await Future.wait(
-        urls.map((url) async {
-          try {
-            await cacheManager.getSingleFile(url);
-          } catch (_) {}
-        }),
-      );
-    } catch (_) {
-    } finally {
-      await WakelockHelper.release();
+    final cacheManager = DefaultCacheManager();
+    final newUrls = <String>[];
+
+    for (final url in targetUrls) {
+      if (_inFlightPreloadUrls.contains(url) || _pendingPreloadUrls.contains(url)) {
+        continue;
+      }
+      final fileInfo = await cacheManager.getFileFromCache(url);
+      if (fileInfo == null) {
+        newUrls.add(url);
+      }
+    }
+
+    if (newUrls.isEmpty) return;
+
+    _pendingPreloadUrls.addAll(newUrls);
+    _preloadTotalCount += newUrls.length;
+
+    if (!_isPreloadWorkerRunning) {
+      _runPreloadWorker();
     }
   });
+}
+
+Future<void> _runPreloadWorker() async {
+  if (_isPreloadWorkerRunning) return;
+  _isPreloadWorkerRunning = true;
+
+  final cacheManager = DefaultCacheManager();
+  await WakelockHelper.acquire(timeout: const Duration(minutes: 10));
+
+  try {
+    while (_pendingPreloadUrls.isNotEmpty) {
+      final currentBatch = _pendingPreloadUrls.toList();
+      _pendingPreloadUrls.clear();
+      _inFlightPreloadUrls.addAll(currentBatch);
+
+      await ForegroundServiceHelper.start(
+        title: 'Diptych 照片缓存',
+        content: '正在缓存照片 ($_preloadDoneCount/$_preloadTotalCount)...',
+        maxProgress: _preloadTotalCount,
+        progress: _preloadDoneCount,
+      );
+
+      // 完全并行并发下载当前批次所有图片
+      await Future.wait(
+        currentBatch.map((url) async {
+          try {
+            await cacheManager.getSingleFile(url);
+          } catch (_) {
+          } finally {
+            _inFlightPreloadUrls.remove(url);
+            _preloadDoneCount++;
+            await ForegroundServiceHelper.update(
+              title: 'Diptych 照片缓存',
+              content: '正在缓存照片 ($_preloadDoneCount/$_preloadTotalCount)...',
+              maxProgress: _preloadTotalCount,
+              progress: _preloadDoneCount,
+            );
+          }
+        }),
+      );
+    }
+  } finally {
+    _isPreloadWorkerRunning = false;
+    _preloadTotalCount = 0;
+    _preloadDoneCount = 0;
+    _pendingPreloadUrls.clear();
+    _inFlightPreloadUrls.clear();
+    await ForegroundServiceHelper.stop();
+    await WakelockHelper.release();
+  }
 }
 
 /// 解析动态列表，分出自己和对方的

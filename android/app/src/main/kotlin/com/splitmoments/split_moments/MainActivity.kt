@@ -35,20 +35,24 @@ class MainActivity : FlutterActivity() {
 
         // 1. Media Scanner Channel
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, MEDIA_CHANNEL).setMethodCallHandler { call, result ->
-            if (call.method == "scanFile") {
-                val path = call.argument<String>("path")
-                if (path != null) {
-                    MediaScannerConnection.scanFile(
-                        context,
-                        arrayOf(path),
-                        null
-                    ) { _, _ -> }
-                    result.success(true)
-                } else {
-                    result.error("INVALID_ARGUMENT", "path is required", null)
+            when (call.method) {
+                "scanFile" -> {
+                    val path = call.argument<String>("path")
+                    if (path != null) {
+                        MediaScannerConnection.scanFile(
+                            context,
+                            arrayOf(path),
+                            null
+                        ) { _, _ -> }
+                        result.success(true)
+                    } else {
+                        result.error("INVALID_ARGUMENT", "path is required", null)
+                    }
                 }
-            } else {
-                result.notImplemented()
+                "getDeviceManufacturer" -> {
+                    result.success(Build.MANUFACTURER ?: "")
+                }
+                else -> result.notImplemented()
             }
         }
 

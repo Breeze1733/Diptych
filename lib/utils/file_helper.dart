@@ -44,4 +44,17 @@ class FileHelper {
     }
   }
 
+  /// 获取当前 Android 设备制造商（如 Xiaomi, HONOR, HUAWEI 等）
+  static Future<String> getDeviceManufacturer() async {
+    if (Platform.isAndroid) {
+      try {
+        final res = await _channel.invokeMethod<String>('getDeviceManufacturer');
+        return res ?? '';
+      } catch (_) {
+        return '';
+      }
+    }
+    return '';
+  }
+
 }
