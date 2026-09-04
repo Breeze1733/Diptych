@@ -2,6 +2,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import '../utils/diptych_asset_picker.dart';
+import '../utils/motion_photo_helper.dart';
 
 /// 图片上传状态
 enum PhotoUploadStatus {
@@ -15,18 +17,50 @@ enum PhotoUploadStatus {
 class PhotoEntry {
   final File? file;
   final String? url;
+  final bool isMotion;
+  final bool uploadLive;
 
-  const PhotoEntry.file(File this.file) : url = null;
-  const PhotoEntry.url(String this.url) : file = null;
+  const PhotoEntry.file(
+    File this.file, {
+    this.isMotion = false,
+    this.uploadLive = false,
+  }) : url = null;
+
+  const PhotoEntry.url(
+    String this.url, {
+    this.isMotion = false,
+    this.uploadLive = false,
+  }) : file = null;
 
   bool get isLocal => file != null;
+
+  PhotoEntry copyWith({
+    File? file,
+    String? url,
+    bool? isMotion,
+    bool? uploadLive,
+  }) {
+    if (isLocal) {
+      return PhotoEntry.file(
+        file ?? this.file!,
+        isMotion: isMotion ?? this.isMotion,
+        uploadLive: uploadLive ?? this.uploadLive,
+      );
+    } else {
+      return PhotoEntry.url(
+        url ?? this.url!,
+        isMotion: isMotion ?? this.isMotion,
+        uploadLive: uploadLive ?? this.uploadLive,
+      );
+    }
+  }
 }
 
 /// 微信风格图片九宫格选择器
 /// 已选图片 + 末尾一个灰色"+"框；点"+"可拍照或从相册多选，图片右上角可删除
 class PhotoGridPicker extends StatelessWidget {
   final List<PhotoEntry> entries;
-  final ValueChanged<List<File>> onAdded;
+  final ValueChanged<List<PhotoEntry>> onAdded;
   final ValueChanged<int> onRemoved;
   final void Function(int oldIndex, int newIndex) onReordered;
   final PhotoUploadStatus Function(PhotoEntry entry)? statusProvider;
@@ -48,7 +82,7 @@ class PhotoGridPicker extends StatelessWidget {
     final picker = ImagePicker();
 
     // 弹出选择方式
-    final source = await showModalBottomSheet<ImageSource>(
+    final source = await showModalBottomSheet<String>(
       context: context,
       builder: (ctx) => SafeArea(
         child: Wrap(
@@ -56,26 +90,45 @@ class PhotoGridPicker extends StatelessWidget {
             ListTile(
               leading: const Icon(Icons.camera_alt),
               title: const Text('拍照'),
-              onTap: () => Navigator.pop(ctx, ImageSource.camera),
+              onTap: () => Navigator.pop(ctx, 'camera'),
             ),
             ListTile(
               leading: const Icon(Icons.photo_library),
               title: const Text('从相册选择（可多选）'),
-              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+              onTap: () => Navigator.pop(ctx, 'gallery'),
             ),
           ],
         ),
       ),
     );
 
-    if (source == null) return;
+    if (source == null || !context.mounted) return;
 
-    if (source == ImageSource.camera) {
+    if (source == 'camera') {
       final picked = await picker.pickImage(source: ImageSource.camera);
-      if (picked != null) onAdded([File(picked.path)]);
+      if (picked != null) {
+        final file = File(picked.path);
+        final isMotion = await MotionPhotoHelper.isMotionPhoto(file);
+        onAdded([
+          PhotoEntry.file(
+            file,
+            isMotion: isMotion,
+            uploadLive: false,
+          ),
+        ]);
+      }
     } else {
-      final picked = await picker.pickMultiImage();
-      if (picked.isNotEmpty) onAdded(picked.map((x) => File(x.path)).toList());
+      try {
+        final pickedEntries = await DiptychAssetPicker.pickPhotos(
+          context,
+          maxAssets: 999, // 不限图片张数，支持海量多选
+        );
+        if (pickedEntries != null && pickedEntries.isNotEmpty) {
+          onAdded(pickedEntries);
+        }
+      } catch (e) {
+        debugPrint('PhotoGridPicker.pickPhotos 异常: $e');
+      }
     }
   }
 
@@ -120,10 +173,10 @@ class PhotoGridPicker extends StatelessWidget {
     void handleTap() {
       if (status == PhotoUploadStatus.failed) {
         onRetry?.call(index);
-      } else if (status == PhotoUploadStatus.success || status == PhotoUploadStatus.idle) {
+      } else if (status == PhotoUploadStatus.success) {
         onTap?.call(index);
       }
-      // 上传中时不触发打开大图
+      // 上传中 (uploading) 或未就绪 (idle) 时不触发打开大图，确保上传过程中无法点击大图，上传成功后可预览
     }
 
     return LayoutBuilder(
@@ -235,16 +288,53 @@ class PhotoGridPicker extends StatelessWidget {
           if (index == 0)
             Positioned(
               left: 0,
-              bottom: 0,
+              top: 0,
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: const BoxDecoration(
                   color: Colors.black54,
-                  borderRadius: BorderRadius.only(topRight: Radius.circular(6)),
+                  borderRadius: BorderRadius.only(bottomRight: Radius.circular(6)),
                 ),
                 child: const Text(
                   '封面',
                   style: TextStyle(color: Colors.white, fontSize: 10),
+                ),
+              ),
+            ),
+          // 实况徽标（若为实况照片，点击可单独切换该图片的实况状态）
+          // 实况静态徽标（如果选图时指定为实况，则在九宫格显示微信同款静态角标，轻触图片主体进入大图预览）
+          if (entry.uploadLive)
+            Positioned(
+              left: 4,
+              bottom: 4,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.black.withAlpha(160),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: Colors.white38,
+                    width: 0.8,
+                  ),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.motion_photos_on,
+                      size: 12,
+                      color: Colors.white,
+                    ),
+                    SizedBox(width: 3),
+                    Text(
+                      '实况',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 9.5,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),

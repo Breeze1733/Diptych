@@ -54,16 +54,21 @@ class DraftService {
 
   /// 保存草稿（文本 + 心情 + 图片列表，全量替换）
   /// [uploaded] 为断点续传进度（序号 → URL），若未传入则保留已持久化的进度
+  /// [liveFlags] 为图片实况状态（序号 → 是否上传实况）
+  /// [uploadedLive] 为已上传图片所使用的实况状态（序号 → 当初上传时是否为实况）
   static Future<void> save(
     String dateStr,
     String feeling,
     int? mood, {
     List<File> images = const [],
     Map<int, String>? uploaded,
+    Map<int, bool>? liveFlags,
+    Map<int, bool>? uploadedLive,
   }) async {
     await _persistImages(dateStr, images);
 
     final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString('$_prefix$dateStr');
     final data = {
       'feeling': feeling,
       if (mood != null) 'mood': mood, // ignore: use_null_aware_elements
@@ -71,10 +76,24 @@ class DraftService {
     };
     // 优先使用传入的断点续传进度，未传入时保留已持久化的进度，存草稿不应清掉它
     final finalUploaded =
-        uploaded ?? _readUploaded(prefs.getString('$_prefix$dateStr'));
+        uploaded ?? _readUploaded(raw);
     if (finalUploaded.isNotEmpty) {
       data['uploaded'] = {
         for (final e in finalUploaded.entries) '${e.key}': e.value,
+      };
+    }
+    final finalLiveFlags =
+        liveFlags ?? _readBoolMap(raw, 'live_flags');
+    if (finalLiveFlags.isNotEmpty) {
+      data['live_flags'] = {
+        for (final e in finalLiveFlags.entries) '${e.key}': e.value,
+      };
+    }
+    final finalUploadedLive =
+        uploadedLive ?? _readBoolMap(raw, 'uploaded_live');
+    if (finalUploadedLive.isNotEmpty) {
+      data['uploaded_live'] = {
+        for (final e in finalUploadedLive.entries) '${e.key}': e.value,
       };
     }
     await prefs.setString('$_prefix$dateStr', jsonEncode(data));
@@ -92,6 +111,8 @@ class DraftService {
         mood: data['mood'] as int?,
         images: await _resolveImages(dateStr),
         uploaded: _readUploaded(raw),
+        liveFlags: _readBoolMap(raw, 'live_flags'),
+        uploadedLive: _readBoolMap(raw, 'uploaded_live'),
       );
     } catch (_) {
       return null;
@@ -118,15 +139,29 @@ class DraftService {
     String dateStr,
     List<File> images, {
     Map<int, String> uploaded = const {},
+    Map<int, bool> liveFlags = const {},
+    Map<int, bool> uploadedLive = const {},
   }) async {
     await _persistImages(dateStr, images);
-    await _persistUploaded(dateStr, uploaded);
+    await _persistUploadMetadata(
+      dateStr,
+      uploaded: uploaded,
+      liveFlags: liveFlags,
+      uploadedLive: uploadedLive,
+    );
   }
 
   /// 只持久化断点续传进度，不重新复制图片（上传成功一张后调用）
   static Future<void> saveUploadProgress(
-      String dateStr, Map<int, String> uploaded) async {
-    await _persistUploaded(dateStr, uploaded);
+    String dateStr,
+    Map<int, String> uploaded, {
+    Map<int, bool>? uploadedLive,
+  }) async {
+    await _persistUploadMetadata(
+      dateStr,
+      uploaded: uploaded,
+      uploadedLive: uploadedLive,
+    );
   }
 
   // ─── 私有辅助 ───
@@ -179,18 +214,34 @@ class DraftService {
     return [for (final i in indexes) files[i]!];
   }
 
-  /// 把断点续传进度（序号 → URL）写进草稿 JSON
-  static Future<void> _persistUploaded(
-      String dateStr, Map<int, String> uploaded) async {
-    if (uploaded.isEmpty) return; // 无进度时不动现有 JSON，避免建出空草稿
+  /// 把上传元数据（断点续传进度、实况开关、已上传实况标识）写入草稿 JSON
+  static Future<void> _persistUploadMetadata(
+    String dateStr, {
+    Map<int, String>? uploaded,
+    Map<int, bool>? liveFlags,
+    Map<int, bool>? uploadedLive,
+  }) async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString('$_prefix$dateStr');
     final data = raw == null
         ? <String, dynamic>{}
         : _safeDecodeMap(raw, <String, dynamic>{});
-    data['uploaded'] = {
-      for (final e in uploaded.entries) '${e.key}': e.value,
-    };
+
+    if (uploaded != null) {
+      data['uploaded'] = {
+        for (final e in uploaded.entries) '${e.key}': e.value,
+      };
+    }
+    if (liveFlags != null) {
+      data['live_flags'] = {
+        for (final e in liveFlags.entries) '${e.key}': e.value,
+      };
+    }
+    if (uploadedLive != null) {
+      data['uploaded_live'] = {
+        for (final e in uploadedLive.entries) '${e.key}': e.value,
+      };
+    }
     await prefs.setString('$_prefix$dateStr', jsonEncode(data));
   }
 
@@ -206,6 +257,20 @@ class DraftService {
       if (idx != null && v is String && v.isNotEmpty) uploaded[idx] = v;
     });
     return uploaded;
+  }
+
+  /// 从草稿 JSON 中读取 bool 映射（如 live_flags 或 uploaded_live）
+  static Map<int, bool> _readBoolMap(String? raw, String key) {
+    if (raw == null) return const {};
+    final data = _safeDecodeMap(raw, <String, dynamic>{});
+    final mapRaw = data[key];
+    if (mapRaw is! Map) return const {};
+    final result = <int, bool>{};
+    mapRaw.forEach((k, v) {
+      final idx = int.tryParse('$k');
+      if (idx != null && v is bool) result[idx] = v;
+    });
+    return result;
   }
 
   static Map<String, dynamic> _safeDecodeMap(
@@ -235,11 +300,17 @@ class DraftData {
   final List<File> images;
   /// 断点续传进度：图片序号 → 已上传成功的 URL
   final Map<int, String> uploaded;
+  /// 实况选择状态：图片序号 → 是否勾选上传实况
+  final Map<int, bool> liveFlags;
+  /// 已上传版本的实况属性：图片序号 → 当时上传的是否为实况
+  final Map<int, bool> uploadedLive;
 
   const DraftData({
     required this.feeling,
     this.mood,
     this.images = const [],
     this.uploaded = const {},
+    this.liveFlags = const {},
+    this.uploadedLive = const {},
   });
 }

@@ -12,11 +12,75 @@ class MotionPhotoHelper {
   /// 内存解析缓存：文件路径 -> 提取出的临时 MP4 视频文件 (null 表示非实况图)
   static final Map<String, File?> _memoryCache = {};
 
-  /// 检查指定本地文件是否为实况照片
+  /// 检查指定本地文件是否为实况照片（极速二进制检索，无需解压视频）
   static Future<bool> isMotionPhoto(File? file) async {
     if (file == null || !await file.exists()) return false;
-    final video = await getOrExtractMotionVideo(file);
-    return video != null;
+    final path = file.path;
+    if (_memoryCache.containsKey(path)) {
+      return _memoryCache[path] != null;
+    }
+    try {
+      final length = await file.length();
+      if (length < 100 * 1024) return false;
+      final mp4Offset = await _findMp4Offset(file, length);
+      return mp4Offset > 0;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 提取纯静态 JPEG 图片（无损剥离尾部 MP4 视频流）
+  ///
+  /// 如果文件不是实况照片，返回原文件；如果是实况照片，切片提取前半部分纯静态 JPEG。
+  static Future<File> getOrExtractStillImage(File file) async {
+    final path = file.path;
+    if (!await file.exists()) return file;
+
+    try {
+      final length = await file.length();
+      if (length < 100 * 1024) return file;
+
+      final mp4Offset = await _findMp4Offset(file, length);
+      if (mp4Offset <= 0) return file;
+
+      File targetFile = File('${path}_still.jpg');
+      try {
+        if (await targetFile.exists()) {
+          final existingSize = await targetFile.length();
+          if (existingSize == mp4Offset) return targetFile;
+        }
+      } catch (_) {
+        targetFile = File('${Directory.systemTemp.path}/${path.hashCode}_still.jpg');
+      }
+
+      final raf = await file.open(mode: FileMode.read);
+      RandomAccessFile? outRaf;
+      try {
+        try {
+          outRaf = await targetFile.open(mode: FileMode.write);
+        } catch (_) {
+          targetFile = File('${Directory.systemTemp.path}/${path.hashCode}_still.jpg');
+          outRaf = await targetFile.open(mode: FileMode.write);
+        }
+
+        const chunkSize = 256 * 1024;
+        int bytesLeft = mp4Offset;
+        while (bytesLeft > 0) {
+          final toRead = bytesLeft > chunkSize ? chunkSize : bytesLeft;
+          final chunk = await raf.read(toRead);
+          if (chunk.isEmpty) break;
+          await outRaf.writeFrom(chunk);
+          bytesLeft -= chunk.length;
+        }
+      } finally {
+        await raf.close();
+        await outRaf?.close();
+      }
+
+      return targetFile;
+    } catch (e) {
+      return file;
+    }
   }
 
   /// 获取或提取实况照片的 MP4 视频文件

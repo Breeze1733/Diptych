@@ -10,6 +10,7 @@ import '../services/draft_service.dart';
 import '../services/storage_service.dart';
 import '../utils/date_helper.dart';
 import '../utils/foreground_service_helper.dart';
+import '../utils/motion_photo_helper.dart';
 import '../utils/wakelock_helper.dart';
 import '../widgets/image_gallery.dart';
 import '../widgets/photo_grid_picker.dart';
@@ -38,6 +39,9 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
 
   /// 断点续传/预上传：本地图片路径 → 已成功上传的远端 URL
   final Map<String, String> _uploadedUrls = {};
+
+  /// 本地图片路径 → 上传该远端 URL 时是否为实况图
+  final Map<String, bool> _uploadedIsLive = {};
 
   /// 本地图片路径 → 当前上传状态 (uploading, success, failed, idle)
   final Map<String, PhotoUploadStatus> _uploadStatuses = {};
@@ -81,21 +85,44 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
   Future<void> _loadDraft() async {
     final draft = await DraftService.load(_dateStr);
     if (draft == null || !mounted) return;
+
+    final loadedPhotos = <PhotoEntry>[];
+    for (var i = 0; i < draft.images.length; i++) {
+      final f = draft.images[i];
+      final isMotion = await MotionPhotoHelper.isMotionPhoto(f);
+      // 从草稿恢复用户的实况开关状态，草稿未指定时默认传静态图 (false)
+      final uploadLive = draft.liveFlags[i] ?? false;
+      loadedPhotos.add(PhotoEntry.file(
+        f,
+        isMotion: isMotion,
+        uploadLive: uploadLive,
+      ));
+    }
+
     setState(() {
       _feelingController.text = draft.feeling;
       _mood = draft.mood;
-      _photos.addAll(draft.images.map(PhotoEntry.file));
+      _photos.addAll(loadedPhotos);
       // 恢复断点续传：草稿图片按序号与持久化的进度一一对应
       for (final e in draft.uploaded.entries) {
         if (e.key >= 0 && e.key < draft.images.length) {
           final path = draft.images[e.key].path;
-          _uploadedUrls[path] = e.value;
-          _uploadStatuses[path] = PhotoUploadStatus.success;
+          final wasLive = draft.uploadedLive[e.key] ?? false;
+          final shouldBeLive = _photos[e.key].uploadLive;
+
+          if (wasLive == shouldBeLive) {
+            _uploadedUrls[path] = e.value;
+            _uploadedIsLive[path] = wasLive;
+            _uploadStatuses[path] = PhotoUploadStatus.success;
+          } else {
+            // 实况状态不一致，需要清理旧图片并重新上传对应版本
+            _enqueueDelete(e.value);
+          }
         }
       }
     });
 
-    // 对草稿中尚未上传成功的本地图片，自动加入预上传队列
+    // 对草稿中尚未上传成功或需要重新上传的本地图片，自动加入预上传队列
     final unUploaded = <File>[];
     for (final p in _photos) {
       if (p.isLocal && !_uploadedUrls.containsKey(p.file!.path)) {
@@ -121,12 +148,42 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
   }
 
   /// 新建模式下图片变动后即时落地草稿目录，防临时文件被系统清理；
-  /// 同时持久化当前断点续传进度（序号 → URL），让进度与图片顺序保持一致。
+  /// 同时持久化当前断点续传进度与实况开关设置，让进度与图片顺序保持一致。
   void _syncDraftImages() {
     if (!_isEdit) {
-      DraftService.saveImages(_dateStr, _localFiles,
-          uploaded: _currentUploadProgress());
+      DraftService.saveImages(
+        _dateStr,
+        _localFiles,
+        uploaded: _currentUploadProgress(),
+        liveFlags: _currentLiveFlags(),
+        uploadedLive: _currentUploadedLive(),
+      );
     }
+  }
+
+  /// 当前实况开关设置：序号 → 是否上传实况
+  Map<int, bool> _currentLiveFlags() {
+    final flags = <int, bool>{};
+    for (var i = 0; i < _photos.length; i++) {
+      final p = _photos[i];
+      if (p.isLocal && p.isMotion) {
+        flags[i] = p.uploadLive;
+      }
+    }
+    return flags;
+  }
+
+  /// 已上传版本的实况标识：序号 → 是否为实况
+  Map<int, bool> _currentUploadedLive() {
+    final liveMap = <int, bool>{};
+    for (var i = 0; i < _photos.length; i++) {
+      final p = _photos[i];
+      if (p.isLocal) {
+        final isLive = _uploadedIsLive[p.file!.path];
+        if (isLive != null) liveMap[i] = isLive;
+      }
+    }
+    return liveMap;
   }
 
   /// 当前断点续传进度：序号 → URL（序号对应草稿图片的序号）
@@ -188,12 +245,28 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
   Future<void> _uploadSingle(
       String path, StorageService storageService, String folder) async {
     try {
-      final file = File(path);
-      if (!await file.exists()) {
+      final entryIndex =
+          _photos.indexWhere((p) => p.isLocal && p.file!.path == path);
+      if (entryIndex == -1) return;
+      final entry = _photos[entryIndex];
+
+      final File fileToUpload;
+      final bool isUploadingLive;
+      if (entry.isMotion && !entry.uploadLive) {
+        // 实况照片且用户选择仅传静态图：提取无损静态 JPEG
+        fileToUpload = await MotionPhotoHelper.getOrExtractStillImage(entry.file!);
+        isUploadingLive = false;
+      } else {
+        // 普通静态图，或用户主动选择上传实况：上传原文件
+        fileToUpload = entry.file!;
+        isUploadingLive = entry.uploadLive;
+      }
+
+      if (!await fileToUpload.exists()) {
         throw Exception('文件不存在');
       }
 
-      final url = await storageService.uploadImage(file, folder);
+      final url = await storageService.uploadImage(fileToUpload, folder);
 
       if (_cancelledUploads.contains(path)) {
         _cancelledUploads.remove(path);
@@ -204,9 +277,14 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
       } else {
         _inFlightUploads.remove(path);
         _uploadedUrls[path] = url;
+        _uploadedIsLive[path] = isUploadingLive;
         _uploadStatuses[path] = PhotoUploadStatus.success;
         if (!_isEdit) {
-          DraftService.saveUploadProgress(_dateStr, _currentUploadProgress());
+          DraftService.saveUploadProgress(
+            _dateStr,
+            _currentUploadProgress(),
+            uploadedLive: _currentUploadedLive(),
+          );
         }
       }
     } catch (e) {
@@ -235,6 +313,8 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
             _mood,
             images: _localFiles,
             uploaded: _currentUploadProgress(),
+            liveFlags: _currentLiveFlags(),
+            uploadedLive: _currentUploadedLive(),
           );
         } catch (e) {
           debugPrint('[UploadQueue] 传输完毕自动存草稿异常: $e');
@@ -255,6 +335,7 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
         _cancelledUploads.add(path);
       }
       final existingUrl = _uploadedUrls.remove(path);
+      _uploadedIsLive.remove(path);
       _uploadStatuses.remove(path);
       if (existingUrl != null) {
         _enqueueDelete(existingUrl);
@@ -263,6 +344,14 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
 
     _syncDraftImages();
     _updateKeepAliveState();
+  }
+
+  /// 用户新选取照片处理：接收选图器已封装好的 PhotoEntry 列表
+  void _handlePhotosAdded(List<PhotoEntry> newEntries) {
+    setState(() => _photos.addAll(newEntries));
+    _syncDraftImages();
+    final files = [for (final p in newEntries) if (p.isLocal) p.file!];
+    _enqueueUploads(files);
   }
 
   /// 异步删除队列
@@ -409,6 +498,8 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
           _mood,
           images: _localFiles,
           uploaded: _currentUploadProgress(),
+          liveFlags: _currentLiveFlags(),
+          uploadedLive: _currentUploadedLive(),
         );
       } catch (e) {
         debugPrint('发布前自动存草稿异常: $e');
@@ -424,11 +515,12 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
       final apiService = ref.read(apiServiceProvider);
       final storageService = ref.read(storageServiceProvider);
 
-      // 1. 将所有尚未成功上传的本地图片（包括失败的项）重新推入上传队列并调度
+      // 1. 将所有尚未成功上传或实况模式变更的本地图片（包括失败项）推入上传队列并调度
       for (final p in _photos) {
         if (p.isLocal) {
           final path = p.file!.path;
-          if (!_uploadedUrls.containsKey(path) &&
+          final needsUpload = !_uploadedUrls.containsKey(path);
+          if (needsUpload &&
               !_pendingUploadQueue.contains(path) &&
               !_inFlightUploads.contains(path)) {
             _pendingUploadQueue.add(path);
@@ -540,6 +632,8 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
             _mood,
             images: _localFiles,
             uploaded: _currentUploadProgress(),
+            liveFlags: _currentLiveFlags(),
+            uploadedLive: _currentUploadedLive(),
           );
         } catch (_) {}
       }
@@ -568,11 +662,13 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
         _mood,
         images: _localFiles,
         uploaded: _currentUploadProgress(),
+        liveFlags: _currentLiveFlags(),
+        uploadedLive: _currentUploadedLive(),
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-            content: Text('草稿已保存'), backgroundColor: AppTheme.primaryColor),
+          content: Text('草稿已保存'), backgroundColor: AppTheme.primaryColor),
       );
     } catch (e) {
       if (!mounted) return;
@@ -602,6 +698,8 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
             _mood,
             images: _localFiles,
             uploaded: _currentUploadProgress(),
+            liveFlags: _currentLiveFlags(),
+            uploadedLive: _currentUploadedLive(),
           );
         }
       },
@@ -695,11 +793,7 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
                   initialIndex: index,
                 );
               },
-              onAdded: (files) {
-                setState(() => _photos.addAll(files.map(PhotoEntry.file)));
-                _syncDraftImages();
-                _enqueueUploads(files);
-              },
+              onAdded: _handlePhotosAdded,
               onRemoved: (index) {
                 _handleRemovePhoto(index);
               },

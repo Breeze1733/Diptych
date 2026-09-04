@@ -150,6 +150,8 @@ class _FullScreenImageState extends State<FullScreenImage> {
   bool _isPlaying = false;
   int _checkingIndex = -1;
 
+  bool get _showLiveButton => _isMotionPhoto;
+
   int get _totalCount => widget.entries?.length ?? widget.urls?.length ?? 0;
 
   @override
@@ -444,8 +446,8 @@ class _FullScreenImageState extends State<FullScreenImage> {
               ),
             ),
 
-          // 3. 微信同款左下角「实况」无感胶囊按钮
-          if (_isMotionPhoto)
+          // 3. 微信同款左下角「实况」无感轻触播放胶囊按钮（播完自动恢复静态图）
+          if (_showLiveButton)
             Positioned(
               left: 16,
               bottom: 24,
