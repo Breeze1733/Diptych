@@ -8,6 +8,7 @@ import 'package:video_player/video_player.dart';
 import '../utils/file_helper.dart';
 import '../utils/motion_photo_helper.dart';
 import 'photo_grid_picker.dart';
+import 'live_photo_badge.dart';
 
 /// 弹出半透明底色的图片列表（一行三张，可滑动），点击单张进入全屏查看
 void showImageGallery(BuildContext context, List<String> urls) {
@@ -30,6 +31,7 @@ void showFullScreenPreview(
   List<String>? urls,
   List<PhotoEntry>? entries,
   int initialIndex = 0,
+  void Function(int index, bool isLive)? onToggleLive,
 }) {
   Navigator.push(
     context,
@@ -81,38 +83,108 @@ class _ImageGalleryOverlay extends StatelessWidget {
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => FullScreenImage(
-                    urls: urls,
-                    initialIndex: index,
-                  ),
+                  builder: (_) =>
+                      FullScreenImage(urls: urls, initialIndex: index),
                 ),
               ),
-              child: Container(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(6),
-                  color: Colors.white10,
-                ),
-                clipBehavior: Clip.antiAlias,
-                child: CachedNetworkImage(
-                  imageUrl: urls[index],
-                  fit: BoxFit.cover,
-                  placeholder: (_, _) => const Center(
-                    child: SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white54),
-                    ),
-                  ),
-                  errorWidget: (_, _, _) => const Icon(
-                    Icons.broken_image,
-                    color: Colors.white38,
-                  ),
-                ),
-              ),
+              child: _GalleryGridItem(url: urls[index]),
             );
           },
         ),
+      ),
+    );
+  }
+}
+
+/// 带实况状态识别的相册缩略图
+class _GalleryGridItem extends StatefulWidget {
+  final String url;
+  const _GalleryGridItem({required this.url});
+
+  @override
+  State<_GalleryGridItem> createState() => _GalleryGridItemState();
+}
+
+class _GalleryGridItemState extends State<_GalleryGridItem> {
+  bool _isMotion = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkMotion();
+  }
+
+  @override
+  void didUpdateWidget(_GalleryGridItem oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.url != oldWidget.url) {
+      _checkMotion();
+    }
+  }
+
+  Future<void> _checkMotion() async {
+    final isMotion = await MotionPhotoHelper.isMotionPhotoUrl(widget.url);
+    if (mounted && isMotion) {
+      setState(() => _isMotion = true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(6),
+        color: Colors.white10,
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          CachedNetworkImage(
+            imageUrl: widget.url,
+            fit: BoxFit.cover,
+            placeholder: (_, _) => const Center(
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white54,
+                ),
+              ),
+            ),
+            errorWidget: (_, _, _) =>
+                const Icon(Icons.broken_image, color: Colors.white38),
+          ),
+          if (_isMotion)
+            Positioned(
+              left: 4,
+              bottom: 4,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.black.withAlpha(160),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.white38, width: 0.8),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.motion_photos_on, size: 12, color: Colors.white),
+                    SizedBox(width: 3),
+                    Text(
+                      '实况',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 9.5,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -127,12 +199,14 @@ class FullScreenImage extends StatefulWidget {
   final List<String>? urls;
   final List<PhotoEntry>? entries;
   final int initialIndex;
+  final void Function(int index, bool isLive)? onToggleLive;
 
   const FullScreenImage({
     super.key,
     this.urls,
     this.entries,
     this.initialIndex = 0,
+    this.onToggleLive,
   }) : assert(urls != null || entries != null, 'urls 与 entries 至少提供一个');
 
   @override
@@ -150,7 +224,12 @@ class _FullScreenImageState extends State<FullScreenImage> {
   bool _isPlaying = false;
   int _checkingIndex = -1;
 
-  bool get _showLiveButton => _isMotionPhoto;
+  bool get _showLiveButton {
+    if (widget.entries != null && _currentIndex < widget.entries!.length) {
+      return widget.entries![_currentIndex].isMotion;
+    }
+    return _isMotionPhoto;
+  }
 
   int get _totalCount => widget.entries?.length ?? widget.urls?.length ?? 0;
 
@@ -206,7 +285,9 @@ class _FullScreenImageState extends State<FullScreenImage> {
       final entry = widget.entries![index];
       if (entry.isLocal && entry.file != null) return entry.file;
       if (entry.url != null && entry.url!.isNotEmpty) {
-        final fileInfo = await DefaultCacheManager().getFileFromCache(entry.url!);
+        final fileInfo = await DefaultCacheManager().getFileFromCache(
+          entry.url!,
+        );
         if (fileInfo != null) return fileInfo.file;
         try {
           return await DefaultCacheManager().getSingleFile(entry.url!);
@@ -245,6 +326,14 @@ class _FullScreenImageState extends State<FullScreenImage> {
     final file = await _resolveFile(index);
     if (file == null || !mounted || _checkingIndex != index) return;
 
+    // 先快速检测二进制特征，若为实况照片立即点亮实况标识
+    final isMotion = await MotionPhotoHelper.isMotionPhoto(file);
+    if (!isMotion || !mounted || _checkingIndex != index) return;
+
+    setState(() {
+      _isMotionPhoto = true;
+    });
+
     final videoFile = await MotionPhotoHelper.getOrExtractMotionVideo(file);
     if (videoFile == null || !mounted || _checkingIndex != index) return;
 
@@ -260,7 +349,8 @@ class _FullScreenImageState extends State<FullScreenImage> {
       controller.addListener(() {
         if (!mounted) return;
         if (controller.value.isInitialized) {
-          final isEnded = controller.value.position >= controller.value.duration;
+          final isEnded =
+              controller.value.position >= controller.value.duration;
           if (isEnded && _isPlaying) {
             setState(() {
               _isPlaying = false;
@@ -282,7 +372,9 @@ class _FullScreenImageState extends State<FullScreenImage> {
 
   /// 轻点左下角实况按钮：无感播放一遍（播完自动停住恢复静态图）
   Future<void> _toggleLivePlayback() async {
-    if (_videoController == null || !_videoController!.value.isInitialized) return;
+    if (_videoController == null || !_videoController!.value.isInitialized) {
+      return;
+    }
     if (_isPlaying) {
       await _videoController!.pause();
       await _videoController!.seekTo(Duration.zero);
@@ -310,7 +402,11 @@ class _FullScreenImageState extends State<FullScreenImage> {
           setState(() => _isDownloading = true);
           try {
             final dir = await FileHelper.getDownloadsDirectory();
-            final name = entry.file!.path.split(Platform.pathSeparator).last.split('/').last;
+            final name = entry.file!.path
+                .split(Platform.pathSeparator)
+                .last
+                .split('/')
+                .last;
             final targetFile = File('${dir.path}/$name');
             await MotionPhotoHelper.saveAdaptedMotionPhoto(
               entry.file!,
@@ -319,9 +415,9 @@ class _FullScreenImageState extends State<FullScreenImage> {
             );
             await FileHelper.scanFile(targetFile.path);
             if (!mounted) return;
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('已保存到 ${targetFile.path}')),
-            );
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text('已保存到 ${targetFile.path}')));
           } catch (e) {
             if (!mounted) return;
             ScaffoldMessenger.of(context).showSnackBar(
@@ -358,9 +454,9 @@ class _FullScreenImageState extends State<FullScreenImage> {
       await FileHelper.scanFile(targetFile.path);
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('已保存到 ${targetFile.path}')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('已保存到 ${targetFile.path}')));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -371,7 +467,134 @@ class _FullScreenImageState extends State<FullScreenImage> {
     }
   }
 
+  
+  Widget _buildLiveButton() {
+    // 上传/选图大图预览：微信同款，勾选实况播放一遍，取消实况不播放
+    if (widget.entries != null && _currentIndex < widget.entries!.length) {
+      final currentEntry = widget.entries![_currentIndex];
+      final bool isLiveSelected = currentEntry.uploadLive;
+
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () async {
+          final newLive = !isLiveSelected;
+          widget.entries![_currentIndex] =
+              currentEntry.copyWith(uploadLive: newLive);
+          widget.onToggleLive?.call(_currentIndex, newLive);
+          setState(() {});
+
+          if (newLive) {
+            // 勾选实况：播放一遍实况
+            if (_videoController != null &&
+                _videoController!.value.isInitialized) {
+              await _videoController!.seekTo(Duration.zero);
+              await _videoController!.play();
+              if (mounted) setState(() => _isPlaying = true);
+            }
+          } else {
+            // 取消实况：不播放
+            if (_videoController != null &&
+                _videoController!.value.isInitialized) {
+              await _videoController!.pause();
+              await _videoController!.seekTo(Duration.zero);
+            }
+            if (mounted) setState(() => _isPlaying = false);
+          }
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: 10,
+            vertical: 5,
+          ),
+          decoration: BoxDecoration(
+            color: isLiveSelected
+                ? const Color(0xFF07C160).withAlpha(230)
+                : Colors.black54,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: isLiveSelected ? Colors.white70 : Colors.white30,
+              width: 0.8,
+            ),
+          ),
+          child: CustomPaint(
+            foregroundPainter: isLiveSelected
+                ? null
+                : const DiagonalSlashPainter(
+                    color: Colors.white,
+                    strokeWidth: 1.6,
+                  ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  isLiveSelected
+                      ? Icons.motion_photos_on
+                      : Icons.motion_photos_off_outlined,
+                  size: 15,
+                  color: Colors.white,
+                ),
+                const SizedBox(width: 4),
+                const Text(
+                  '实况',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    // 浏览已发布动态：原有轻点播放/暂停逻辑
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: _toggleLivePlayback,
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: 10,
+          vertical: 5,
+        ),
+        decoration: BoxDecoration(
+          color: _isPlaying
+              ? Colors.white.withAlpha(220)
+              : Colors.black54,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: _isPlaying ? Colors.white : Colors.white30,
+            width: 0.8,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              _isPlaying
+                  ? Icons.motion_photos_on
+                  : Icons.motion_photos_on_outlined,
+              size: 15,
+              color: _isPlaying ? Colors.black87 : Colors.white,
+            ),
+            const SizedBox(width: 4),
+            Text(
+              '实况',
+              style: TextStyle(
+                color: _isPlaying ? Colors.black87 : Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
+
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
@@ -392,7 +615,9 @@ class _FullScreenImageState extends State<FullScreenImage> {
                       width: 20,
                       height: 20,
                       child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white),
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
                     )
                   : const Icon(Icons.download),
               tooltip: '下载',
@@ -414,19 +639,23 @@ class _FullScreenImageState extends State<FullScreenImage> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.broken_image,
-                        size: 48, color: Colors.white54),
+                    const Icon(
+                      Icons.broken_image,
+                      size: 48,
+                      color: Colors.white54,
+                    ),
                     const SizedBox(height: 8),
-                    const Text('图片加载失败',
-                        style: TextStyle(color: Colors.white54)),
+                    const Text(
+                      '图片加载失败',
+                      style: TextStyle(color: Colors.white54),
+                    ),
                   ],
                 ),
               ),
             ),
             pageController: _pageController,
             onPageChanged: _onPageChanged,
-            backgroundDecoration:
-                const BoxDecoration(color: Colors.black),
+            backgroundDecoration: const BoxDecoration(color: Colors.black),
             gaplessPlayback: true,
           ),
 
@@ -451,44 +680,7 @@ class _FullScreenImageState extends State<FullScreenImage> {
             Positioned(
               left: 16,
               bottom: 24,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: _toggleLivePlayback,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: _isPlaying
-                        ? Colors.white.withAlpha(220)
-                        : Colors.black54,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: _isPlaying ? Colors.white : Colors.white30,
-                      width: 0.8,
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        _isPlaying
-                            ? Icons.motion_photos_on
-                            : Icons.motion_photos_on_outlined,
-                        size: 15,
-                        color: _isPlaying ? Colors.black87 : Colors.white,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        '实况',
-                        style: TextStyle(
-                          color: _isPlaying ? Colors.black87 : Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+              child: _buildLiveButton(),
             ),
 
           // 4. 底部页码指示器
@@ -501,7 +693,9 @@ class _FullScreenImageState extends State<FullScreenImage> {
                 child: Center(
                   child: Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 6),
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.black45,
                       borderRadius: BorderRadius.circular(12),
@@ -509,7 +703,9 @@ class _FullScreenImageState extends State<FullScreenImage> {
                     child: Text(
                       '${_currentIndex + 1} / $_totalCount',
                       style: const TextStyle(
-                          color: Colors.white70, fontSize: 13),
+                        color: Colors.white70,
+                        fontSize: 13,
+                      ),
                     ),
                   ),
                 ),
@@ -520,4 +716,3 @@ class _FullScreenImageState extends State<FullScreenImage> {
     );
   }
 }
-

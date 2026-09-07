@@ -20,11 +20,7 @@ class EditMomentScreen extends ConsumerStatefulWidget {
   final DateTime date;
   final Moment? existingMoment; // null 表示新建
 
-  const EditMomentScreen({
-    super.key,
-    required this.date,
-    this.existingMoment,
-  });
+  const EditMomentScreen({super.key, required this.date, this.existingMoment});
 
   @override
   ConsumerState<EditMomentScreen> createState() => _EditMomentScreenState();
@@ -67,8 +63,9 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
   String get _dateStr => DateHelper.toDateStr(widget.date);
 
   /// 当前所有本地新选的图片文件（新建模式下全部都是本地文件）
-  List<File> get _localFiles =>
-      [for (final p in _photos.where((p) => p.isLocal)) p.file!];
+  List<File> get _localFiles => [
+    for (final p in _photos.where((p) => p.isLocal)) p.file!,
+  ];
 
   @override
   void initState() {
@@ -92,11 +89,9 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
       final isMotion = await MotionPhotoHelper.isMotionPhoto(f);
       // 从草稿恢复用户的实况开关状态，草稿未指定时默认传静态图 (false)
       final uploadLive = draft.liveFlags[i] ?? false;
-      loadedPhotos.add(PhotoEntry.file(
-        f,
-        isMotion: isMotion,
-        uploadLive: uploadLive,
-      ));
+      loadedPhotos.add(
+        PhotoEntry.file(f, isMotion: isMotion, uploadLive: uploadLive),
+      );
     }
 
     setState(() {
@@ -209,7 +204,8 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
       }
       _cancelledUploads.remove(path);
       _uploadStatuses[path] = PhotoUploadStatus.uploading;
-      if (!_pendingUploadQueue.contains(path) && !_inFlightUploads.contains(path)) {
+      if (!_pendingUploadQueue.contains(path) &&
+          !_inFlightUploads.contains(path)) {
         _pendingUploadQueue.add(path);
       }
     }
@@ -243,23 +239,29 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
 
   /// 单张上传
   Future<void> _uploadSingle(
-      String path, StorageService storageService, String folder) async {
+    String path,
+    StorageService storageService,
+    String folder,
+  ) async {
     try {
-      final entryIndex =
-          _photos.indexWhere((p) => p.isLocal && p.file!.path == path);
+      final entryIndex = _photos.indexWhere(
+        (p) => p.isLocal && p.file!.path == path,
+      );
       if (entryIndex == -1) return;
       final entry = _photos[entryIndex];
 
       final File fileToUpload;
       final bool isUploadingLive;
       if (entry.isMotion && !entry.uploadLive) {
-        // 实况照片且用户选择仅传静态图：提取无损静态 JPEG
-        fileToUpload = await MotionPhotoHelper.getOrExtractStillImage(entry.file!);
+        // 实况照片且用户选择仅传静态图：提取静态 JPEG（保存在应用私有临时缓存目录，杜绝存进手机相册）
+        fileToUpload = await MotionPhotoHelper.getOrExtractStillImage(
+          entry.file!,
+        );
         isUploadingLive = false;
       } else {
-        // 普通静态图，或用户主动选择上传实况：上传原文件
+        // 普通静态图，或用户主动选择上传实况：直接完整上传原文件，无需本地拆分
         fileToUpload = entry.file!;
-        isUploadingLive = entry.uploadLive;
+        isUploadingLive = entry.isMotion && entry.uploadLive;
       }
 
       if (!await fileToUpload.exists()) {
@@ -350,7 +352,10 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
   void _handlePhotosAdded(List<PhotoEntry> newEntries) {
     setState(() => _photos.addAll(newEntries));
     _syncDraftImages();
-    final files = [for (final p in newEntries) if (p.isLocal) p.file!];
+    final files = [
+      for (final p in newEntries)
+        if (p.isLocal) p.file!,
+    ];
     _enqueueUploads(files);
   }
 
@@ -382,13 +387,48 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
     }
   }
 
+  /// 切换指定照片的实况/静态上传状态
+  void _handleToggleLive(int index) {
+    if (index < 0 || index >= _photos.length) return;
+    final entry = _photos[index];
+    if (!entry.isMotion) return;
+
+    final newLive = !entry.uploadLive;
+    setState(() {
+      _photos[index] = entry.copyWith(uploadLive: newLive);
+    });
+
+    if (entry.isLocal && entry.file != null) {
+      final path = entry.file!.path;
+      final wasUploaded = _uploadedUrls.containsKey(path);
+      final previousUploadIsLive = _uploadedIsLive[path];
+
+      // 如果已上传且格式不一致（例如之前作为静态图上传了，现在改成实况，或反之），需重新上传
+      if (wasUploaded && previousUploadIsLive != newLive) {
+        final oldUrl = _uploadedUrls.remove(path);
+        _uploadedIsLive.remove(path);
+        _uploadStatuses.remove(path);
+        if (oldUrl != null) {
+          _enqueueDelete(oldUrl);
+        }
+        _enqueueUploads([entry.file!]);
+      } else if (_inFlightUploads.contains(path)) {
+        // 如果正在上传中，标记废弃并重新入队，确保最终上传格式正确
+        _cancelledUploads.add(path);
+        _pendingUploadQueue.add(path);
+      }
+    }
+
+    _syncDraftImages();
+  }
   /// 重试单张上传
   void _handleRetryUpload(int index) {
     final photo = _photos[index];
     if (photo.isLocal) {
       final path = photo.file!.path;
       _uploadStatuses[path] = PhotoUploadStatus.uploading;
-      if (!_pendingUploadQueue.contains(path) && !_inFlightUploads.contains(path)) {
+      if (!_pendingUploadQueue.contains(path) &&
+          !_inFlightUploads.contains(path)) {
         _pendingUploadQueue.add(path);
       }
       setState(() {});
@@ -398,7 +438,8 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
 
   /// 保活通知与唤醒锁生命周期同步
   Future<void> _updateKeepAliveState() async {
-    final isBusy = _inFlightUploads.isNotEmpty ||
+    final isBusy =
+        _inFlightUploads.isNotEmpty ||
         _pendingUploadQueue.isNotEmpty ||
         _isDeleting ||
         _isSaving;
@@ -417,8 +458,8 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
           content: _isSaving
               ? '正在发布日记...'
               : (_isDeleting
-                  ? '正在清理图片...'
-                  : '正在上传照片 ($doneCount/$localCount)...'),
+                    ? '正在清理图片...'
+                    : '正在上传照片 ($doneCount/$localCount)...'),
           maxProgress: localCount > 0 ? localCount : 1,
           progress: doneCount,
         );
@@ -428,8 +469,8 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
           content: _isSaving
               ? '正在发布日记...'
               : (_isDeleting
-                  ? '正在清理图片...'
-                  : '正在上传照片 ($doneCount/$localCount)...'),
+                    ? '正在清理图片...'
+                    : '正在上传照片 ($doneCount/$localCount)...'),
           maxProgress: localCount > 0 ? localCount : 1,
           progress: doneCount,
         );
@@ -445,7 +486,9 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
 
   /// API 保存成功后更新本地缓存
   Future<void> _updateCacheAfterSave(
-      String authorId, List<String> imageUrls) async {
+    String authorId,
+    List<String> imageUrls,
+  ) async {
     final cached = await CacheService.loadDayMoments(_dateStr) ?? [];
     final feeling = _feelingController.text.trim();
 
@@ -463,10 +506,12 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
 
     if (_isEdit) {
       momentJson['id'] = widget.existingMoment!.id;
-      momentJson['created_at'] =
-          DateHelper.toIsoString(widget.existingMoment!.createdAt);
-      momentJson['comments'] =
-          widget.existingMoment!.comments.map((c) => c.toJson()).toList();
+      momentJson['created_at'] = DateHelper.toIsoString(
+        widget.existingMoment!.createdAt,
+      );
+      momentJson['comments'] = widget.existingMoment!.comments
+          .map((c) => c.toJson())
+          .toList();
     } else {
       momentJson['created_at'] = now;
       momentJson['comments'] = <Map<String, dynamic>>[];
@@ -474,7 +519,8 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
 
     // 替换或追加到缓存列表
     final idx = cached.indexWhere(
-        (m) => m['date_str'] == _dateStr && m['author_id'] == authorId);
+      (m) => m['date_str'] == _dateStr && m['author_id'] == authorId,
+    );
     if (idx >= 0) {
       // 保留已有的 id（创建时可能还不知道）
       momentJson['id'] ??= cached[idx]['id'];
@@ -538,7 +584,8 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
 
       // 3. 检查是否有图片上传失败
       final hasFailed = _photos.any(
-          (p) => p.isLocal && !_uploadedUrls.containsKey(p.file!.path));
+        (p) => p.isLocal && !_uploadedUrls.containsKey(p.file!.path),
+      );
       if (hasFailed) {
         throw Exception('部分图片上传失败，请点击图片重试后发布');
       }
@@ -567,33 +614,30 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
           if (!imageUrls.contains(old)) storageService.deleteImage(old);
         }
 
-        await apiService.updateMoment(
-          widget.existingMoment!.id,
-          {
-            'image_urls': imageUrls,
-            'feeling': _feelingController.text.trim(),
-            if (_mood != null) 'mood': _mood,
-          },
-        );
+        await apiService.updateMoment(widget.existingMoment!.id, {
+          'image_urls': imageUrls,
+          'feeling': _feelingController.text.trim(),
+          if (_mood != null) 'mood': _mood,
+        });
         await _updateCacheAfterSave(currentUser.uid, imageUrls);
       } else {
         // 防并发：其他设备可能已创建当天日记
-        final existing =
-            await apiService.getMomentByDate(currentUser.uid, _dateStr);
+        final existing = await apiService.getMomentByDate(
+          currentUser.uid,
+          _dateStr,
+        );
         if (existing != null) {
-          final finalUrls =
-              imageUrls.isNotEmpty ? imageUrls : existing.imageUrls;
+          final finalUrls = imageUrls.isNotEmpty
+              ? imageUrls
+              : existing.imageUrls;
           for (final old in existing.imageUrls) {
             if (!finalUrls.contains(old)) storageService.deleteImage(old);
           }
-          await apiService.updateMoment(
-            existing.id,
-            {
-              'image_urls': finalUrls,
-              'feeling': _feelingController.text.trim(),
-              if (_mood != null) 'mood': _mood,
-            },
-          );
+          await apiService.updateMoment(existing.id, {
+            'image_urls': finalUrls,
+            'feeling': _feelingController.text.trim(),
+            if (_mood != null) 'mood': _mood,
+          });
           await _updateCacheAfterSave(currentUser.uid, finalUrls);
         } else {
           await apiService.createMoment(
@@ -618,8 +662,9 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-            content: Text(AppStrings.uploadSuccess),
-            backgroundColor: AppTheme.primaryColor),
+          content: Text(AppStrings.uploadSuccess),
+          backgroundColor: AppTheme.primaryColor,
+        ),
       );
       Navigator.pop(context, true);
     } catch (e) {
@@ -668,7 +713,9 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('草稿已保存'), backgroundColor: AppTheme.primaryColor),
+          content: Text('草稿已保存'),
+          backgroundColor: AppTheme.primaryColor,
+        ),
       );
     } catch (e) {
       if (!mounted) return;
@@ -704,136 +751,151 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
         }
       },
       child: Scaffold(
-      appBar: AppBar(
-        title: Text(_isEdit ? AppStrings.editTitle : AppStrings.createTitle),
-        actions: [
-          if (!_isEdit)
-            SizedBox(
-              width: 72,
-              child: TextButton(
-                onPressed:
-                    _isSavingDraft || _isSaving ? null : _handleSaveDraft,
-                child: _isSavingDraft
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Text('存草稿'),
-              ),
-            ),
-          SizedBox(
-            width: 84,
-            child: TextButton(
-              style: TextButton.styleFrom(padding: EdgeInsets.zero),
-              onPressed: _isSaving || _isSavingDraft ? null : _handleSave,
-              child: _isSaving
-                  ? (_inFlightUploads.isNotEmpty || _pendingUploadQueue.isNotEmpty
-                      ? FittedBox(
-                          fit: BoxFit.scaleDown,
-                          child: Text(
-                            '上传中 $doneCount/$localCount',
-                            style: const TextStyle(fontSize: 12),
-                          ),
+        appBar: AppBar(
+          title: Text(_isEdit ? AppStrings.editTitle : AppStrings.createTitle),
+          actions: [
+            if (!_isEdit)
+              SizedBox(
+                width: 72,
+                child: TextButton(
+                  onPressed: _isSavingDraft || _isSaving
+                      ? null
+                      : _handleSaveDraft,
+                  child: _isSavingDraft
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Text(
-                          '发布中…',
-                          style: TextStyle(fontSize: 12),
-                        ))
-                  : const Text(
-                      AppStrings.saveButton,
-                      style: TextStyle(fontWeight: FontWeight.w600),
-                    ),
-            ),
-          ),
-          const SizedBox(width: 4),
-        ],
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Text(
-                DateHelper.toChineseDate(widget.date),
-                style:
-                    const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-              ),
-            ),
-            const SizedBox(height: 20),
-
-            // 心情打分
-            Text(AppStrings.feelingLabel,
-                style:
-                    const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
-            const SizedBox(height: 8),
-            _buildMoodSelector(),
-            const SizedBox(height: 16),
-
-            // 图片九宫格（第一张为封面）
-            Text(AppStrings.photosLabel,
-                style:
-                    const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
-            const SizedBox(height: 8),
-            PhotoGridPicker(
-              entries: _photos,
-              statusProvider: (entry) {
-                if (!entry.isLocal) return PhotoUploadStatus.success;
-                return _uploadStatuses[entry.file!.path] ??
-                    (_uploadedUrls.containsKey(entry.file!.path)
-                        ? PhotoUploadStatus.success
-                        : PhotoUploadStatus.idle);
-              },
-              onRetry: _handleRetryUpload,
-              onTap: (index) {
-                showFullScreenPreview(
-                  context,
-                  entries: _photos,
-                  initialIndex: index,
-                );
-              },
-              onAdded: _handlePhotosAdded,
-              onRemoved: (index) {
-                _handleRemovePhoto(index);
-              },
-              onReordered: (oldIndex, newIndex) {
-                setState(() {
-                  final photo = _photos.removeAt(oldIndex);
-                  _photos.insert(newIndex, photo);
-                });
-                _syncDraftImages();
-              },
-            ),
-            const SizedBox(height: 20),
-
-            // 感受输入
-            Text('今日感受',
-                style:
-                    const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
-            const SizedBox(height: 8),
-            // 排除全局选择容器：输入框用自己的原生选择（与输入法兼容）
-            SelectionContainer.disabled(
-              child: TextField(
-                controller: _feelingController,
-                minLines: 5,
-                maxLines: null,
-                scrollPhysics: const NeverScrollableScrollPhysics(),
-                // 显式声明长按菜单：剪切/复制/粘贴/全选
-                contextMenuBuilder: (context, editableTextState) =>
-                    AdaptiveTextSelectionToolbar.buttonItems(
-                  anchors: editableTextState.contextMenuAnchors,
-                  buttonItems: editableTextState.contextMenuButtonItems,
-                ),
-                decoration: InputDecoration(
-                  hintText: AppStrings.feelingHint,
+                      : const Text('存草稿'),
                 ),
               ),
+            SizedBox(
+              width: 84,
+              child: TextButton(
+                style: TextButton.styleFrom(padding: EdgeInsets.zero),
+                onPressed: _isSaving || _isSavingDraft ? null : _handleSave,
+                child: _isSaving
+                    ? (_inFlightUploads.isNotEmpty ||
+                              _pendingUploadQueue.isNotEmpty
+                          ? FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                '上传中 $doneCount/$localCount',
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                            )
+                          : const Text('发布中…', style: TextStyle(fontSize: 12)))
+                    : const Text(
+                        AppStrings.saveButton,
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+              ),
             ),
+            const SizedBox(width: 4),
           ],
         ),
+        body: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Text(
+                  DateHelper.toChineseDate(widget.date),
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              // 心情打分
+              Text(
+                AppStrings.feelingLabel,
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 8),
+              _buildMoodSelector(),
+              const SizedBox(height: 16),
+
+              // 图片九宫格（第一张为封面）
+              Text(
+                AppStrings.photosLabel,
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 8),
+              PhotoGridPicker(
+                entries: _photos,
+                statusProvider: (entry) {
+                  if (!entry.isLocal) return PhotoUploadStatus.success;
+                  return _uploadStatuses[entry.file!.path] ??
+                      (_uploadedUrls.containsKey(entry.file!.path)
+                          ? PhotoUploadStatus.success
+                          : PhotoUploadStatus.idle);
+                },
+                onRetry: _handleRetryUpload,
+                onToggleLive: _handleToggleLive,
+                onTap: (index) {
+                  showFullScreenPreview(
+                    context,
+                    entries: _photos,
+                    initialIndex: index,
+                    onToggleLive: (idx, isLive) {
+                      _handleToggleLive(idx);
+                    },
+                  );
+                },
+                onAdded: _handlePhotosAdded,
+                onRemoved: (index) {
+                  _handleRemovePhoto(index);
+                },
+                onReordered: (oldIndex, newIndex) {
+                  setState(() {
+                    final photo = _photos.removeAt(oldIndex);
+                    _photos.insert(newIndex, photo);
+                  });
+                  _syncDraftImages();
+                },
+              ),
+              const SizedBox(height: 20),
+
+              // 感受输入
+              Text(
+                '今日感受',
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 8),
+              // 排除全局选择容器：输入框用自己的原生选择（与输入法兼容）
+              SelectionContainer.disabled(
+                child: TextField(
+                  controller: _feelingController,
+                  minLines: 5,
+                  maxLines: null,
+                  scrollPhysics: const NeverScrollableScrollPhysics(),
+                  // 显式声明长按菜单：剪切/复制/粘贴/全选
+                  contextMenuBuilder: (context, editableTextState) =>
+                      AdaptiveTextSelectionToolbar.buttonItems(
+                        anchors: editableTextState.contextMenuAnchors,
+                        buttonItems: editableTextState.contextMenuButtonItems,
+                      ),
+                  decoration: InputDecoration(hintText: AppStrings.feelingHint),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
-    ),
     );
   }
 

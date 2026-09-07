@@ -1,6 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
+import 'package:wechat_assets_picker/wechat_assets_picker.dart';
+import 'package:path_provider/path_provider.dart';
 
 /// 实况照片（Motion Photo / 动态照片）解析与提取工具类
 ///
@@ -11,6 +14,51 @@ class MotionPhotoHelper {
 
   /// 内存解析缓存：文件路径 -> 提取出的临时 MP4 视频文件 (null 表示非实况图)
   static final Map<String, File?> _memoryCache = {};
+
+  /// 内存缓存：AssetEntity id -> 是否为实况图
+  static final Map<String, bool> _assetMotionCache = {};
+
+  /// 检查相册中的 AssetEntity 是否为实况图（支持 iOS Live Photo 及 Android 各厂商动态照片）
+  /// 快速查询是否为实况（或已检测出的实况），无须异步开销
+  static bool isLiveOrCachedMotion(AssetEntity asset) {
+    if (asset.isLivePhoto) return true;
+    return _assetMotionCache[asset.id] == true;
+  }
+
+  static Future<bool> isMotionPhotoAsset(AssetEntity asset) async {
+    if (asset.isLivePhoto) return true;
+    if (_assetMotionCache.containsKey(asset.id)) {
+      return _assetMotionCache[asset.id]!;
+    }
+    try {
+      final file = await asset.file;
+      if (file == null) {
+        _assetMotionCache[asset.id] = false;
+        return false;
+      }
+      final isMotion = await isMotionPhoto(file);
+      _assetMotionCache[asset.id] = isMotion;
+      return isMotion;
+    } catch (_) {
+      _assetMotionCache[asset.id] = false;
+      return false;
+    }
+  }
+
+
+  /// 检查网络 URL 对应的本地缓存文件是否为实况照片
+  static Future<bool> isMotionPhotoUrl(String url) async {
+    if (url.isEmpty) return false;
+    try {
+      final fileInfo = await DefaultCacheManager().getFileFromCache(url);
+      if (fileInfo != null) {
+        return await isMotionPhoto(fileInfo.file);
+      }
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
 
   /// 检查指定本地文件是否为实况照片（极速二进制检索，无需解压视频）
   static Future<bool> isMotionPhoto(File? file) async {
@@ -43,14 +91,17 @@ class MotionPhotoHelper {
       final mp4Offset = await _findMp4Offset(file, length);
       if (mp4Offset <= 0) return file;
 
-      File targetFile = File('${path}_still.jpg');
-      try {
-        if (await targetFile.exists()) {
-          final existingSize = await targetFile.length();
-          if (existingSize == mp4Offset) return targetFile;
-        }
-      } catch (_) {
-        targetFile = File('${Directory.systemTemp.path}/${path.hashCode}_still.jpg');
+      final tempDir = await getTemporaryDirectory();
+      final stillDir = Directory('${tempDir.path}/still_images');
+      if (!await stillDir.exists()) {
+        await stillDir.create(recursive: true);
+      }
+      File targetFile = File(
+        '${stillDir.path}/still_${path.hashCode}_$mp4Offset.jpg',
+      );
+      if (await targetFile.exists()) {
+        final existingSize = await targetFile.length();
+        if (existingSize == mp4Offset) return targetFile;
       }
 
       final raf = await file.open(mode: FileMode.read);
@@ -59,7 +110,9 @@ class MotionPhotoHelper {
         try {
           outRaf = await targetFile.open(mode: FileMode.write);
         } catch (_) {
-          targetFile = File('${Directory.systemTemp.path}/${path.hashCode}_still.jpg');
+          targetFile = File(
+            '${Directory.systemTemp.path}/${path.hashCode}_still.jpg',
+          );
           outRaf = await targetFile.open(mode: FileMode.write);
         }
 
@@ -103,10 +156,6 @@ class MotionPhotoHelper {
         return null;
       }
 
-      // 目标视频缓存文件路径
-      final videoPath = '${path}_motion.mp4';
-      final targetVideoFile = File(videoPath);
-
       // 1. 查找 MP4 文件头特征 'ftyp'
       final mp4Offset = await _findMp4Offset(file, length);
       if (mp4Offset == -1) {
@@ -115,6 +164,20 @@ class MotionPhotoHelper {
       }
 
       final expectedVideoSize = length - mp4Offset;
+      if (expectedVideoSize <= 0) {
+        _memoryCache[path] = null;
+        return null;
+      }
+
+      // 目标视频缓存文件保存在应用私有临时缓存目录，杜绝污染手机相册
+      final tempDir = await getTemporaryDirectory();
+      final videoDir = Directory('${tempDir.path}/motion_videos');
+      if (!await videoDir.exists()) {
+        await videoDir.create(recursive: true);
+      }
+      final videoPath =
+          '${videoDir.path}/motion_${path.hashCode}_$expectedVideoSize.mp4';
+      final targetVideoFile = File(videoPath);
       if (expectedVideoSize <= 0) {
         _memoryCache[path] = null;
         return null;
@@ -211,7 +274,10 @@ class MotionPhotoHelper {
 
       final xmpBytes = utf8.encode(xmpXml);
       // http://ns.adobe.com/xap/1.0/\x00 标准 XMP APP1 命名空间前缀（29 字节）
-      final xmpNamespace = [...utf8.encode('http://ns.adobe.com/xap/1.0/'), 0x00];
+      final xmpNamespace = [
+        ...utf8.encode('http://ns.adobe.com/xap/1.0/'),
+        0x00,
+      ];
       final payloadLength = xmpNamespace.length + xmpBytes.length;
       final segmentLength = payloadLength + 2;
 
@@ -225,7 +291,9 @@ class MotionPhotoHelper {
 
       // 组装新 JPEG：SOI (FF D8) + APP1 Segment + 原始 JPEG 主体 (跳过前 2 字节 SOI) + MP4 视频流
       final builder = BytesBuilder(copy: false);
-      if (jpegBytes.length >= 2 && jpegBytes[0] == 0xFF && jpegBytes[1] == 0xD8) {
+      if (jpegBytes.length >= 2 &&
+          jpegBytes[0] == 0xFF &&
+          jpegBytes[1] == 0xD8) {
         builder.add(jpegBytes.sublist(0, 2)); // SOI
         builder.add(app1Segment);
         builder.add(jpegBytes.sublist(2));
@@ -265,8 +333,10 @@ class MotionPhotoHelper {
           if (buffer[i] == 0x66 && // 'f'
               buffer[i + 1] == 0x74 && // 't'
               buffer[i + 2] == 0x79 && // 'y'
-              buffer[i + 3] == 0x70) { // 'p'
-            final boxSize = (buffer[i - 4] << 24) |
+              buffer[i + 3] == 0x70) {
+            // 'p'
+            final boxSize =
+                (buffer[i - 4] << 24) |
                 (buffer[i - 3] << 16) |
                 (buffer[i - 2] << 8) |
                 buffer[i - 1];
@@ -291,3 +361,4 @@ class MotionPhotoHelper {
     }
   }
 }
+

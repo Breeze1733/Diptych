@@ -1,7 +1,7 @@
 name: diptych
 description: "Diptych - 双人私密日记"
 publish_to: 'none'
-version: 1.1.9+26
+version: 1.1.10+27
 
 environment:
   sdk: ^3.12.2

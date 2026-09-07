@@ -4,14 +4,10 @@ import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../utils/diptych_asset_picker.dart';
 import '../utils/motion_photo_helper.dart';
+import 'live_photo_badge.dart';
 
 /// 图片上传状态
-enum PhotoUploadStatus {
-  idle,
-  uploading,
-  success,
-  failed,
-}
+enum PhotoUploadStatus { idle, uploading, success, failed }
 
 /// 一张图片条目：本地新选的文件，或编辑时已上传的网络图
 class PhotoEntry {
@@ -66,6 +62,7 @@ class PhotoGridPicker extends StatelessWidget {
   final PhotoUploadStatus Function(PhotoEntry entry)? statusProvider;
   final ValueChanged<int>? onRetry;
   final ValueChanged<int>? onTap;
+  final ValueChanged<int>? onToggleLive;
 
   const PhotoGridPicker({
     super.key,
@@ -76,6 +73,7 @@ class PhotoGridPicker extends StatelessWidget {
     this.statusProvider,
     this.onRetry,
     this.onTap,
+    this.onToggleLive,
   });
 
   Future<void> _pickImages(BuildContext context) async {
@@ -109,13 +107,7 @@ class PhotoGridPicker extends StatelessWidget {
       if (picked != null) {
         final file = File(picked.path);
         final isMotion = await MotionPhotoHelper.isMotionPhoto(file);
-        onAdded([
-          PhotoEntry.file(
-            file,
-            isMotion: isMotion,
-            uploadLive: false,
-          ),
-        ]);
+        onAdded([PhotoEntry.file(file, isMotion: isMotion, uploadLive: false)]);
       }
     } else {
       try {
@@ -195,7 +187,11 @@ class PhotoGridPicker extends StatelessWidget {
               child: SizedBox(
                 width: constraints.maxWidth,
                 height: constraints.maxHeight,
-                child: _buildPhotoContent(index, status, showDeleteButton: false),
+                child: _buildPhotoContent(
+                  index,
+                  status,
+                  showDeleteButton: false,
+                ),
               ),
             ),
             childWhenDragging: Opacity(
@@ -230,8 +226,11 @@ class PhotoGridPicker extends StatelessWidget {
     );
   }
 
-  Widget _buildPhotoContent(int index, PhotoUploadStatus status,
-      {bool showDeleteButton = true}) {
+  Widget _buildPhotoContent(
+    int index,
+    PhotoUploadStatus status, {
+    bool showDeleteButton = true,
+  }) {
     final entry = entries[index];
     final image = entry.isLocal
         ? Image.file(entry.file!, fit: BoxFit.cover)
@@ -277,9 +276,10 @@ class PhotoGridPicker extends StatelessWidget {
                   Text(
                     '轻点重试',
                     style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w500),
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                 ],
               ),
@@ -293,7 +293,9 @@ class PhotoGridPicker extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: const BoxDecoration(
                   color: Colors.black54,
-                  borderRadius: BorderRadius.only(bottomRight: Radius.circular(6)),
+                  borderRadius: BorderRadius.only(
+                    bottomRight: Radius.circular(6),
+                  ),
                 ),
                 child: const Text(
                   '封面',
@@ -301,41 +303,15 @@ class PhotoGridPicker extends StatelessWidget {
                 ),
               ),
             ),
-          // 实况徽标（若为实况照片，点击可单独切换该图片的实况状态）
-          // 实况静态徽标（如果选图时指定为实况，则在九宫格显示微信同款静态角标，轻触图片主体进入大图预览）
-          if (entry.uploadLive)
+          // 实况缩略图角标：如果是实况图，在左下角显示「实况」角标（选了实况正常显示，没选实况画一条斜杠）
+          // 不能选择实况的普通静态图片不显示任何角标
+          if (entry.isMotion)
             Positioned(
               left: 4,
               bottom: 4,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.black.withAlpha(160),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: Colors.white38,
-                    width: 0.8,
-                  ),
-                ),
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.motion_photos_on,
-                      size: 12,
-                      color: Colors.white,
-                    ),
-                    SizedBox(width: 3),
-                    Text(
-                      '实况',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 9.5,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
+              child: LivePhotoBadge(
+                isLiveSelected: entry.uploadLive,
+                onTap: onToggleLive != null ? () => onToggleLive!(index) : null,
               ),
             ),
           // 删除角标
@@ -362,3 +338,4 @@ class PhotoGridPicker extends StatelessWidget {
     );
   }
 }
+

@@ -5,6 +5,8 @@ import 'auth_provider.dart';
 
 /// 通知列表状态管理 Notifier
 class NotificationListNotifier extends Notifier<List<AppNotification>> {
+  bool _isSyncing = false;
+
   @override
   List<AppNotification> build() {
     final role = ref.watch(currentUserRoleProvider);
@@ -20,29 +22,43 @@ class NotificationListNotifier extends Notifier<List<AppNotification>> {
     return const [];
   }
 
-  /// 与后端队列静默同步
+  /// 与后端队列静默同步（增加并发锁防抖）
   Future<void> sync() async {
+    if (_isSyncing) return;
+    _isSyncing = true;
     final role = ref.read(currentUserRoleProvider);
-    if (role == null) return;
+    if (role == null) {
+      _isSyncing = false;
+      return;
+    }
     final api = ref.read(apiServiceProvider);
     try {
       final updated = await NotificationService.sync(role, api);
       state = updated;
-    } catch (_) {}
+    } catch (_) {
+    } finally {
+      _isSyncing = false;
+    }
   }
 
-  /// 标记单条通知已读
+  /// 标记单条通知已读（带乐观更新）
   Future<void> markAsRead(String id) async {
     final role = ref.read(currentUserRoleProvider);
     if (role == null) return;
+    // 乐观立即将该项标为已读
+    state = state
+        .map((n) => n.id == id ? n.copyWith(isRead: true) : n)
+        .toList();
     final updated = await NotificationService.markAsRead(role, id);
     state = updated;
   }
 
-  /// 全部标记为已读
+  /// 全部标记为已读（带乐观更新）
   Future<void> markAllAsRead() async {
     final role = ref.read(currentUserRoleProvider);
     if (role == null) return;
+    // 乐观立即将所有项标为已读，避免网络或读取延迟引起界面无反应
+    state = state.map((n) => n.copyWith(isRead: true)).toList();
     final updated = await NotificationService.markAllAsRead(role);
     state = updated;
   }
@@ -51,14 +67,15 @@ class NotificationListNotifier extends Notifier<List<AppNotification>> {
   Future<void> clearAll() async {
     final role = ref.read(currentUserRoleProvider);
     if (role == null) return;
-    await NotificationService.clearAll(role);
     state = const [];
+    await NotificationService.clearAll(role);
   }
 }
 
 final notificationListProvider =
     NotifierProvider<NotificationListNotifier, List<AppNotification>>(
-        NotificationListNotifier.new);
+      NotificationListNotifier.new,
+    );
 
 /// 未读通知总数 Provider（用于驱动顶栏 Badge）
 final unreadNotificationCountProvider = Provider<int>((ref) {
