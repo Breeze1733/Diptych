@@ -216,8 +216,8 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
     _processUploadQueue();
   }
 
-  /// 调度上传队列（最大并发数 2）
-  static const int _maxConcurrentUploads = 2;
+  /// 调度上传队列——串行上传
+  static const int _maxConcurrentUploads = 1;
 
   Future<void> _processUploadQueue() async {
     if (!mounted) return;
