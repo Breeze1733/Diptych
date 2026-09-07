@@ -4,7 +4,6 @@ import 'dart:typed_data';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:wechat_assets_picker/wechat_assets_picker.dart';
 import 'package:path_provider/path_provider.dart';
-import 'file_helper.dart';
 
 /// 实况照片（Motion Photo / 动态照片）解析与提取工具类
 ///
@@ -20,6 +19,12 @@ class MotionPhotoHelper {
   static final Map<String, bool> _assetMotionCache = {};
 
   /// 检查相册中的 AssetEntity 是否为实况图（支持 iOS Live Photo 及 Android 各厂商动态照片）
+  /// 快速查询是否为实况（或已检测出的实况），无须异步开销
+  static bool isLiveOrCachedMotion(AssetEntity asset) {
+    if (asset.isLivePhoto) return true;
+    return _assetMotionCache[asset.id] == true;
+  }
+
   static Future<bool> isMotionPhotoAsset(AssetEntity asset) async {
     if (asset.isLivePhoto) return true;
     if (_assetMotionCache.containsKey(asset.id)) {
@@ -40,23 +45,6 @@ class MotionPhotoHelper {
     }
   }
 
-  /// 清理旧版本可能在相册目录产生的 _still.jpg 和 _motion.mp4 垃圾文件
-  static void _cleanupLegacyPollutedFiles(String path) {
-    Future(() async {
-      try {
-        final legacyStill = File('${path}_still.jpg');
-        if (await legacyStill.exists()) {
-          await legacyStill.delete();
-          await FileHelper.scanFile(legacyStill.path);
-        }
-        final legacyVideo = File('${path}_motion.mp4');
-        if (await legacyVideo.exists()) {
-          await legacyVideo.delete();
-          await FileHelper.scanFile(legacyVideo.path);
-        }
-      } catch (_) {}
-    });
-  }
 
   /// 检查网络 URL 对应的本地缓存文件是否为实况照片
   static Future<bool> isMotionPhotoUrl(String url) async {
@@ -95,8 +83,6 @@ class MotionPhotoHelper {
   static Future<File> getOrExtractStillImage(File file) async {
     final path = file.path;
     if (!await file.exists()) return file;
-
-    _cleanupLegacyPollutedFiles(path);
 
     try {
       final length = await file.length();
@@ -155,7 +141,6 @@ class MotionPhotoHelper {
   /// 如果存在内嵌 MP4，则返回对应的 .mp4 文件；如果是普通静态图，返回 null。
   static Future<File?> getOrExtractMotionVideo(File file) async {
     final path = file.path;
-    _cleanupLegacyPollutedFiles(path);
     if (_memoryCache.containsKey(path)) {
       final cachedFile = _memoryCache[path];
       if (cachedFile != null && await cachedFile.exists()) {
@@ -376,3 +361,4 @@ class MotionPhotoHelper {
     }
   }
 }
+

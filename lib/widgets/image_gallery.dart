@@ -8,6 +8,7 @@ import 'package:video_player/video_player.dart';
 import '../utils/file_helper.dart';
 import '../utils/motion_photo_helper.dart';
 import 'photo_grid_picker.dart';
+import 'live_photo_badge.dart';
 
 /// 弹出半透明底色的图片列表（一行三张，可滑动），点击单张进入全屏查看
 void showImageGallery(BuildContext context, List<String> urls) {
@@ -30,6 +31,7 @@ void showFullScreenPreview(
   List<String>? urls,
   List<PhotoEntry>? entries,
   int initialIndex = 0,
+  void Function(int index, bool isLive)? onToggleLive,
 }) {
   Navigator.push(
     context,
@@ -197,12 +199,14 @@ class FullScreenImage extends StatefulWidget {
   final List<String>? urls;
   final List<PhotoEntry>? entries;
   final int initialIndex;
+  final void Function(int index, bool isLive)? onToggleLive;
 
   const FullScreenImage({
     super.key,
     this.urls,
     this.entries,
     this.initialIndex = 0,
+    this.onToggleLive,
   }) : assert(urls != null || entries != null, 'urls 与 entries 至少提供一个');
 
   @override
@@ -220,7 +224,12 @@ class _FullScreenImageState extends State<FullScreenImage> {
   bool _isPlaying = false;
   int _checkingIndex = -1;
 
-  bool get _showLiveButton => _isMotionPhoto;
+  bool get _showLiveButton {
+    if (widget.entries != null && _currentIndex < widget.entries!.length) {
+      return widget.entries![_currentIndex].isMotion;
+    }
+    return _isMotionPhoto;
+  }
 
   int get _totalCount => widget.entries?.length ?? widget.urls?.length ?? 0;
 
@@ -458,7 +467,134 @@ class _FullScreenImageState extends State<FullScreenImage> {
     }
   }
 
+  
+  Widget _buildLiveButton() {
+    // 上传/选图大图预览：微信同款，勾选实况播放一遍，取消实况不播放
+    if (widget.entries != null && _currentIndex < widget.entries!.length) {
+      final currentEntry = widget.entries![_currentIndex];
+      final bool isLiveSelected = currentEntry.uploadLive;
+
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () async {
+          final newLive = !isLiveSelected;
+          widget.entries![_currentIndex] =
+              currentEntry.copyWith(uploadLive: newLive);
+          widget.onToggleLive?.call(_currentIndex, newLive);
+          setState(() {});
+
+          if (newLive) {
+            // 勾选实况：播放一遍实况
+            if (_videoController != null &&
+                _videoController!.value.isInitialized) {
+              await _videoController!.seekTo(Duration.zero);
+              await _videoController!.play();
+              if (mounted) setState(() => _isPlaying = true);
+            }
+          } else {
+            // 取消实况：不播放
+            if (_videoController != null &&
+                _videoController!.value.isInitialized) {
+              await _videoController!.pause();
+              await _videoController!.seekTo(Duration.zero);
+            }
+            if (mounted) setState(() => _isPlaying = false);
+          }
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: 10,
+            vertical: 5,
+          ),
+          decoration: BoxDecoration(
+            color: isLiveSelected
+                ? const Color(0xFF07C160).withAlpha(230)
+                : Colors.black54,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: isLiveSelected ? Colors.white70 : Colors.white30,
+              width: 0.8,
+            ),
+          ),
+          child: CustomPaint(
+            foregroundPainter: isLiveSelected
+                ? null
+                : const DiagonalSlashPainter(
+                    color: Colors.white,
+                    strokeWidth: 1.6,
+                  ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  isLiveSelected
+                      ? Icons.motion_photos_on
+                      : Icons.motion_photos_off_outlined,
+                  size: 15,
+                  color: Colors.white,
+                ),
+                const SizedBox(width: 4),
+                const Text(
+                  '实况',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    // 浏览已发布动态：原有轻点播放/暂停逻辑
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: _toggleLivePlayback,
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: 10,
+          vertical: 5,
+        ),
+        decoration: BoxDecoration(
+          color: _isPlaying
+              ? Colors.white.withAlpha(220)
+              : Colors.black54,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: _isPlaying ? Colors.white : Colors.white30,
+            width: 0.8,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              _isPlaying
+                  ? Icons.motion_photos_on
+                  : Icons.motion_photos_on_outlined,
+              size: 15,
+              color: _isPlaying ? Colors.black87 : Colors.white,
+            ),
+            const SizedBox(width: 4),
+            Text(
+              '实况',
+              style: TextStyle(
+                color: _isPlaying ? Colors.black87 : Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
+
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
@@ -544,47 +680,7 @@ class _FullScreenImageState extends State<FullScreenImage> {
             Positioned(
               left: 16,
               bottom: 24,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: _toggleLivePlayback,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 5,
-                  ),
-                  decoration: BoxDecoration(
-                    color: _isPlaying
-                        ? Colors.white.withAlpha(220)
-                        : Colors.black54,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: _isPlaying ? Colors.white : Colors.white30,
-                      width: 0.8,
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        _isPlaying
-                            ? Icons.motion_photos_on
-                            : Icons.motion_photos_on_outlined,
-                        size: 15,
-                        color: _isPlaying ? Colors.black87 : Colors.white,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        '实况',
-                        style: TextStyle(
-                          color: _isPlaying ? Colors.black87 : Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+              child: _buildLiveButton(),
             ),
 
           // 4. 底部页码指示器

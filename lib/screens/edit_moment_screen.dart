@@ -387,6 +387,40 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
     }
   }
 
+  /// 切换指定照片的实况/静态上传状态
+  void _handleToggleLive(int index) {
+    if (index < 0 || index >= _photos.length) return;
+    final entry = _photos[index];
+    if (!entry.isMotion) return;
+
+    final newLive = !entry.uploadLive;
+    setState(() {
+      _photos[index] = entry.copyWith(uploadLive: newLive);
+    });
+
+    if (entry.isLocal && entry.file != null) {
+      final path = entry.file!.path;
+      final wasUploaded = _uploadedUrls.containsKey(path);
+      final previousUploadIsLive = _uploadedIsLive[path];
+
+      // 如果已上传且格式不一致（例如之前作为静态图上传了，现在改成实况，或反之），需重新上传
+      if (wasUploaded && previousUploadIsLive != newLive) {
+        final oldUrl = _uploadedUrls.remove(path);
+        _uploadedIsLive.remove(path);
+        _uploadStatuses.remove(path);
+        if (oldUrl != null) {
+          _enqueueDelete(oldUrl);
+        }
+        _enqueueUploads([entry.file!]);
+      } else if (_inFlightUploads.contains(path)) {
+        // 如果正在上传中，标记废弃并重新入队，确保最终上传格式正确
+        _cancelledUploads.add(path);
+        _pendingUploadQueue.add(path);
+      }
+    }
+
+    _syncDraftImages();
+  }
   /// 重试单张上传
   void _handleRetryUpload(int index) {
     final photo = _photos[index];
@@ -808,11 +842,15 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
                           : PhotoUploadStatus.idle);
                 },
                 onRetry: _handleRetryUpload,
+                onToggleLive: _handleToggleLive,
                 onTap: (index) {
                   showFullScreenPreview(
                     context,
                     entries: _photos,
                     initialIndex: index,
+                    onToggleLive: (idx, isLive) {
+                      _handleToggleLive(idx);
+                    },
                   );
                 },
                 onAdded: _handlePhotosAdded,
