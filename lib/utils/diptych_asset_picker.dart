@@ -17,7 +17,10 @@ class DiptychAssetPickerProvider extends DefaultAssetPickerProvider {
     bool keepPreviousCount = false,
   }) async {
     try {
-      await super.getPaths(onlyAll: onlyAll, keepPreviousCount: keepPreviousCount);
+      await super.getPaths(
+        onlyAll: onlyAll,
+        keepPreviousCount: keepPreviousCount,
+      );
       if (paths.isEmpty) {
         hasAssetsToDisplay = false;
         isAssetsEmpty = true;
@@ -76,7 +79,7 @@ class DiptychAssetPickerBuilderDelegate
   final ValueNotifier<int> liveNotifier = ValueNotifier<int>(0);
 
   /// 默认实况倾向（选图时默认静态，用户可主动针对某张图片开启实况）
-  bool defaultLive = false;
+  bool defaultLive = true;
 
   @override
   void dispose() {
@@ -109,74 +112,13 @@ class DiptychAssetPickerBuilderDelegate
     final selector = super.selectIndicator(context, index, asset);
     return Stack(
       fit: StackFit.expand,
-      children: [
-        selector,
-        _buildGridItemLiveBadge(context, asset),
-      ],
+      children: [selector, _buildGridItemLiveBadge(context, asset)],
     );
   }
 
-  /// 在相册网格缩略图左下角显示的单张实况切换角标
+  /// 在相册网格缩略图左下角显示的实况角标：只要是实况照片，在缩略图清晰标示「实况」
   Widget _buildGridItemLiveBadge(BuildContext context, AssetEntity asset) {
-    return ListenableBuilder(
-      listenable: Listenable.merge([provider, liveNotifier]),
-      builder: (context, _) {
-        final isSelected = provider.selectedAssets.contains(asset);
-        if (!isSelected) {
-          return const SizedBox.shrink();
-        }
-
-        final isLive = liveAssetIds.contains(asset.id);
-
-        return Positioned(
-          left: 4,
-          bottom: 4,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () {
-              if (isLive) {
-                liveAssetIds.remove(asset.id);
-              } else {
-                liveAssetIds.add(asset.id);
-              }
-              liveNotifier.value++;
-            },
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2.5),
-              decoration: BoxDecoration(
-                color: isLive
-                    ? const Color(0xFF07C160)
-                    : Colors.black.withValues(alpha: 0.65),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                  color: isLive ? Colors.white70 : Colors.white24,
-                  width: 0.8,
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    isLive ? Icons.motion_photos_on : Icons.motion_photos_off,
-                    size: 11,
-                    color: Colors.white,
-                  ),
-                  const SizedBox(width: 3),
-                  Text(
-                    isLive ? '实况' : '实况关',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
+    return _AssetPickerLiveBadge(asset: asset);
   }
 
   @override
@@ -243,9 +185,7 @@ class DiptychAssetPickerBuilderDelegate
           padding: const EdgeInsets.symmetric(horizontal: 12),
           color: theme.colorScheme.secondary,
           disabledColor: theme.splashColor,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(3),
-          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(3)),
           onPressed: shouldAllowConfirm
               ? () {
                   Navigator.maybeOf(context)?.maybePop(provider.selectedAssets);
@@ -278,9 +218,9 @@ class DiptychAssetPickerBuilderDelegate
       if (hasBottomActions)
         Container(
           height: bottomActionBarHeight + bottomPadding,
-          padding: const EdgeInsets.symmetric(horizontal: 12).copyWith(
-            bottom: bottomPadding,
-          ),
+          padding: const EdgeInsets.symmetric(
+            horizontal: 12,
+          ).copyWith(bottom: bottomPadding),
           color: appBarColor.withValues(
             alpha: appBarColor.a * (isAppleOS(context) ? .9 : 1),
           ),
@@ -309,8 +249,9 @@ class DiptychAssetPickerBuilderDelegate
                         ? Icons.motion_photos_on
                         : Icons.motion_photos_off;
                   } else if (selectedCount == 1) {
-                    final singleLive =
-                        liveAssetIds.contains(selectedAssets.first.id);
+                    final singleLive = liveAssetIds.contains(
+                      selectedAssets.first.id,
+                    );
                     btnText = singleLive ? '实况' : '实况关';
                     isHighlight = singleLive;
                     btnIcon = singleLive
@@ -352,7 +293,9 @@ class DiptychAssetPickerBuilderDelegate
                     },
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 5),
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
                       decoration: BoxDecoration(
                         color: isHighlight
                             ? const Color(0xFF07C160)
@@ -366,11 +309,7 @@ class DiptychAssetPickerBuilderDelegate
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(
-                            btnIcon,
-                            size: 15,
-                            color: Colors.white,
-                          ),
+                          Icon(btnIcon, size: 15, color: Colors.white),
                           const SizedBox(width: 4),
                           Text(
                             btnText,
@@ -398,10 +337,7 @@ class DiptychAssetPickerBuilderDelegate
     if (children.isEmpty) {
       return const SizedBox.shrink();
     }
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: children,
-    );
+    return Column(mainAxisSize: MainAxisSize.min, children: children);
   }
 
   /// 当选了多张图片时，弹出底部抽屉分别设置每张图片的实况开关
@@ -422,8 +358,10 @@ class DiptychAssetPickerBuilderDelegate
 
             return SafeArea(
               child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -464,8 +402,10 @@ class DiptychAssetPickerBuilderDelegate
                             });
                             liveNotifier.value++;
                           },
-                          child: const Text('全开',
-                              style: TextStyle(color: Color(0xFF07C160))),
+                          child: const Text(
+                            '全开',
+                            style: TextStyle(color: Color(0xFF07C160)),
+                          ),
                         ),
                         TextButton(
                           onPressed: () {
@@ -476,8 +416,10 @@ class DiptychAssetPickerBuilderDelegate
                             });
                             liveNotifier.value++;
                           },
-                          child: const Text('全关',
-                              style: TextStyle(color: Colors.white70)),
+                          child: const Text(
+                            '全关',
+                            style: TextStyle(color: Colors.white70),
+                          ),
                         ),
                       ],
                     ),
@@ -505,8 +447,9 @@ class DiptychAssetPickerBuilderDelegate
                                     image: AssetEntityImageProvider(
                                       asset,
                                       isOriginal: false,
-                                      thumbnailSize:
-                                          const ThumbnailSize.square(120),
+                                      thumbnailSize: const ThumbnailSize.square(
+                                        120,
+                                      ),
                                     ),
                                     width: 48,
                                     height: 48,
@@ -554,11 +497,15 @@ class DiptychAssetPickerBuilderDelegate
                                   },
                                   child: Container(
                                     padding: const EdgeInsets.symmetric(
-                                        horizontal: 10, vertical: 5),
+                                      horizontal: 10,
+                                      vertical: 5,
+                                    ),
                                     decoration: BoxDecoration(
                                       color: isLive
                                           ? const Color(0xFF07C160)
-                                          : Colors.white.withValues(alpha: 0.12),
+                                          : Colors.white.withValues(
+                                              alpha: 0.12,
+                                            ),
                                       borderRadius: BorderRadius.circular(14),
                                       border: Border.all(
                                         color: isLive
@@ -611,9 +558,13 @@ class DiptychAssetPickerBuilderDelegate
                           ),
                         ),
                         onPressed: () => Navigator.pop(sheetContext),
-                        child: const Text('确定',
-                            style: TextStyle(
-                                fontSize: 15, fontWeight: FontWeight.w600)),
+                        child: const Text(
+                          '确定',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                       ),
                     ),
                   ],
@@ -633,11 +584,11 @@ class DiptychAssetPicker {
 
   static const PermissionRequestOption _permissionOption =
       PermissionRequestOption(
-    androidPermission: AndroidPermission(
-      type: RequestType.common,
-      mediaLocation: false,
-    ),
-  );
+        androidPermission: AndroidPermission(
+          type: RequestType.common,
+          mediaLocation: false,
+        ),
+      );
 
   static Future<List<PhotoEntry>?> pickPhotos(
     BuildContext context, {
@@ -690,16 +641,17 @@ class DiptychAssetPicker {
 
     List<AssetEntity>? assets;
     try {
-      assets = await AssetPicker.pickAssetsWithDelegate<
-        AssetEntity,
-        AssetPathEntity,
-        DiptychAssetPickerProvider,
-        DiptychAssetPickerBuilderDelegate
-      >(
-        context,
-        delegate: delegate,
-        permissionRequestOption: _permissionOption,
-      );
+      assets =
+          await AssetPicker.pickAssetsWithDelegate<
+            AssetEntity,
+            AssetPathEntity,
+            DiptychAssetPickerProvider,
+            DiptychAssetPickerBuilderDelegate
+          >(
+            context,
+            delegate: delegate,
+            permissionRequestOption: _permissionOption,
+          );
     } catch (e, stack) {
       debugPrint('AssetPicker.pickAssetsWithDelegate 异常: $e\n$stack');
       return null;
@@ -715,14 +667,89 @@ class DiptychAssetPicker {
       if (file != null) {
         final isMotion = await MotionPhotoHelper.isMotionPhoto(file);
         final isLiveSelected = delegate.liveAssetIds.contains(asset.id);
-        entries.add(PhotoEntry.file(
-          file,
-          isMotion: isMotion,
-          uploadLive: isMotion && isLiveSelected,
-        ));
+        entries.add(
+          PhotoEntry.file(
+            file,
+            isMotion: isMotion,
+            uploadLive: isMotion && isLiveSelected,
+          ),
+        );
       }
     }
 
     return entries;
+  }
+}
+
+/// 相册缩略图网格中的实况角标：如果是实况图，在缩略图常驻显示「实况」角标
+class _AssetPickerLiveBadge extends StatefulWidget {
+  final AssetEntity asset;
+  const _AssetPickerLiveBadge({required this.asset});
+
+  @override
+  State<_AssetPickerLiveBadge> createState() => _AssetPickerLiveBadgeState();
+}
+
+class _AssetPickerLiveBadgeState extends State<_AssetPickerLiveBadge> {
+  bool _isLive = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkLive();
+  }
+
+  @override
+  void didUpdateWidget(_AssetPickerLiveBadge oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.asset.id != widget.asset.id) {
+      _checkLive();
+    }
+  }
+
+  Future<void> _checkLive() async {
+    if (widget.asset.isLivePhoto) {
+      if (mounted) setState(() => _isLive = true);
+      return;
+    }
+    final isLive = await MotionPhotoHelper.isMotionPhotoAsset(widget.asset);
+    if (mounted && isLive) {
+      setState(() => _isLive = true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_isLive) return const SizedBox.shrink();
+
+    return Positioned(
+      left: 4,
+      bottom: 4,
+      child: IgnorePointer(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+          decoration: BoxDecoration(
+            color: Colors.black.withAlpha(160),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: Colors.white38, width: 0.8),
+          ),
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.motion_photos_on, size: 11, color: Colors.white),
+              SizedBox(width: 3),
+              Text(
+                '实况',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 9.5,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }

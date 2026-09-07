@@ -1,3 +1,4 @@
+import '../utils/motion_photo_helper.dart';
 import 'package:flutter/material.dart';
 
 import 'package:cached_network_image/cached_network_image.dart';
@@ -56,10 +57,7 @@ class MomentCard extends StatelessWidget {
           // 头像 + 昵称 + 心情分
           Row(
             children: [
-              AvatarWidget(
-                avatarUrl: avatarUrl,
-                size: 32,
-              ),
+              AvatarWidget(avatarUrl: avatarUrl, size: 32),
               const SizedBox(width: 8),
               Expanded(
                 child: SelectableText(nickname, style: AppTheme.momentNickname),
@@ -138,11 +136,18 @@ class MomentCard extends StatelessWidget {
           decoration: BoxDecoration(
             color: const Color(0xFF2196F3).withAlpha(15),
             borderRadius: BorderRadius.circular(4),
-            border: Border.all(color: const Color(0xFF2196F3).withAlpha(60), width: 0.5),
+            border: Border.all(
+              color: const Color(0xFF2196F3).withAlpha(60),
+              width: 0.5,
+            ),
           ),
           child: const Text(
             AppStrings.editButton,
-            style: TextStyle(fontSize: 11, color: Color(0xFF2196F3), fontWeight: FontWeight.w500),
+            style: TextStyle(
+              fontSize: 11,
+              color: Color(0xFF2196F3),
+              fontWeight: FontWeight.w500,
+            ),
           ),
         ),
       );
@@ -154,11 +159,18 @@ class MomentCard extends StatelessWidget {
           decoration: BoxDecoration(
             color: AppTheme.primaryColor.withAlpha(15),
             borderRadius: BorderRadius.circular(4),
-            border: Border.all(color: AppTheme.primaryColor.withAlpha(60), width: 0.5),
+            border: Border.all(
+              color: AppTheme.primaryColor.withAlpha(60),
+              width: 0.5,
+            ),
           ),
           child: const Text(
             AppStrings.commentButton,
-            style: TextStyle(fontSize: 11, color: AppTheme.primaryColor, fontWeight: FontWeight.w500),
+            style: TextStyle(
+              fontSize: 11,
+              color: AppTheme.primaryColor,
+              fontWeight: FontWeight.w500,
+            ),
           ),
         ),
       );
@@ -198,7 +210,11 @@ class MomentCard extends StatelessWidget {
   }
 
   /// 递归渲染评论树：当前评论 + 所有子回复
-  Widget _buildCommentTree(BuildContext context, Comment comment, Map<String, List<Comment>> replies) {
+  Widget _buildCommentTree(
+    BuildContext context,
+    Comment comment,
+    Map<String, List<Comment>> replies,
+  ) {
     final children = replies[comment.id];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -292,13 +308,18 @@ class MomentCard extends StatelessWidget {
                   placeholder: (_, _) => _placeholder(''),
                   errorWidget: (_, _, _) => _placeholder(''),
                 ),
+                // 实况角标
+                _MomentCoverLiveBadge(url: urls.first),
                 // 张数角标
                 if (urls.length > 1)
                   Positioned(
                     right: 6,
                     bottom: 6,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
                       decoration: BoxDecoration(
                         color: Colors.black54,
                         borderRadius: BorderRadius.circular(10),
@@ -306,13 +327,18 @@ class MomentCard extends StatelessWidget {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.photo_library,
-                              size: 12, color: Colors.white),
+                          const Icon(
+                            Icons.photo_library,
+                            size: 12,
+                            color: Colors.white,
+                          ),
                           const SizedBox(width: 3),
                           Text(
                             '${urls.length}',
                             style: const TextStyle(
-                                color: Colors.white, fontSize: 11),
+                              color: Colors.white,
+                              fontSize: 11,
+                            ),
                           ),
                         ],
                       ),
@@ -344,8 +370,80 @@ class MomentCard extends StatelessWidget {
         children: [
           Icon(Icons.image_outlined, size: 28, color: Colors.grey[300]),
           if (label.isNotEmpty)
-            Text(label, style: TextStyle(fontSize: 10, color: Colors.grey[400])),
+            Text(
+              label,
+              style: TextStyle(fontSize: 10, color: Colors.grey[400]),
+            ),
         ],
+      ),
+    );
+  }
+}
+
+/// 动态卡片封面图上的实况角标
+class _MomentCoverLiveBadge extends StatefulWidget {
+  final String url;
+  const _MomentCoverLiveBadge({required this.url});
+
+  @override
+  State<_MomentCoverLiveBadge> createState() => _MomentCoverLiveBadgeState();
+}
+
+class _MomentCoverLiveBadgeState extends State<_MomentCoverLiveBadge> {
+  bool _isMotion = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkMotion();
+  }
+
+  @override
+  void didUpdateWidget(_MomentCoverLiveBadge oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.url != widget.url) {
+      _checkMotion();
+    }
+  }
+
+  Future<void> _checkMotion() async {
+    final isMotion = await MotionPhotoHelper.isMotionPhotoUrl(widget.url);
+    if (mounted && isMotion) {
+      setState(() => _isMotion = true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_isMotion) return const SizedBox.shrink();
+
+    return Positioned(
+      left: 6,
+      bottom: 6,
+      child: IgnorePointer(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+          decoration: BoxDecoration(
+            color: Colors.black.withAlpha(160),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: Colors.white38, width: 0.8),
+          ),
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.motion_photos_on, size: 11, color: Colors.white),
+              SizedBox(width: 3),
+              Text(
+                '实况',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 9.5,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

@@ -81,38 +81,108 @@ class _ImageGalleryOverlay extends StatelessWidget {
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => FullScreenImage(
-                    urls: urls,
-                    initialIndex: index,
-                  ),
+                  builder: (_) =>
+                      FullScreenImage(urls: urls, initialIndex: index),
                 ),
               ),
-              child: Container(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(6),
-                  color: Colors.white10,
-                ),
-                clipBehavior: Clip.antiAlias,
-                child: CachedNetworkImage(
-                  imageUrl: urls[index],
-                  fit: BoxFit.cover,
-                  placeholder: (_, _) => const Center(
-                    child: SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white54),
-                    ),
-                  ),
-                  errorWidget: (_, _, _) => const Icon(
-                    Icons.broken_image,
-                    color: Colors.white38,
-                  ),
-                ),
-              ),
+              child: _GalleryGridItem(url: urls[index]),
             );
           },
         ),
+      ),
+    );
+  }
+}
+
+/// 带实况状态识别的相册缩略图
+class _GalleryGridItem extends StatefulWidget {
+  final String url;
+  const _GalleryGridItem({required this.url});
+
+  @override
+  State<_GalleryGridItem> createState() => _GalleryGridItemState();
+}
+
+class _GalleryGridItemState extends State<_GalleryGridItem> {
+  bool _isMotion = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkMotion();
+  }
+
+  @override
+  void didUpdateWidget(_GalleryGridItem oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.url != oldWidget.url) {
+      _checkMotion();
+    }
+  }
+
+  Future<void> _checkMotion() async {
+    final isMotion = await MotionPhotoHelper.isMotionPhotoUrl(widget.url);
+    if (mounted && isMotion) {
+      setState(() => _isMotion = true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(6),
+        color: Colors.white10,
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          CachedNetworkImage(
+            imageUrl: widget.url,
+            fit: BoxFit.cover,
+            placeholder: (_, _) => const Center(
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white54,
+                ),
+              ),
+            ),
+            errorWidget: (_, _, _) =>
+                const Icon(Icons.broken_image, color: Colors.white38),
+          ),
+          if (_isMotion)
+            Positioned(
+              left: 4,
+              bottom: 4,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.black.withAlpha(160),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.white38, width: 0.8),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.motion_photos_on, size: 12, color: Colors.white),
+                    SizedBox(width: 3),
+                    Text(
+                      '实况',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 9.5,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -206,7 +276,9 @@ class _FullScreenImageState extends State<FullScreenImage> {
       final entry = widget.entries![index];
       if (entry.isLocal && entry.file != null) return entry.file;
       if (entry.url != null && entry.url!.isNotEmpty) {
-        final fileInfo = await DefaultCacheManager().getFileFromCache(entry.url!);
+        final fileInfo = await DefaultCacheManager().getFileFromCache(
+          entry.url!,
+        );
         if (fileInfo != null) return fileInfo.file;
         try {
           return await DefaultCacheManager().getSingleFile(entry.url!);
@@ -245,6 +317,14 @@ class _FullScreenImageState extends State<FullScreenImage> {
     final file = await _resolveFile(index);
     if (file == null || !mounted || _checkingIndex != index) return;
 
+    // 先快速检测二进制特征，若为实况照片立即点亮实况标识
+    final isMotion = await MotionPhotoHelper.isMotionPhoto(file);
+    if (!isMotion || !mounted || _checkingIndex != index) return;
+
+    setState(() {
+      _isMotionPhoto = true;
+    });
+
     final videoFile = await MotionPhotoHelper.getOrExtractMotionVideo(file);
     if (videoFile == null || !mounted || _checkingIndex != index) return;
 
@@ -260,7 +340,8 @@ class _FullScreenImageState extends State<FullScreenImage> {
       controller.addListener(() {
         if (!mounted) return;
         if (controller.value.isInitialized) {
-          final isEnded = controller.value.position >= controller.value.duration;
+          final isEnded =
+              controller.value.position >= controller.value.duration;
           if (isEnded && _isPlaying) {
             setState(() {
               _isPlaying = false;
@@ -282,7 +363,9 @@ class _FullScreenImageState extends State<FullScreenImage> {
 
   /// 轻点左下角实况按钮：无感播放一遍（播完自动停住恢复静态图）
   Future<void> _toggleLivePlayback() async {
-    if (_videoController == null || !_videoController!.value.isInitialized) return;
+    if (_videoController == null || !_videoController!.value.isInitialized) {
+      return;
+    }
     if (_isPlaying) {
       await _videoController!.pause();
       await _videoController!.seekTo(Duration.zero);
@@ -310,7 +393,11 @@ class _FullScreenImageState extends State<FullScreenImage> {
           setState(() => _isDownloading = true);
           try {
             final dir = await FileHelper.getDownloadsDirectory();
-            final name = entry.file!.path.split(Platform.pathSeparator).last.split('/').last;
+            final name = entry.file!.path
+                .split(Platform.pathSeparator)
+                .last
+                .split('/')
+                .last;
             final targetFile = File('${dir.path}/$name');
             await MotionPhotoHelper.saveAdaptedMotionPhoto(
               entry.file!,
@@ -319,9 +406,9 @@ class _FullScreenImageState extends State<FullScreenImage> {
             );
             await FileHelper.scanFile(targetFile.path);
             if (!mounted) return;
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('已保存到 ${targetFile.path}')),
-            );
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text('已保存到 ${targetFile.path}')));
           } catch (e) {
             if (!mounted) return;
             ScaffoldMessenger.of(context).showSnackBar(
@@ -358,9 +445,9 @@ class _FullScreenImageState extends State<FullScreenImage> {
       await FileHelper.scanFile(targetFile.path);
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('已保存到 ${targetFile.path}')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('已保存到 ${targetFile.path}')));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -392,7 +479,9 @@ class _FullScreenImageState extends State<FullScreenImage> {
                       width: 20,
                       height: 20,
                       child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white),
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
                     )
                   : const Icon(Icons.download),
               tooltip: '下载',
@@ -414,19 +503,23 @@ class _FullScreenImageState extends State<FullScreenImage> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.broken_image,
-                        size: 48, color: Colors.white54),
+                    const Icon(
+                      Icons.broken_image,
+                      size: 48,
+                      color: Colors.white54,
+                    ),
                     const SizedBox(height: 8),
-                    const Text('图片加载失败',
-                        style: TextStyle(color: Colors.white54)),
+                    const Text(
+                      '图片加载失败',
+                      style: TextStyle(color: Colors.white54),
+                    ),
                   ],
                 ),
               ),
             ),
             pageController: _pageController,
             onPageChanged: _onPageChanged,
-            backgroundDecoration:
-                const BoxDecoration(color: Colors.black),
+            backgroundDecoration: const BoxDecoration(color: Colors.black),
             gaplessPlayback: true,
           ),
 
@@ -455,7 +548,10 @@ class _FullScreenImageState extends State<FullScreenImage> {
                 behavior: HitTestBehavior.opaque,
                 onTap: _toggleLivePlayback,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 5,
+                  ),
                   decoration: BoxDecoration(
                     color: _isPlaying
                         ? Colors.white.withAlpha(220)
@@ -501,7 +597,9 @@ class _FullScreenImageState extends State<FullScreenImage> {
                 child: Center(
                   child: Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 6),
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.black45,
                       borderRadius: BorderRadius.circular(12),
@@ -509,7 +607,9 @@ class _FullScreenImageState extends State<FullScreenImage> {
                     child: Text(
                       '${_currentIndex + 1} / $_totalCount',
                       style: const TextStyle(
-                          color: Colors.white70, fontSize: 13),
+                        color: Colors.white70,
+                        fontSize: 13,
+                      ),
                     ),
                   ),
                 ),
@@ -520,4 +620,3 @@ class _FullScreenImageState extends State<FullScreenImage> {
     );
   }
 }
-
