@@ -14,7 +14,6 @@ class AppTheme {
   // 品牌色
   static const Color primaryColor = Color(0xFF07C160); // 微信绿
   static const Color backgroundColor = Color(0xFFF5F5F5);
-  static const Color cardColor = Colors.white;
   static const Color textPrimary = Color(0xFF1A1A1A);
   static const Color textSecondary = Color(0xFF999999);
   static const Color dividerColor = Color(0xFFE5E5E5);
@@ -37,11 +36,6 @@ class AppTheme {
     color: textSecondary,
   );
 
-  static const TextStyle dateHeaderStyle = TextStyle(
-    fontSize: 16,
-    fontWeight: FontWeight.w500,
-    color: textPrimary,
-  );
 
   // 全局主题
   static ThemeData get lightTheme {

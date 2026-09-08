@@ -111,14 +111,4 @@ class Moment {
     };
   }
 
-  /// 更新用的 JSON（仅可变字段）
-  Map<String, dynamic> toUpdateJson() {
-    return {
-      'image_urls': imageUrls,
-      'feeling': feeling,
-      if (mood != null) 'mood': mood,
-      'comments': comments.map((c) => c.toJson()).toList(),
-      'updated_at': DateHelper.toIsoString(updatedAt),
-    };
-  }
 }

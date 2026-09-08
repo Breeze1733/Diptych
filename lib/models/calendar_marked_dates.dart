@@ -36,13 +36,4 @@ class CalendarMarkedDates {
     return CalendarDateStatus.none;
   }
 
-  CalendarMarkedDates copyWith({
-    Set<String>? userADates,
-    Set<String>? userBDates,
-  }) {
-    return CalendarMarkedDates(
-      userADates: userADates ?? this.userADates,
-      userBDates: userBDates ?? this.userBDates,
-    );
-  }
 }
