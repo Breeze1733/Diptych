@@ -1,9 +1,9 @@
-import 'package:flutter/material.dart';
-import '../constants/app_theme.dart';
-import '../constants/strings.dart';
-import '../models/moment.dart';
+import "package:flutter/material.dart";
+import "../constants/app_theme.dart";
+import "../constants/strings.dart";
+import "../models/moment.dart";
 
-import 'moment_card.dart';
+import "moment_card.dart";
 
 /// 单日 1:1 分屏视图
 /// 左侧：当前用户的动态，右侧：对方的动态（或盲盒遮罩）
@@ -20,13 +20,14 @@ class DaySplitView extends StatelessWidget {
   final void Function(Comment comment)? onDeletePartnerComment;
   final void Function(Comment? parentComment)? onReplyMyComment;
   final void Function(Comment? parentComment)? onReplyPartnerComment;
+  final double scale;
 
   const DaySplitView({
     super.key,
     this.myMoment,
     this.partnerMoment,
-    this.myNickname = '',
-    this.partnerNickname = '',
+    this.myNickname = "",
+    this.partnerNickname = "",
     this.myAvatarUrl,
     this.partnerAvatarUrl,
     this.onEditMyMoment,
@@ -35,6 +36,7 @@ class DaySplitView extends StatelessWidget {
     this.onDeletePartnerComment,
     this.onReplyMyComment,
     this.onReplyPartnerComment,
+    this.scale = 1.0,
   });
 
   @override
@@ -105,24 +107,29 @@ class DaySplitView extends StatelessWidget {
           onComment: onComment,
           onDeleteComment: onDeleteComment,
           onReplyComment: onReplyComment,
+          scale: scale,
         ),
       );
     }
+
+    final double imgSize = (80 * scale).clamp(44.0, 80.0);
+    final double pad = (16 * scale).clamp(8.0, 16.0);
+    final double textSize = (14 * scale).clamp(10.0, 14.0);
 
     if (isSelf) {
       // 自己还未发布
       return Center(
         child: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: EdgeInsets.all(pad),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Image.asset('assets/not_posted_self.png',
-                  width: 80, height: 80, fit: BoxFit.contain),
-              const SizedBox(height: 8),
+              Image.asset("assets/not_posted_self.png",
+                  width: imgSize, height: imgSize, fit: BoxFit.contain),
+              SizedBox(height: (8 * scale).clamp(4.0, 8.0)),
               Text(
                 AppStrings.noPostPlaceholder,
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: textSize),
               ),
             ],
           ),
@@ -133,16 +140,16 @@ class DaySplitView extends StatelessWidget {
     // 对方未发布 → 空白
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.all(pad),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Image.asset('assets/not_posted_partner.png',
-                width: 80, height: 80, fit: BoxFit.contain),
-            const SizedBox(height: 8),
+            Image.asset("assets/not_posted_partner.png",
+                width: imgSize, height: imgSize, fit: BoxFit.contain),
+            SizedBox(height: (8 * scale).clamp(4.0, 8.0)),
             Text(
               AppStrings.noPostPlaceholder,
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: textSize),
             ),
           ],
         ),

@@ -32,13 +32,4 @@ class WakelockHelper {
     }
   }
 
-  /// 检查当前是否持有锁
-  static Future<bool> isHeld() async {
-    try {
-      final held = await _channel.invokeMethod<bool>('isHeld');
-      return held ?? false;
-    } catch (_) {
-      return false;
-    }
-  }
 }

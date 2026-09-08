@@ -18,8 +18,6 @@ class DateHelper {
     return now;
   }
 
-  /// 今天的日期字符串（以 6:00 为界）
-  static String get todayStr => toDateStr(effectiveNow);
 
   /// 日期 → "2026年07月05日 星期一"
   static String toChineseDate(DateTime date) {
