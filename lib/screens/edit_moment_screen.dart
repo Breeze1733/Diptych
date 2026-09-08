@@ -683,10 +683,11 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
         } catch (_) {}
       }
 
+      debugPrint('发布日记失败: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('${AppStrings.uploadFailed}，已自动保存为草稿: $e'),
+        const SnackBar(
+          content: Text('保存失败，已自动为您保存为草稿，请稍后重试'),
           backgroundColor: Colors.red,
         ),
       );
@@ -718,9 +719,10 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
         ),
       );
     } catch (e) {
+      debugPrint('保存草稿失败: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('保存草稿失败: $e'), backgroundColor: Colors.red),
+        const SnackBar(content: Text('保存草稿失败，请重试'), backgroundColor: Colors.red),
       );
     } finally {
       if (mounted) setState(() => _isSavingDraft = false);

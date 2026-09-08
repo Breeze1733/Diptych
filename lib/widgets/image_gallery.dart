@@ -419,9 +419,10 @@ class _FullScreenImageState extends State<FullScreenImage> {
               context,
             ).showSnackBar(SnackBar(content: Text('已保存到 ${targetFile.path}')));
           } catch (e) {
+            debugPrint('保存图片失败: $e');
             if (!mounted) return;
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('保存失败: $e'), backgroundColor: Colors.red),
+              const SnackBar(content: Text('保存失败，请检查存储权限后重试'), backgroundColor: Colors.red),
             );
           } finally {
             if (mounted) setState(() => _isDownloading = false);
@@ -458,9 +459,10 @@ class _FullScreenImageState extends State<FullScreenImage> {
         context,
       ).showSnackBar(SnackBar(content: Text('已保存到 ${targetFile.path}')));
     } catch (e) {
+      debugPrint('下载图片失败: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('下载失败: $e'), backgroundColor: Colors.red),
+        const SnackBar(content: Text('下载失败，请检查网络后重试'), backgroundColor: Colors.red),
       );
     } finally {
       if (mounted) setState(() => _isDownloading = false);

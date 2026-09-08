@@ -69,9 +69,10 @@ class _TopicPostScreenState extends ConsumerState<TopicPostScreen> {
         const SnackBar(content: Text('草稿已保存')),
       );
     } catch (e) {
+      debugPrint('保存草稿失败: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('保存草稿失败: $e'), backgroundColor: Colors.red),
+        const SnackBar(content: Text('保存草稿失败，请重试'), backgroundColor: Colors.red),
       );
     } finally {
       if (mounted) setState(() => _isSavingDraft = false);
@@ -108,6 +109,7 @@ class _TopicPostScreenState extends ConsumerState<TopicPostScreen> {
       );
       Navigator.pop(context, true);
     } catch (e) {
+      debugPrint('发布帖子失败: $e');
       // 发布失败时自动保存草稿，确保用户输入的内容不丢失
       try {
         await DraftService.saveTopicPost(_draftKey, content);
@@ -115,8 +117,8 @@ class _TopicPostScreenState extends ConsumerState<TopicPostScreen> {
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('发布失败，已自动为您保存为草稿: $e'),
+        const SnackBar(
+          content: Text('发布失败，已自动为您保存为草稿，请重试'),
           backgroundColor: Colors.red,
         ),
       );

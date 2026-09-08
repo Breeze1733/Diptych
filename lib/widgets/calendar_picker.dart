@@ -69,11 +69,12 @@ class _CalendarPickerState extends ConsumerState<CalendarPicker> {
         );
       }
     } catch (e) {
+      debugPrint('日历标记同步失败: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('同步失败: $e'),
-            duration: const Duration(seconds: 2),
+          const SnackBar(
+            content: Text('同步失败，请检查网络后重试'),
+            duration: Duration(seconds: 2),
             behavior: SnackBarBehavior.floating,
           ),
         );

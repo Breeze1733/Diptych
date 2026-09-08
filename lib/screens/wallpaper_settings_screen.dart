@@ -46,6 +46,7 @@ class _WallpaperSettingsScreenState extends ConsumerState<WallpaperSettingsScree
 
     final file = await _pickAndAdjust();
     if (file == null) return;
+    if (!mounted) return;
 
     setState(() => _uploading = type);
     await WakelockHelper.acquire(timeout: const Duration(minutes: 5));
@@ -97,9 +98,10 @@ class _WallpaperSettingsScreenState extends ConsumerState<WallpaperSettingsScree
         ),
       );
     } catch (e) {
+      debugPrint('上传壁纸失败: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('上传失败: $e'), backgroundColor: Colors.red),
+        const SnackBar(content: Text('壁纸上传失败，请检查网络后重试'), backgroundColor: Colors.red),
       );
     } finally {
       await WakelockHelper.release();

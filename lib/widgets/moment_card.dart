@@ -459,8 +459,8 @@ class _MomentCoverLiveBadgeState extends State<_MomentCoverLiveBadge> {
 
   Future<void> _checkMotion() async {
     final isMotion = await MotionPhotoHelper.isMotionPhotoUrl(widget.url);
-    if (mounted && isMotion) {
-      setState(() => _isMotion = true);
+    if (mounted) {
+      setState(() => _isMotion = isMotion);
     }
   }
 

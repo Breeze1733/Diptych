@@ -46,10 +46,11 @@ class _TopicsScreenState extends ConsumerState<TopicsScreen> {
       // 列表文字先秒开，最新更新时间后台并行补齐（每次打开都会重新比对）
       _loadLatestUpdates(topics);
     } catch (e) {
+      debugPrint('加载话题列表失败: $e');
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = e.toString();
+        _error = '网络连接异常，请检查网络后重试';
       });
     }
   }
@@ -114,6 +115,7 @@ class _TopicsScreenState extends ConsumerState<TopicsScreen> {
         ],
       ),
     );
+    controller.dispose();
 
     if (result == null || result.isEmpty) return;
 
@@ -121,9 +123,10 @@ class _TopicsScreenState extends ConsumerState<TopicsScreen> {
       await _service.createTopic(result, currentUser.uid);
       await _loadTopics();
     } catch (e) {
+      debugPrint('创建话题失败: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('创建失败: $e'), backgroundColor: Colors.red),
+        const SnackBar(content: Text('创建失败，请稍后重试'), backgroundColor: Colors.red),
       );
     }
   }
@@ -172,7 +175,7 @@ class _TopicsScreenState extends ConsumerState<TopicsScreen> {
           children: [
             const Icon(Icons.cloud_off, size: 48, color: Colors.grey),
             const SizedBox(height: 12),
-            Text('后端不可用', style: TextStyle(color: Colors.grey[600], fontSize: 16)),
+            const Text('加载话题失败', style: TextStyle(color: Colors.grey, fontSize: 16)),
             const SizedBox(height: 4),
             Text(_error!, style: TextStyle(color: Colors.grey[400], fontSize: 12)),
             const SizedBox(height: 16),

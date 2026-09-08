@@ -86,7 +86,7 @@ class Moment {
       authorId: json['author_id'] as String? ?? '',
       imageUrls: _parseImageUrls(json),
       feeling: json['feeling'] as String? ?? '',
-      mood: json['mood'] as int?,
+      mood: (json['mood'] as num?)?.toInt(),
       comments: (json['comments'] as List<dynamic>?)
               ?.map((e) => e is Map<String, dynamic> ? Comment.fromJson(e) : Comment(id: '', authorId: '', content: e.toString(), createdAt: DateTime.now()))
               .toList() ??

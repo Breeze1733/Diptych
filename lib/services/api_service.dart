@@ -135,19 +135,19 @@ class ApiService {
 
   /// 获取所有用户的日历日期分布 (如 {'A': [...], 'B': [...]})
   Future<Map<String, List<String>>> getCalendarDates() async {
-    try {
-      final res = await http.get(Uri.parse('$_baseUrl/moments/calendar/dates'));
-      if (res.statusCode != 200) return {'A': [], 'B': []};
-      final body = _safeDecode(res);
-      if (body['ok'] != true || body['data'] is! Map) return {'A': [], 'B': []};
-      final Map data = body['data'] as Map;
-      return data.map((key, value) {
-        final list = (value as List).map((e) => e.toString()).toList();
-        return MapEntry(key.toString(), list);
-      });
-    } catch (_) {
-      return {'A': [], 'B': []};
+    final res = await http.get(Uri.parse('$_baseUrl/moments/calendar/dates'));
+    if (res.statusCode != 200) {
+      throw Exception('GET /moments/calendar/dates 返回 ${res.statusCode}: ${res.body}');
     }
+    final body = _safeDecode(res);
+    if (body['ok'] != true || body['data'] is! Map) {
+      throw Exception('GET /moments/calendar/dates 响应异常: ${res.body}');
+    }
+    final Map data = body['data'] as Map;
+    return data.map((key, value) {
+      final list = (value as List).map((e) => e.toString()).toList();
+      return MapEntry(key.toString(), list);
+    });
   }
 
   // ─── 通知相关（单次请求：取出并自毁） ───

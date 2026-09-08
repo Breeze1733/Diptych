@@ -76,9 +76,10 @@ class _WallpaperPreviewScreenState extends ConsumerState<WallpaperPreviewScreen>
       );
       Navigator.pop(context);
     } catch (e) {
+      debugPrint('应用壁纸失败: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('应用失败: $e'), backgroundColor: Colors.red),
+        const SnackBar(content: Text('应用失败，请稍后重试'), backgroundColor: Colors.red),
       );
     } finally {
       if (mounted) setState(() => _applying = false);

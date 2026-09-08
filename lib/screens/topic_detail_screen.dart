@@ -45,10 +45,11 @@ class _TopicDetailScreenState extends ConsumerState<TopicDetailScreen> {
         _loading = false;
       });
     } catch (e) {
+      debugPrint('加载话题详情失败: $e');
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = e.toString();
+        _error = '网络连接异常，请检查网络后重试';
       });
     }
   }
@@ -109,9 +110,10 @@ class _TopicDetailScreenState extends ConsumerState<TopicDetailScreen> {
       await _service.deletePost(widget.topicId, post.id);
       await _loadTopic();
     } catch (e) {
+      debugPrint('删除帖子失败: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('删除失败: $e'), backgroundColor: Colors.red),
+        const SnackBar(content: Text('删除失败，请稍后重试'), backgroundColor: Colors.red),
       );
     }
   }

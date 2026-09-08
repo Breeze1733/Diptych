@@ -120,9 +120,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       );
       Navigator.pop(context);
     } catch (e) {
+      debugPrint('保存个人资料失败: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('保存失败: $e'), backgroundColor: Colors.red),
+        const SnackBar(content: Text('保存失败，请稍后重试'), backgroundColor: Colors.red),
       );
     } finally {
       if (_avatarFile != null) {
@@ -158,9 +159,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         });
       }
     } catch (e) {
+      debugPrint('检查更新失败: $e');
+      if (!mounted) return;
       setState(() {
         _isChecking = false;
-        _updateStatus = '检查失败: $e';
+        _updateStatus = '检查更新失败，请检查网络后重试';
       });
     }
   }
@@ -193,6 +196,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         },
       );
 
+      if (!mounted) return;
       setState(() {
         _isDownloading = false;
         _downloadProgress = 1.0;
@@ -205,10 +209,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
       await _updateService.installApk(apkPath);
     } catch (e) {
+      debugPrint('下载更新失败: $e');
       if (mounted) {
         setState(() {
           _isDownloading = false;
-          _updateStatus = '下载失败: $e';
+          _updateStatus = '下载失败，请检查网络或存储权限后重试';
         });
       }
       if (apkPath != null) {
@@ -284,13 +289,14 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         ),
       );
     } catch (e) {
+      debugPrint('清理缓存失败: $e');
       if (!mounted) return;
       setState(() {
         _isClearingCache = false;
         _cacheSizeText = '清理失败';
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('清理失败: $e'), backgroundColor: Colors.red),
+        const SnackBar(content: Text('清理失败，请稍后重试'), backgroundColor: Colors.red),
       );
     }
   }

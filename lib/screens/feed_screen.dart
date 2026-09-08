@@ -197,12 +197,26 @@ class FeedScreen extends ConsumerWidget {
       currentUser, partner, DateTime selectedDate, BuildContext context, double scale) {
     // 只有彻底加载失败且无用户数据才显示错误
     if (currentUser == null && loadUsersAsync.hasError) {
+      debugPrint('加载用户数据失败: ${loadUsersAsync.error}');
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
-          child: Text(
-            '加载失败：${loadUsersAsync.error}\n\n请检查后端服务是否正常运行',
-            textAlign: TextAlign.center,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.cloud_off, size: 48, color: Colors.grey),
+              const SizedBox(height: 12),
+              const Text(
+                '加载用户信息失败\n请检查网络或后端服务后重试',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.grey, fontSize: 15, height: 1.5),
+              ),
+              const SizedBox(height: 16),
+              OutlinedButton(
+                onPressed: () => ref.invalidate(loadUsersProvider),
+                child: const Text('重试'),
+              ),
+            ],
           ),
         ),
       );
@@ -270,9 +284,26 @@ class FeedScreen extends ConsumerWidget {
         );
       },
       loading: () => const Expanded(child: SizedBox()),
-      error: (e, _) => Expanded(
-        child: Center(child: Text('加载失败: $e')),
-      ),
+      error: (e, _) {
+        debugPrint('加载日记失败: $e');
+        return Expanded(
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.cloud_off, size: 48, color: Colors.grey),
+                const SizedBox(height: 12),
+                const Text('加载失败，请检查网络后重试', style: TextStyle(color: Colors.grey, fontSize: 15)),
+                const SizedBox(height: 16),
+                OutlinedButton(
+                  onPressed: () => ref.invalidate(dayMomentsProvider),
+                  child: const Text('重试'),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -408,9 +439,10 @@ class FeedScreen extends ConsumerWidget {
           );
         }
       } catch (e) {
+        debugPrint('评论草稿保存失败: $e');
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('评论草稿保存失败: $e'), backgroundColor: Colors.red),
+            const SnackBar(content: Text('评论草稿保存失败，请重试'), backgroundColor: Colors.red),
           );
         }
       }
@@ -457,6 +489,7 @@ class FeedScreen extends ConsumerWidget {
         await _updateCachedMomentComments(ref, moment.id, newComments);
         _refresh(ref);
       } catch (e) {
+        debugPrint('发送评论失败: $e');
         // 上传失败自动保存为草稿，避免用户输入的内容丢失
         try {
           await DraftService.saveComment(draftKey, result.content);
@@ -464,8 +497,8 @@ class FeedScreen extends ConsumerWidget {
 
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('评论失败，已自动为您保存为草稿: $e'),
+            const SnackBar(
+              content: Text('评论失败，已自动为您保存为草稿，请重试'),
               backgroundColor: Colors.red,
             ),
           );
@@ -534,9 +567,10 @@ class FeedScreen extends ConsumerWidget {
       await _updateCachedMomentComments(ref, moment.id, newComments);
       _refresh(ref);
     } catch (e) {
+      debugPrint('删除评论失败: $e');
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('删除失败: $e'), backgroundColor: Colors.red),
+          const SnackBar(content: Text('删除失败，请稍后重试'), backgroundColor: Colors.red),
         );
       }
     }
