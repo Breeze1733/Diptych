@@ -1,3 +1,4 @@
+import '../widgets/frosted_pill_button.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../constants/app_theme.dart';
@@ -148,10 +149,9 @@ class FeedScreen extends ConsumerWidget {
         final myMoment = data['myMoment'];
         // 已有动态就不显示 FAB（编辑在卡片内操作）
         if (myMoment != null) return null;
-        return FloatingActionButton.extended(
-          onPressed: () => _openCreateEditor(ref, context),
-          icon: const Icon(Icons.add),
-          label: const Text(AppStrings.createTitle),
+        return FrostedPillButton(
+          label: AppStrings.createTitle,
+          onTap: () => _openCreateEditor(ref, context),
         );
       },
       loading: () => null,
@@ -242,13 +242,9 @@ class FeedScreen extends ConsumerWidget {
 
   /// 打开日历选择器
   Future<void> _openCalendar(BuildContext context, WidgetRef ref) async {
-    final markedDatesAsync = ref.read(markedDatesProvider);
-    final markedDates = markedDatesAsync.value ?? [];
-
     final picked = await CalendarPicker.show(
       context,
       selectedDate: ref.read(selectedDateProvider),
-      markedDates: markedDates,
     );
 
     if (picked != null) {

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/moment.dart';
+import '../models/calendar_marked_dates.dart';
 import '../services/cache_service.dart';
 import '../utils/date_helper.dart';
 import '../utils/foreground_service_helper.dart';
@@ -170,40 +171,60 @@ final FutureProvider<Map<String, Moment?>> dayMomentsProvider = FutureProvider<M
   }
 });
 
-/// 日历圆点（只增不减，纯缓存；仅首次无缓存时调一次 API）
-final FutureProvider<List<DateTime>> markedDatesProvider = FutureProvider<List<DateTime>>((ref) async {
-  final currentUser = ref.watch(currentUserProvider);
-  if (currentUser == null) return [];
+/// 日历标记数据（纯本地缓存优先；仅首次无缓存时调一次 API）
+final FutureProvider<CalendarMarkedDates> markedDatesProvider = FutureProvider<CalendarMarkedDates>((ref) async {
+  final cachedA = await CacheService.loadMarkedDates('A');
+  final cachedB = await CacheService.loadMarkedDates('B');
 
-  final cached = await CacheService.loadMarkedDates(currentUser.uid);
-
-  if (cached != null) {
+  if (cachedA != null && cachedB != null) {
     // 缓存命中（包括空数据）→ 秒返
-    return cached.map((s) => DateHelper.parseDateStr(s)).toList();
+    return CalendarMarkedDates(
+      userADates: cachedA.toSet(),
+      userBDates: cachedB.toSet(),
+    );
   }
 
-  // 首次使用 → 从后端拉一次
+  // 首次使用 / 缓存缺失 → 从后端拉取全量
+  final apiService = ref.read(apiServiceProvider);
   try {
-    final apiService = ref.read(apiServiceProvider);
-    final dateStrs = await apiService.getDatesWithMoments(currentUser.uid);
-    await CacheService.saveMarkedDates(currentUser.uid, dateStrs);
-    return dateStrs.map((s) => DateHelper.parseDateStr(s)).toList();
+    final map = await apiService.getCalendarDates();
+    final listA = map['A'] ?? [];
+    final listB = map['B'] ?? [];
+    await CacheService.overwriteAllCalendarDates(listA, listB);
+    return CalendarMarkedDates(
+      userADates: listA.toSet(),
+      userBDates: listB.toSet(),
+    );
   } catch (_) {
-    return [];
+    return CalendarMarkedDates(
+      userADates: cachedA?.toSet() ?? {},
+      userBDates: cachedB?.toSet() ?? {},
+    );
   }
 });
 
-/// 保存后更新日历圆点：本地缓存追加当天日期（不调 API）
+/// 联网强制拉取所有日期的日记情况并全量覆盖本地缓存（日历弹窗右上角刷新按钮专用）
+Future<void> syncCalendarMarkedDatesFromNetwork(WidgetRef ref) async {
+  final apiService = ref.read(apiServiceProvider);
+  final map = await apiService.getCalendarDates();
+  final listA = map['A'] ?? [];
+  final listB = map['B'] ?? [];
+  await CacheService.overwriteAllCalendarDates(listA, listB);
+  ref.invalidate(markedDatesProvider);
+}
+
+/// 保存后更新日历标记：本地缓存追加当天日期（纯本地增量更新，不调 API）
 Future<void> updateMarkedDateCache(WidgetRef ref) async {
   final currentUser = ref.read(currentUserProvider);
   if (currentUser == null) return;
 
   final dateStr = DateHelper.toDateStr(ref.read(selectedDateProvider));
-  final cached = await CacheService.loadMarkedDates(currentUser.uid) ?? [];
+  final targetUid = currentUser.uid.isNotEmpty ? currentUser.uid : 'A';
+  final cached = await CacheService.loadMarkedDates(targetUid) ?? [];
   if (!cached.contains(dateStr)) {
     cached.add(dateStr);
     cached.sort();
-    await CacheService.saveMarkedDates(currentUser.uid, cached);
+    await CacheService.saveMarkedDates(targetUid, cached);
   }
   ref.invalidate(markedDatesProvider);
 }

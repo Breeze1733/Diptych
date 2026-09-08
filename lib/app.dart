@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'constants/app_theme.dart';
 import 'providers/auth_provider.dart';
@@ -20,6 +21,15 @@ class DiptychApp extends ConsumerWidget {
       title: 'Diptych',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [
+        Locale('zh', 'CN'),
+      ],
+      locale: const Locale('zh', 'CN'),
       home: autoLoginAsync.when(
         data: (_) {
           // 根据 currentUserRoleProvider 决定显示哪个页面

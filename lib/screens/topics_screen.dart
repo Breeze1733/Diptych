@@ -1,3 +1,4 @@
+import '../widgets/frosted_pill_button.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../constants/app_theme.dart';
@@ -150,9 +151,9 @@ class _TopicsScreenState extends ConsumerState<TopicsScreen> {
             elevation: 0,
             title: const Text('话题'),
           ),
-          floatingActionButton: FloatingActionButton(
-            onPressed: _createTopic,
-            child: const Icon(Icons.add),
+          floatingActionButton: FrostedPillButton(
+            label: '创建话题',
+            onTap: _createTopic,
           ),
           body: _buildBody(),
         ),

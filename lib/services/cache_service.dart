@@ -27,7 +27,14 @@ class CacheService {
     }
   }
 
-  // ─── 标记日期缓存（日历小圆点）───
+  // ─── 标记日期缓存（日历双人状态）───
+
+  /// 全量覆盖保存双人日历标记
+  static Future<void> overwriteAllCalendarDates(List<String> datesA, List<String> datesB) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('${_prefixMarked}A', jsonEncode(datesA));
+    await prefs.setString('${_prefixMarked}B', jsonEncode(datesB));
+  }
 
   static Future<void> saveMarkedDates(String userId, List<String> dates) async {
     final prefs = await SharedPreferences.getInstance();
