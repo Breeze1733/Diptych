@@ -1,3 +1,4 @@
+import "dart:math" as math;
 import '../widgets/frosted_pill_button.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -60,6 +61,14 @@ class FeedScreen extends ConsumerWidget {
     // 监听未读通知数量
     final unreadNotificationCount = ref.watch(unreadNotificationCountProvider);
 
+    // 窗口尺寸与比例放缩因子（基准设计尺寸 375x700）
+    final screenSize = MediaQuery.sizeOf(context);
+    final scaleW = screenSize.width / 375.0;
+    final scaleH = screenSize.height / 700.0;
+    final scale = math.min(scaleW, scaleH).clamp(0.65, 1.0);
+    final double iconSize = (20.0 * scale).clamp(14.0, 20.0);
+    final double buttonSize = (44.0 * scale).clamp(28.0, 48.0);
+
     // 用户数据加载完成后，静默检查更新（仅一次）
     final hasChecked = ref.watch(_autoUpdateCheckedProvider);
     if (!hasChecked && loadUsersAsync is AsyncData) {
@@ -78,23 +87,37 @@ class FeedScreen extends ConsumerWidget {
           appBar: AppBar(
             backgroundColor: Colors.transparent,
             elevation: 0,
-            title: const Text(AppStrings.appTitle),
+            toolbarHeight: (kToolbarHeight * scale).clamp(42.0, 56.0),
+            titleSpacing: (NavigationToolbar.kMiddleSpacing * scale).clamp(8.0, 16.0),
+            title: Text(
+              AppStrings.appTitle,
+              style: TextStyle(
+                fontSize: (20.0 * scale).clamp(14.0, 20.0),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
             actions: [
               // 话题
               IconButton(
-                icon: const Icon(Icons.forum_outlined, size: 20),
+                iconSize: iconSize,
+                padding: EdgeInsets.zero,
+                constraints: BoxConstraints.tightFor(width: buttonSize, height: buttonSize),
+                icon: const Icon(Icons.forum_outlined),
                 tooltip: '话题',
                 onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const TopicsScreen())),
               ),
               // 信箱通知（带未读角标）
               IconButton(
+                iconSize: iconSize,
+                padding: EdgeInsets.zero,
+                constraints: BoxConstraints.tightFor(width: buttonSize, height: buttonSize),
                 icon: Badge(
                   isLabelVisible: unreadNotificationCount > 0,
                   label: Text(
                     unreadNotificationCount > 99 ? '99+' : '$unreadNotificationCount',
-                    style: const TextStyle(fontSize: 10),
+                    style: TextStyle(fontSize: (10.0 * scale).clamp(7.0, 10.0)),
                   ),
-                  child: const Icon(Icons.mail_outline, size: 20),
+                  child: Icon(Icons.mail_outline, size: iconSize),
                 ),
                 tooltip: '信箱',
                 onPressed: () => Navigator.push(
@@ -103,17 +126,21 @@ class FeedScreen extends ConsumerWidget {
                 ),
               ),
               // 刷新按钮
-              _buildRefreshButton(ref),
+              _buildRefreshButton(ref, scale, iconSize, buttonSize),
               // 个人设置
               IconButton(
-                icon: const Icon(Icons.settings_outlined, size: 20),
+                iconSize: iconSize,
+                padding: EdgeInsets.zero,
+                constraints: BoxConstraints.tightFor(width: buttonSize, height: buttonSize),
+                icon: const Icon(Icons.settings_outlined),
                 tooltip: '个人设置',
                 onPressed: () => _openProfile(context),
               ),
+              SizedBox(width: (8.0 * scale).clamp(4.0, 8.0)),
             ],
           ),
           body: _buildBody(
-              ref, loadUsersAsync, currentUser, partner, selectedDate, context),
+              ref, loadUsersAsync, currentUser, partner, selectedDate, context, scale),
           // FAB 仅在没有自己的动态时显示（用于新建）
           floatingActionButton: _buildFabIfNeeded(ref, currentUser, context),
         ),
@@ -122,12 +149,19 @@ class FeedScreen extends ConsumerWidget {
   }
 
   /// 刷新按钮（加载中显示转圈）
-  Widget _buildRefreshButton(WidgetRef ref) {
+  Widget _buildRefreshButton(WidgetRef ref, double scale, double iconSize, double buttonSize) {
     final isLoading = ref.watch(dayMomentsProvider).isLoading;
     return IconButton(
+      iconSize: iconSize,
+      padding: EdgeInsets.zero,
+      constraints: BoxConstraints.tightFor(width: buttonSize, height: buttonSize),
       icon: isLoading
-          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-          : const Icon(Icons.refresh, size: 20),
+          ? SizedBox(
+              width: iconSize,
+              height: iconSize,
+              child: CircularProgressIndicator(strokeWidth: (2.0 * scale).clamp(1.5, 2.0)),
+            )
+          : const Icon(Icons.refresh),
       tooltip: '刷新',
       onPressed: isLoading
           ? null
@@ -160,7 +194,7 @@ class FeedScreen extends ConsumerWidget {
   }
 
   Widget _buildBody(WidgetRef ref, AsyncValue<void> loadUsersAsync,
-      currentUser, partner, DateTime selectedDate, BuildContext context) {
+      currentUser, partner, DateTime selectedDate, BuildContext context, double scale) {
     // 只有彻底加载失败且无用户数据才显示错误
     if (currentUser == null && loadUsersAsync.hasError) {
       return Center(
@@ -180,16 +214,17 @@ class FeedScreen extends ConsumerWidget {
         DateHeader(
           dateText: DateHelper.toChineseDate(selectedDate),
           onCalendarTap: () => _openCalendar(context, ref),
+          scale: scale,
         ),
         const Divider(height: 1, thickness: 1, color: AppTheme.dividerColor),
         if (currentUser != null && partner != null)
-          _buildDayView(ref, currentUser, partner, context),
+          _buildDayView(ref, currentUser, partner, context, scale),
       ],
     );
   }
 
   /// 构建日视图
-  Widget _buildDayView(WidgetRef ref, currentUser, partner, BuildContext context) {
+  Widget _buildDayView(WidgetRef ref, currentUser, partner, BuildContext context, double scale) {
     final dayMomentsAsync = ref.watch(dayMomentsProvider);
 
     return dayMomentsAsync.when(
@@ -204,6 +239,7 @@ class FeedScreen extends ConsumerWidget {
           partnerNickname: partner.nickname,
           myAvatarUrl: currentUser.avatarUrl,
           partnerAvatarUrl: partner.avatarUrl,
+          scale: scale,
           // 编辑自己的动态
           onEditMyMoment: myMoment != null
               ? () => _openEditor(
