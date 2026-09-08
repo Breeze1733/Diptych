@@ -133,13 +133,21 @@ class ApiService {
     }
   }
 
-  /// 获取用户有动态的日期列表
-  Future<List<String>> getDatesWithMoments(String userId) async {
-    final res = await http.get(Uri.parse('$_baseUrl/moments/$userId/dates'));
-    if (res.statusCode != 200) return [];
-    final body = _safeDecode(res);
-    if (body['ok'] != true || body['data'] == null) return [];
-    return (body['data'] as List).map((e) => e.toString()).toList();
+  /// 获取所有用户的日历日期分布 (如 {'A': [...], 'B': [...]})
+  Future<Map<String, List<String>>> getCalendarDates() async {
+    try {
+      final res = await http.get(Uri.parse('$_baseUrl/moments/calendar/dates'));
+      if (res.statusCode != 200) return {'A': [], 'B': []};
+      final body = _safeDecode(res);
+      if (body['ok'] != true || body['data'] is! Map) return {'A': [], 'B': []};
+      final Map data = body['data'] as Map;
+      return data.map((key, value) {
+        final list = (value as List).map((e) => e.toString()).toList();
+        return MapEntry(key.toString(), list);
+      });
+    } catch (_) {
+      return {'A': [], 'B': []};
+    }
   }
 
   // ─── 通知相关（单次请求：取出并自毁） ───
