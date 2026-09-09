@@ -144,13 +144,17 @@ final FutureProvider<Map<String, Moment?>> dayMomentsProvider = FutureProvider<M
       if (jsonEncode(newRaw) != oldJson) {
         await CacheService.saveDayMoments(dateStr, newRaw);
         preloadDayImages(moments);
+        await syncMarkedDatesFromMoments(selfRef, dateStr, moments);
         selfRef.invalidate(dayMomentsProvider);
+      } else {
+        await syncMarkedDatesFromMoments(selfRef, dateStr, moments);
       }
     }).catchError((_) {});
 
     if (cached.isEmpty) return {'myMoment': null, 'partnerMoment': null};
     final moments = cached.map((e) => Moment.fromJson(e)).toList();
     preloadDayImages(moments);
+    syncMarkedDatesFromMoments(ref, dateStr, moments);
     return _splitMoments(
       moments,
       currentUser.uid,
@@ -165,6 +169,7 @@ final FutureProvider<Map<String, Moment?>> dayMomentsProvider = FutureProvider<M
     // 即使空也保存，下次秒开
     await CacheService.saveDayMoments(dateStr, moments.map((m) => m.toJson()).toList());
     preloadDayImages(moments);
+    await syncMarkedDatesFromMoments(ref, dateStr, moments);
     return _splitMoments(moments, currentUser.uid, partner.uid);
   } catch (_) {
     return {'myMoment': null, 'partnerMoment': null};
@@ -203,14 +208,55 @@ final FutureProvider<CalendarMarkedDates> markedDatesProvider = FutureProvider<C
   }
 });
 
-/// 联网强制拉取所有日期的日记情况并全量覆盖本地缓存（日历弹窗右上角刷新按钮专用）
-Future<void> syncCalendarMarkedDatesFromNetwork(WidgetRef ref) async {
-  final apiService = ref.read(apiServiceProvider);
-  final map = await apiService.getCalendarDates();
-  final listA = map['A'] ?? [];
-  final listB = map['B'] ?? [];
-  await CacheService.overwriteAllCalendarDates(listA, listB);
-  ref.invalidate(markedDatesProvider);
+/// 从某天日记列表中纯本地同步日历标记（0 网络开销，保证日记与日历强一致）
+Future<void> syncMarkedDatesFromMoments(
+  dynamic ref,
+  String dateStr,
+  List<Moment> moments,
+) async {
+  final hasA = moments.any((m) => m.authorId == 'A');
+  final hasB = moments.any((m) => m.authorId == 'B');
+
+  bool changed = false;
+  if (hasA) {
+    final cachedA = await CacheService.loadMarkedDates('A') ?? [];
+    if (!cachedA.contains(dateStr)) {
+      cachedA.add(dateStr);
+      cachedA.sort();
+      await CacheService.saveMarkedDates('A', cachedA);
+      changed = true;
+    }
+  }
+  if (hasB) {
+    final cachedB = await CacheService.loadMarkedDates('B') ?? [];
+    if (!cachedB.contains(dateStr)) {
+      cachedB.add(dateStr);
+      cachedB.sort();
+      await CacheService.saveMarkedDates('B', cachedB);
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    ref.invalidate(markedDatesProvider);
+  }
+}
+
+/// 联网强制拉取所有日期的日记情况并全量覆盖本地缓存（全局刷新或弹窗手动刷新专用）
+Future<void> syncCalendarMarkedDatesFromNetwork(
+  dynamic ref, {
+  bool throwOnError = false,
+}) async {
+  try {
+    final apiService = ref.read(apiServiceProvider);
+    final map = await apiService.getCalendarDates();
+    final listA = map['A'] ?? [];
+    final listB = map['B'] ?? [];
+    await CacheService.overwriteAllCalendarDates(listA, listB);
+    ref.invalidate(markedDatesProvider);
+  } catch (e) {
+    if (throwOnError) rethrow;
+  }
 }
 
 /// 保存后更新日历标记：本地缓存追加当天日期（纯本地增量更新，不调 API）

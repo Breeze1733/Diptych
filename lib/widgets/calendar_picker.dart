@@ -58,7 +58,7 @@ class _CalendarPickerState extends ConsumerState<CalendarPicker> {
     });
 
     try {
-      await syncCalendarMarkedDatesFromNetwork(ref);
+      await syncCalendarMarkedDatesFromNetwork(ref, throwOnError: true);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(

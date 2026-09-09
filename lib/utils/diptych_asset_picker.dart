@@ -693,6 +693,7 @@ class DiptychAssetPicker {
       themeColor: const Color(0xFF07C160),
       textDelegate: const AssetPickerTextDelegate(),
       enableLivePhoto: true,
+      gridThumbnailSize: const ThumbnailSize.square(400),
       limitedPermissionOverlayPredicate: (state) => false,
     );
 
@@ -947,11 +948,22 @@ class _DiptychAssetViewerScreenState
             builder: (context, index) => PhotoViewGalleryPageOptions(
               imageProvider: AssetEntityImageProvider(
                 widget.previewAssets[index],
-                isOriginal: false,
+                isOriginal: true,
               ),
               initialScale: PhotoViewComputedScale.contained,
               minScale: PhotoViewComputedScale.contained,
               maxScale: PhotoViewComputedScale.covered * 4.0,
+            ),
+            loadingBuilder: (context, event) => Center(
+              child: Image(
+                image: AssetEntityImageProvider(
+                  widget.previewAssets[
+                      _currentIndex.clamp(0, widget.previewAssets.length - 1)],
+                  isOriginal: false,
+                  thumbnailSize: const ThumbnailSize.square(400),
+                ),
+                fit: BoxFit.contain,
+              ),
             ),
             pageController: _pageController,
             onPageChanged: _onPageChanged,

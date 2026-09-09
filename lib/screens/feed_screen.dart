@@ -167,6 +167,7 @@ class FeedScreen extends ConsumerWidget {
           ? null
           : () {
               ref.invalidate(dayMomentsProvider);
+              syncCalendarMarkedDatesFromNetwork(ref);
               ref.read(notificationListProvider.notifier).sync();
             },
     );
@@ -580,6 +581,7 @@ class FeedScreen extends ConsumerWidget {
   void _refresh(WidgetRef ref) {
     ref.invalidate(dayMomentsProvider);
     updateMarkedDateCache(ref);
+    syncCalendarMarkedDatesFromNetwork(ref);
     ref.read(notificationListProvider.notifier).sync();
   }
 
