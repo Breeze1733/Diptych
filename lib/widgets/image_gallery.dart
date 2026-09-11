@@ -471,8 +471,10 @@ class _FullScreenImageState extends State<FullScreenImage> {
 
   
   Widget _buildLiveButton() {
-    // 上传/选图大图预览：微信同款，勾选实况播放一遍，取消实况不播放
-    if (widget.entries != null && _currentIndex < widget.entries!.length) {
+    // 选图预览且允许切换实况模式：微信同款，勾选实况播放一遍，取消实况不播放
+    if (widget.entries != null &&
+        _currentIndex < widget.entries!.length &&
+        widget.onToggleLive != null) {
       final currentEntry = widget.entries![_currentIndex];
       final bool isLiveSelected = currentEntry.uploadLive;
 
