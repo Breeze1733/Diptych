@@ -1,7 +1,7 @@
 name: diptych
 description: "Diptych - 双人私密日记"
 publish_to: 'none'
-version: 1.1.13+30
+version: 1.1.14+31
 
 environment:
   sdk: ^3.12.2
@@ -26,7 +26,7 @@ dependencies:
   # 缓存管理
   flutter_cache_manager: ^3.4.2
   # 图片缓存
-  cached_network_image: ^3.4.1
+  cached_network_image: ^4.0.0
   # 文件路径
   path_provider: ^2.1.0
   # 获取应用版本号

@@ -1,8 +1,37 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import '../utils/url_helper.dart';
 import '../constants/api_config.dart';
+
+/// 支持发送进度回调的 MultipartRequest
+class _MultipartRequestWithProgress extends http.MultipartRequest {
+  final void Function(double progress)? onProgress;
+
+  _MultipartRequestWithProgress(super.method, super.url, {this.onProgress});
+
+  @override
+  http.ByteStream finalize() {
+    final byteStream = super.finalize();
+    final total = contentLength;
+    int bytes = 0;
+
+    return http.ByteStream(
+      byteStream.transform(
+        StreamTransformer.fromHandlers(
+          handleData: (data, sink) {
+            bytes += data.length;
+            if (onProgress != null && total > 0) {
+              onProgress!((bytes / total).clamp(0.0, 1.0));
+            }
+            sink.add(data);
+          },
+        ),
+      ),
+    );
+  }
+}
 
 /// 图片上传服务
 class StorageService {
@@ -21,8 +50,12 @@ class StorageService {
     }
   }
 
-  /// 上传图片文件，返回下载 URL（流式上传，支持 3 次网络重连重试）
-  Future<String> uploadImage(File file, String folder) async {
+  /// 上传图片文件，返回下载 URL（流式上传，支持进度回调与 3 次网络重连重试）
+  Future<String> uploadImage(
+    File file,
+    String folder, {
+    void Function(double progress)? onProgress,
+  }) async {
     int attempts = 0;
     const maxAttempts = 3;
 
@@ -31,11 +64,18 @@ class StorageService {
       http.Client? client;
       try {
         client = http.Client();
-        final request = http.MultipartRequest('POST', Uri.parse('$_baseUrl/upload'));
+        onProgress?.call(0.0);
+        final request = _MultipartRequestWithProgress(
+          'POST',
+          Uri.parse('$_baseUrl/upload'),
+          onProgress: onProgress,
+        );
+        final fileName =
+            file.path.split(Platform.pathSeparator).last.split('/').last;
         request.files.add(await http.MultipartFile.fromPath(
           'file',
           file.path,
-          filename: file.path.split('/').last,
+          filename: fileName,
         ));
         request.fields['folder'] = folder;
 

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../utils/motion_photo_helper.dart';
 
 /// 日记草稿服务：本地保存/加载/清除
 ///
@@ -164,6 +165,18 @@ class DraftService {
     );
   }
 
+  /// 将动态照片转为静态图，直接保存在草稿箱目录中（私有沙盒，绝不污染系统相册）
+  static Future<File> createDraftStillImage(
+    String dateStr,
+    File motionFile,
+  ) async {
+    final dir = await _draftDir();
+    final fileName =
+        '${dateStr}_still_${DateTime.now().microsecondsSinceEpoch}.jpg';
+    final targetFile = File('${dir.path}/$fileName');
+    return MotionPhotoHelper.extractStillImageTo(motionFile, targetFile);
+  }
+
   // ─── 私有辅助 ───
 
   /// 全量替换草稿图片：先复制到临时文件 → 删除旧序号文件 → 改名到位
@@ -181,11 +194,21 @@ class DraftService {
     }
 
     // 2. 删除旧序号文件
+    final inUsePaths = images.map((f) => f.path).toSet();
     await for (final entity in dir.list()) {
-      if (entity is File && _fileName(entity).startsWith('${dateStr}_img_')) {
-        try {
-          await entity.delete();
-        } catch (_) {}
+      if (entity is File) {
+        final name = _fileName(entity);
+        if (name.startsWith('${dateStr}_img_')) {
+          try {
+            await entity.delete();
+          } catch (_) {}
+        } else if (name.startsWith('${dateStr}_still_') &&
+            !inUsePaths.contains(entity.path)) {
+          // 只删除未在当前图片列表中使用的孤儿静态图缓存，正在使用的静态图严禁删除
+          try {
+            await entity.delete();
+          } catch (_) {}
+        }
       }
     }
 

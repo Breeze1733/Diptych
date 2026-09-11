@@ -77,6 +77,68 @@ class MotionPhotoHelper {
     }
   }
 
+  /// 将实况照片提取纯静态 JPEG 保存到指定的私有目标文件（如草稿箱缓存文件）
+  ///
+  /// 如果源文件不是实况照片，直接复制到目标文件；如果是实况照片，无损剥离尾部 MP4 视频流并写入目标文件。
+  static Future<File> extractStillImageTo(
+    File sourceFile,
+    File destinationFile,
+  ) async {
+    if (!await sourceFile.exists()) return sourceFile;
+
+    try {
+      final parentDir = destinationFile.parent;
+      if (!await parentDir.exists()) {
+        await parentDir.create(recursive: true);
+      }
+
+      final length = await sourceFile.length();
+      if (length < 100 * 1024) {
+        return await sourceFile.copy(destinationFile.path);
+      }
+
+      final mp4Offset = await _findMp4Offset(sourceFile, length);
+      if (mp4Offset <= 0) {
+        return await sourceFile.copy(destinationFile.path);
+      }
+
+      if (await destinationFile.exists()) {
+        final existingSize = await destinationFile.length();
+        if (existingSize == mp4Offset) return destinationFile;
+      }
+
+      final raf = await sourceFile.open(mode: FileMode.read);
+      RandomAccessFile? outRaf;
+      try {
+        outRaf = await destinationFile.open(mode: FileMode.write);
+        const chunkSize = 256 * 1024;
+        int bytesLeft = mp4Offset;
+        while (bytesLeft > 0) {
+          final toRead = bytesLeft > chunkSize ? chunkSize : bytesLeft;
+          final chunk = await raf.read(toRead);
+          if (chunk.isEmpty) break;
+          await outRaf.writeFrom(chunk);
+          bytesLeft -= chunk.length;
+        }
+      } finally {
+        await raf.close();
+        await outRaf?.close();
+      }
+
+      return destinationFile;
+    } catch (_) {
+      try {
+        final parentDir = destinationFile.parent;
+        if (!await parentDir.exists()) {
+          await parentDir.create(recursive: true);
+        }
+        return await sourceFile.copy(destinationFile.path);
+      } catch (_) {
+        return sourceFile;
+      }
+    }
+  }
+
   /// 提取纯静态 JPEG 图片（无损剥离尾部 MP4 视频流）
   ///
   /// 如果文件不是实况照片，返回原文件；如果是实况照片，切片提取前半部分纯静态 JPEG。

@@ -6,8 +6,8 @@ import '../utils/diptych_asset_picker.dart';
 import '../utils/motion_photo_helper.dart';
 import 'live_photo_badge.dart';
 
-/// 图片上传状态
-enum PhotoUploadStatus { idle, uploading, success, failed }
+/// 图片上传状态：idle（空闲/未入队）、queued（排队中）、uploading（上传中）、success（成功）、failed（失败）
+enum PhotoUploadStatus { idle, queued, uploading, success, failed }
 
 /// 一张图片条目：本地新选的文件，或编辑时已上传的网络图
 class PhotoEntry {
@@ -60,6 +60,7 @@ class PhotoGridPicker extends StatelessWidget {
   final ValueChanged<int> onRemoved;
   final void Function(int oldIndex, int newIndex) onReordered;
   final PhotoUploadStatus Function(PhotoEntry entry)? statusProvider;
+  final double? Function(PhotoEntry entry)? progressProvider;
   final ValueChanged<int>? onRetry;
   final ValueChanged<int>? onTap;
   final ValueChanged<int>? onToggleLive;
@@ -71,6 +72,7 @@ class PhotoGridPicker extends StatelessWidget {
     required this.onRemoved,
     required this.onReordered,
     this.statusProvider,
+    this.progressProvider,
     this.onRetry,
     this.onTap,
     this.onToggleLive,
@@ -107,7 +109,7 @@ class PhotoGridPicker extends StatelessWidget {
       if (picked != null) {
         final file = File(picked.path);
         final isMotion = await MotionPhotoHelper.isMotionPhoto(file);
-        onAdded([PhotoEntry.file(file, isMotion: isMotion, uploadLive: false)]);
+        onAdded([PhotoEntry.file(file, isMotion: isMotion, uploadLive: isMotion)]);
       }
     } else {
       try {
@@ -165,10 +167,13 @@ class PhotoGridPicker extends StatelessWidget {
     void handleTap() {
       if (status == PhotoUploadStatus.failed) {
         onRetry?.call(index);
-      } else if (status == PhotoUploadStatus.success) {
+      } else if (status == PhotoUploadStatus.uploading) {
+        // 正在上传的那张图片不可预览大图
+        return;
+      } else {
+        // success, queued, idle 均可正常预览大图
         onTap?.call(index);
       }
-      // 上传中 (uploading) 或未就绪 (idle) 时不触发打开大图，确保上传过程中无法点击大图，上传成功后可预览
     }
 
     return LayoutBuilder(
@@ -232,6 +237,7 @@ class PhotoGridPicker extends StatelessWidget {
     bool showDeleteButton = true,
   }) {
     final entry = entries[index];
+    final progress = progressProvider?.call(entry);
     final image = entry.isLocal
         ? Image.file(entry.file!, fit: BoxFit.cover)
         : CachedNetworkImage(
@@ -249,17 +255,56 @@ class PhotoGridPicker extends StatelessWidget {
         fit: StackFit.expand,
         children: [
           image,
-          // 上传中半透明遮罩与进度环
+          // 上传中半透明遮罩与圆圈进度显示
           if (status == PhotoUploadStatus.uploading)
             Container(
-              color: Colors.black38,
+              color: Colors.black45,
               alignment: Alignment.center,
-              child: const SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2.5,
-                  color: Colors.white,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  SizedBox(
+                    width: 36,
+                    height: 36,
+                    child: CircularProgressIndicator(
+                      value: progress,
+                      strokeWidth: 3.0,
+                      backgroundColor: Colors.white24,
+                      valueColor:
+                          const AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                  ),
+                  if (progress != null)
+                    Text(
+                      '${(progress * 100).clamp(0, 100).toInt()}%',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          // 排队中状态：右下角展示“排队中”角标
+          if (status == PhotoUploadStatus.queued)
+            Positioned(
+              right: 4,
+              bottom: 4,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.black.withAlpha(160),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.white38, width: 0.8),
+                ),
+                child: const Text(
+                  '排队中',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
               ),
             ),
@@ -303,14 +348,13 @@ class PhotoGridPicker extends StatelessWidget {
                 ),
               ),
             ),
-          // 实况缩略图角标：如果是实况图，在左下角显示「实况」角标（选了实况正常显示，没选实况画一条斜杠）
-          // 不能选择实况的普通静态图片不显示任何角标
-          if (entry.isMotion)
+          // 实况缩略图角标：如果是动态图且选择保留实况，在左下角显示「实况」角标
+          if (entry.isMotion && entry.uploadLive)
             Positioned(
               left: 4,
               bottom: 4,
               child: LivePhotoBadge(
-                isLiveSelected: entry.uploadLive,
+                isLiveSelected: true,
                 onTap: onToggleLive != null ? () => onToggleLive!(index) : null,
               ),
             ),
@@ -338,4 +382,3 @@ class PhotoGridPicker extends StatelessWidget {
     );
   }
 }
-
