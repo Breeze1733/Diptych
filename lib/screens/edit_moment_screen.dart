@@ -54,6 +54,9 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
   /// 已被用户删除/取消、但仍在网络上传中的图片路径集合
   final Set<String> _cancelledUploads = {};
 
+  /// 正在上传中的图片路径及其在服务端的 uploadId 映射（用于取消时即时通知服务端 abort 清理分片）
+  final Map<String, String> _inFlightUploadIds = {};
+
   /// 待异步删除的远端 URL 队列
   final List<String> _pendingDeleteUrls = [];
   bool _isDeleting = false;
@@ -141,6 +144,10 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
     _feelingController.dispose();
     // 页面销毁时清理未完成的上传标记与保活通知
     _cancelledUploads.addAll(_inFlightUploads);
+    for (final uploadId in _inFlightUploadIds.values) {
+      StorageService().abortUpload(uploadId);
+    }
+    _inFlightUploadIds.clear();
     _pendingUploadQueue.clear();
     if (_hasForegroundKeepAlive) {
       ForegroundServiceHelper.stop();
@@ -290,17 +297,23 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
             });
           }
         },
+        isCancelled: () => _cancelledUploads.contains(path) || !mounted,
+        onUploadIdCreated: (id) {
+          _inFlightUploadIds[path] = id;
+        },
       );
 
       if (_cancelledUploads.contains(path)) {
         _cancelledUploads.remove(path);
         _inFlightUploads.remove(path);
+        _inFlightUploadIds.remove(path);
         _uploadStatuses.remove(path);
         _uploadProgress.remove(path);
         // 上传期间已被用户删除，立即清理云端孤儿文件
         _enqueueDelete(url);
       } else {
         _inFlightUploads.remove(path);
+        _inFlightUploadIds.remove(path);
         _uploadedUrls[path] = url;
         _uploadedIsLive[path] = isUploadingLive;
         _uploadStatuses[path] = PhotoUploadStatus.success;
@@ -313,9 +326,17 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
           );
         }
       }
+    } on UploadCancelledException {
+      debugPrint('[UploadQueue] 上传已主动取消并清理分片: $path');
+      _inFlightUploads.remove(path);
+      _inFlightUploadIds.remove(path);
+      _cancelledUploads.remove(path);
+      _uploadStatuses.remove(path);
+      _uploadProgress.remove(path);
     } catch (e) {
       debugPrint('[UploadQueue] 上传失败: $path, $e');
       _inFlightUploads.remove(path);
+      _inFlightUploadIds.remove(path);
       _uploadProgress.remove(path);
       if (_cancelledUploads.contains(path)) {
         _cancelledUploads.remove(path);
@@ -361,6 +382,10 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
       _uploadProgress.remove(path);
       if (_inFlightUploads.contains(path)) {
         _cancelledUploads.add(path);
+        final uploadId = _inFlightUploadIds.remove(path);
+        if (uploadId != null) {
+          ref.read(storageServiceProvider).abortUpload(uploadId);
+        }
       }
       final existingUrl = _uploadedUrls.remove(path);
       _uploadedIsLive.remove(path);
