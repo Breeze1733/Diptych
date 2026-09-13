@@ -6,6 +6,15 @@ import 'package:http/http.dart' as http;
 import '../utils/url_helper.dart';
 import '../constants/api_config.dart';
 
+/// 分片上传被主动取消的异常
+class UploadCancelledException implements Exception {
+  final String message;
+  const UploadCancelledException([this.message = '上传已取消']);
+
+  @override
+  String toString() => message;
+}
+
 /// 支持发送进度字节回调的 MultipartRequest
 class _ChunkMultipartRequestWithProgress extends http.MultipartRequest {
   final void Function(int bytesSent)? onBytesSent;
@@ -64,11 +73,29 @@ class StorageService {
     }
   }
 
-  /// 分片上传图片文件，返回下载 URL（单片 1MB，彻底规避网关超时，支持局部重试与合并）
+  /// 主动中止上传并清理服务端临时分片
+  Future<void> abortUpload(String uploadId) async {
+    if (uploadId.isEmpty) return;
+    try {
+      await _client
+          .post(
+            Uri.parse('$_baseUrl/upload/abort'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'upload_id': uploadId}),
+          )
+          .timeout(const Duration(seconds: 5));
+    } catch (_) {
+      // 忽略超时或网络断开异常，服务端被动定时清理机制兜底
+    }
+  }
+
+  /// 分片上传图片文件，返回下载 URL（单片 1MB，彻底规避网关超时，支持局部重试、主动熔断清理与合并）
   Future<String> uploadImage(
     File file,
     String folder, {
     void Function(double progress)? onProgress,
+    bool Function()? isCancelled,
+    void Function(String uploadId)? onUploadIdCreated,
   }) async {
     final totalBytes = await file.length();
     if (totalBytes <= 0) {
@@ -81,6 +108,7 @@ class StorageService {
 
     final uploadId =
         'upl_${DateTime.now().millisecondsSinceEpoch}_${totalBytes}_${100000 + math.Random().nextInt(900000)}';
+    onUploadIdCreated?.call(uploadId);
     final fileName =
         file.path.split(Platform.pathSeparator).last.split('/').last;
 
@@ -91,6 +119,11 @@ class StorageService {
 
       // ─── 第一阶段：逐片上传 ───
       for (int i = 0; i < totalChunks; i++) {
+        if (isCancelled?.call() == true) {
+          await abortUpload(uploadId);
+          throw const UploadCancelledException();
+        }
+
         final start = i * chunkSize;
         final end = (start + chunkSize > totalBytes) ? totalBytes : start + chunkSize;
         final currentChunkSize = end - start;
@@ -102,6 +135,11 @@ class StorageService {
         const maxChunkAttempts = 3;
 
         while (true) {
+          if (isCancelled?.call() == true) {
+            await abortUpload(uploadId);
+            throw const UploadCancelledException();
+          }
+
           attempts++;
           http.Client? chunkClient;
           try {
@@ -149,6 +187,10 @@ class StorageService {
             // 当前分片成功，跳出重试循环进入下一分片
             break;
           } catch (e) {
+            if (isCancelled?.call() == true) {
+              await abortUpload(uploadId);
+              throw const UploadCancelledException();
+            }
             if (attempts >= maxChunkAttempts) {
               throw Exception('分片 $i 上传失败（已重试 $maxChunkAttempts 次）: $e');
             }
@@ -161,12 +203,22 @@ class StorageService {
       }
 
       // ─── 第二阶段：通知合并 ───
+      if (isCancelled?.call() == true) {
+        await abortUpload(uploadId);
+        throw const UploadCancelledException();
+      }
+
       onProgress?.call(0.95);
 
       int mergeAttempts = 0;
       const maxMergeAttempts = 3;
 
       while (true) {
+        if (isCancelled?.call() == true) {
+          await abortUpload(uploadId);
+          throw const UploadCancelledException();
+        }
+
         mergeAttempts++;
         try {
           final mergeRes = await _client
@@ -196,6 +248,10 @@ class StorageService {
           onProgress?.call(1.0);
           return UrlHelper.normalize(url);
         } catch (e) {
+          if (isCancelled?.call() == true) {
+            await abortUpload(uploadId);
+            throw const UploadCancelledException();
+          }
           if (mergeAttempts >= maxMergeAttempts) {
             rethrow;
           }
@@ -210,10 +266,14 @@ class StorageService {
   /// 删除服务器上的旧图片
   Future<void> deleteImage(String url) async {
     if (url.isEmpty) return;
-    await _client.post(
-      Uri.parse('$_baseUrl/upload/delete'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'url': url}),
-    );
+    try {
+      await _client.post(
+        Uri.parse('$_baseUrl/upload/delete'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'url': url}),
+      );
+    } catch (_) {
+      // 忽略删除失败
+    }
   }
 }
