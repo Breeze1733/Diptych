@@ -10,7 +10,7 @@ import '../providers/wallpaper_provider.dart';
 import '../services/cache_service.dart';
 import '../utils/wakelock_helper.dart';
 import 'wallpaper_preview_screen.dart';
-import 'wallpaper_zoom_screen.dart';
+import 'package:image_cropper/image_cropper.dart';
 
 /// 壁纸设置子页面：分「日记壁纸」「话题壁纸」两个区块
 class WallpaperSettingsScreen extends ConsumerStatefulWidget {
@@ -24,18 +24,36 @@ class WallpaperSettingsScreen extends ConsumerStatefulWidget {
 class _WallpaperSettingsScreenState extends ConsumerState<WallpaperSettingsScreen> {
   WallpaperType? _uploading; // 正在上传的类型
 
-  /// 选图 + 放缩调整（无旋转无裁剪），返回调整后的图片文件
-  Future<File?> _pickAndAdjust() async {
+  /// 选图 + 固定 9:16 比例裁剪，返回裁剪后的图片文件
+  Future<File?> _pickAndCrop() async {
     final picked = await ImagePicker().pickImage(source: ImageSource.gallery);
     if (picked == null) return null;
 
-    final file = File(picked.path);
-    if (!mounted) return null;
-    final adjusted = await Navigator.push<File>(
-      context,
-      MaterialPageRoute(builder: (_) => WallpaperZoomScreen(file: file)),
+    final cropped = await ImageCropper().cropImage(
+      sourcePath: picked.path,
+      compressFormat: ImageCompressFormat.jpg,
+      compressQuality: 90,
+      aspectRatio: const CropAspectRatio(ratioX: 9, ratioY: 16),
+      uiSettings: [
+        AndroidUiSettings(
+          toolbarTitle: '裁剪壁纸',
+          toolbarColor: AppTheme.primaryColor,
+          toolbarWidgetColor: Colors.white,
+          activeControlsWidgetColor: AppTheme.primaryColor,
+          initAspectRatio: CropAspectRatioPreset.ratio16x9,
+          lockAspectRatio: true,
+          hideBottomControls: false,
+        ),
+        IOSUiSettings(
+          title: '裁剪壁纸',
+          aspectRatioLockEnabled: true,
+          resetAspectRatioEnabled: false,
+        ),
+      ],
     );
-    return adjusted ?? file; // 未点完成直接返回也保留原图
+
+    if (cropped == null) return null;
+    return File(cropped.path);
   }
 
   /// 上传新壁纸：传云端 → 删旧图 → 写本地缓存 → 自动进预览页
@@ -44,7 +62,7 @@ class _WallpaperSettingsScreenState extends ConsumerState<WallpaperSettingsScree
     final user = ref.read(currentUserProvider);
     if (user == null) return;
 
-    final file = await _pickAndAdjust();
+    final file = await _pickAndCrop();
     if (file == null) return;
     if (!mounted) return;
 
