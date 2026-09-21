@@ -133,6 +133,39 @@ class ApiService {
     }
   }
 
+  /// 搜索日记内容（从新到旧倒序扫描，支持断点游标续搜）
+  Future<({List<Moment> items, bool hasMore, String? nextCursor})> searchMoments(
+    String keyword,
+    List<String> authorIds, {
+    int limit = 10,
+    String? cursor,
+  }) async {
+    final params = <String, String>{
+      'keyword': keyword,
+      if (authorIds.isNotEmpty) 'author_ids': authorIds.join(','),
+      'limit': limit.toString(),
+      if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
+    };
+    final uri = Uri.parse('$_baseUrl/moments/search').replace(queryParameters: params);
+    final res = await http.get(uri);
+    if (res.statusCode != 200) {
+      throw Exception('GET /moments/search 返回 ${res.statusCode}: ${res.body}');
+    }
+    final body = _safeDecode(res);
+    if (body['ok'] != true || body['data'] is! Map) {
+      throw Exception('GET /moments/search 响应异常: ${res.body}');
+    }
+    final data = body['data'] as Map<String, dynamic>;
+    final rawList = data['items'] as List? ?? [];
+    final items = rawList
+        .whereType<Map<String, dynamic>>()
+        .map((e) => Moment.fromJson(e))
+        .toList();
+    final hasMore = data['has_more'] as bool? ?? false;
+    final nextCursor = data['next_cursor']?.toString();
+    return (items: items, hasMore: hasMore, nextCursor: nextCursor);
+  }
+
   /// 获取所有用户的日历日期分布 (如 {'A': [...], 'B': [...]})
   Future<Map<String, List<String>>> getCalendarDates() async {
     final res = await http.get(Uri.parse('$_baseUrl/moments/calendar/dates'));

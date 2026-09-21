@@ -22,6 +22,7 @@ import 'edit_moment_screen.dart';
 import 'notification_screen.dart';
 import 'profile_screen.dart';
 import 'topics_screen.dart';
+import 'diary_search_screen.dart';
 
 /// 是否已静默检查过更新（仅触发一次）
 class AutoUpdateCheckedNotifier extends Notifier<bool> {
@@ -97,6 +98,18 @@ class FeedScreen extends ConsumerWidget {
               ),
             ),
             actions: [
+              // 搜索日记
+              IconButton(
+                iconSize: iconSize,
+                padding: EdgeInsets.zero,
+                constraints: BoxConstraints.tightFor(width: buttonSize, height: buttonSize),
+                icon: const Icon(Icons.search),
+                tooltip: '搜索日记',
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const DiarySearchScreen()),
+                ),
+              ),
               // 话题
               IconButton(
                 iconSize: iconSize,
