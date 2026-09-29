@@ -55,3 +55,6 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 /android/local.properties
+
+# 本地辅助运维与上传脚本
+scripts/
