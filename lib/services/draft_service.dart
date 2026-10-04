@@ -1,3 +1,4 @@
+// ignore_for_file: use_null_aware_elements
 import 'dart:convert';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
@@ -8,9 +9,10 @@ import '../utils/motion_photo_helper.dart';
 ///
 /// 设计要点：
 /// - 图片列表由 [save] / [saveImages] 统一复制进草稿目录，按序号命名（第一张为封面）。
-/// - prefs 里不存图片路径 —— 绝对路径（尤其 iOS 沙箱）在 App 更新/重装后会失效，
+/// - 支持混合存储远程图片 URL 与本地图片文件，满足编辑已有日记时的草稿需求。
+/// - prefs 里不存本地图片绝对路径（iOS 沙箱在 App 更新后会失效），
 ///   加载时扫描当前草稿目录按序号重新解析。
-/// - 传入的图片可能就是草稿目录里的文件（草稿加载后再保存），复制时先落到临时文件、
+/// - 传入的本地图片可能就是草稿目录里的文件（草稿加载后再保存），复制时先落到临时文件、
 ///   删除旧序号文件后再改名，避免序号变动时互相覆盖或 copy 到自身清空文件。
 class DraftService {
   static const _prefix = 'draft_';
@@ -57,6 +59,7 @@ class DraftService {
   /// [uploaded] 为断点续传进度（序号 → URL），若未传入则保留已持久化的进度
   /// [liveFlags] 为图片实况状态（序号 → 是否上传实况）
   /// [uploadedLive] 为已上传图片所使用的实况状态（序号 → 当初上传时是否为实况）
+  /// [items] 为混合照片项列表（含本地文件与网络图），保留真实排序
   static Future<void> save(
     String dateStr,
     String feeling,
@@ -65,26 +68,41 @@ class DraftService {
     Map<int, String>? uploaded,
     Map<int, bool>? liveFlags,
     Map<int, bool>? uploadedLive,
+    List<DraftPhotoItem>? items,
   }) async {
-    await _persistImages(dateStr, images);
+    final List<File> filesToPersist = items != null
+        ? [for (final it in items) if (it.isLocal && it.file != null) it.file!]
+        : images;
+
+    await _persistImages(dateStr, filesToPersist);
 
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString('$_prefix$dateStr');
-    final data = {
+    final data = <String, dynamic>{
       'feeling': feeling,
-      if (mood != null) 'mood': mood, // ignore: use_null_aware_elements
-      'image_count': images.length,
+      if (mood != null) 'mood': mood,
+      'image_count': filesToPersist.length,
     };
+
+    if (items != null) {
+      int localCounter = 0;
+      data['items'] = [
+        for (final it in items)
+          if (it.isLocal)
+            it.toJson(localIndex: localCounter++)
+          else
+            it.toJson(),
+      ];
+    }
+
     // 优先使用传入的断点续传进度，未传入时保留已持久化的进度，存草稿不应清掉它
-    final finalUploaded =
-        uploaded ?? _readUploaded(raw);
+    final finalUploaded = uploaded ?? _readUploaded(raw);
     if (finalUploaded.isNotEmpty) {
       data['uploaded'] = {
         for (final e in finalUploaded.entries) '${e.key}': e.value,
       };
     }
-    final finalLiveFlags =
-        liveFlags ?? _readBoolMap(raw, 'live_flags');
+    final finalLiveFlags = liveFlags ?? _readBoolMap(raw, 'live_flags');
     if (finalLiveFlags.isNotEmpty) {
       data['live_flags'] = {
         for (final e in finalLiveFlags.entries) '${e.key}': e.value,
@@ -107,13 +125,56 @@ class DraftService {
     if (raw == null) return null;
     try {
       final data = jsonDecode(raw) as Map<String, dynamic>;
+      final localFiles = await _resolveImages(dateStr);
+      final uploaded = _readUploaded(raw);
+      final liveFlags = _readBoolMap(raw, 'live_flags');
+      final uploadedLive = _readBoolMap(raw, 'uploaded_live');
+
+      final rawItems = data['items'];
+      final photoItems = <DraftPhotoItem>[];
+
+      if (rawItems is List) {
+        for (final itemJson in rawItems) {
+          if (itemJson is Map<String, dynamic>) {
+            final item =
+                DraftPhotoItem.fromJson(itemJson, localFiles: localFiles);
+            if (!item.isLocal || (item.file != null && item.file!.existsSync())) {
+              photoItems.add(item);
+            }
+          }
+        }
+      } else {
+        // 兼容旧版草稿（纯本地图片）
+        for (var i = 0; i < localFiles.length; i++) {
+          final f = localFiles[i];
+          final wasLive = uploadedLive[i] ?? false;
+          final uploadLive = liveFlags[i] ?? false;
+          photoItems.add(
+            DraftPhotoItem(
+              isLocal: true,
+              file: f,
+              isMotion: uploadLive,
+              uploadLive: uploadLive,
+              uploadedUrl: uploaded[i],
+              uploadedLive: wasLive,
+            ),
+          );
+        }
+      }
+
+      final resolvedImages = [
+        for (final p in photoItems)
+          if (p.isLocal && p.file != null) p.file!,
+      ];
+
       return DraftData(
         feeling: data['feeling'] as String? ?? '',
         mood: data['mood'] as int?,
-        images: await _resolveImages(dateStr),
-        uploaded: _readUploaded(raw),
-        liveFlags: _readBoolMap(raw, 'live_flags'),
-        uploadedLive: _readBoolMap(raw, 'uploaded_live'),
+        photoItems: photoItems,
+        images: resolvedImages.isNotEmpty ? resolvedImages : localFiles,
+        uploaded: uploaded,
+        liveFlags: liveFlags,
+        uploadedLive: uploadedLive,
       );
     } catch (_) {
       return null;
@@ -142,13 +203,18 @@ class DraftService {
     Map<int, String> uploaded = const {},
     Map<int, bool> liveFlags = const {},
     Map<int, bool> uploadedLive = const {},
+    List<DraftPhotoItem>? items,
   }) async {
-    await _persistImages(dateStr, images);
+    final List<File> filesToPersist = items != null
+        ? [for (final it in items) if (it.isLocal && it.file != null) it.file!]
+        : images;
+    await _persistImages(dateStr, filesToPersist);
     await _persistUploadMetadata(
       dateStr,
       uploaded: uploaded,
       liveFlags: liveFlags,
       uploadedLive: uploadedLive,
+      items: items,
     );
   }
 
@@ -157,11 +223,13 @@ class DraftService {
     String dateStr,
     Map<int, String> uploaded, {
     Map<int, bool>? uploadedLive,
+    List<DraftPhotoItem>? items,
   }) async {
     await _persistUploadMetadata(
       dateStr,
       uploaded: uploaded,
       uploadedLive: uploadedLive,
+      items: items,
     );
   }
 
@@ -243,6 +311,7 @@ class DraftService {
     Map<int, String>? uploaded,
     Map<int, bool>? liveFlags,
     Map<int, bool>? uploadedLive,
+    List<DraftPhotoItem>? items,
   }) async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString('$_prefix$dateStr');
@@ -250,6 +319,16 @@ class DraftService {
         ? <String, dynamic>{}
         : _safeDecodeMap(raw, <String, dynamic>{});
 
+    if (items != null) {
+      int localCounter = 0;
+      data['items'] = [
+        for (final it in items)
+          if (it.isLocal)
+            it.toJson(localIndex: localCounter++)
+          else
+            it.toJson(),
+      ];
+    }
     if (uploaded != null) {
       data['uploaded'] = {
         for (final e in uploaded.entries) '${e.key}': e.value,
@@ -316,10 +395,87 @@ class DraftService {
   }
 }
 
-/// 草稿数据：图片以运行时解析好的 File 列表提供
+/// 草稿中的单张图片项：可以是远程 URL 或本地 File
+class DraftPhotoItem {
+  final bool isLocal;
+  final String? url;
+  final File? file;
+  final bool isMotion;
+  final bool uploadLive;
+  final String? uploadedUrl;
+  final bool? uploadedLive;
+
+  const DraftPhotoItem({
+    required this.isLocal,
+    this.url,
+    this.file,
+    this.isMotion = false,
+    this.uploadLive = false,
+    this.uploadedUrl,
+    this.uploadedLive,
+  });
+
+  Map<String, dynamic> toJson({int? localIndex}) {
+    if (isLocal) {
+      return {
+        'type': 'local',
+        if (localIndex != null) 'local_index': localIndex,
+        'is_motion': isMotion,
+        'upload_live': uploadLive,
+        if (uploadedUrl != null) 'uploaded_url': uploadedUrl,
+        if (uploadedLive != null) 'uploaded_live': uploadedLive,
+      };
+    } else {
+      return {
+        'type': 'remote',
+       
+        if (url != null) 'url': url,
+        'is_motion': isMotion,
+        'upload_live': uploadLive,
+      };
+    }
+  }
+
+  factory DraftPhotoItem.fromJson(
+    Map<String, dynamic> json, {
+    List<File> localFiles = const [],
+  }) {
+    final type = json['type'] as String? ?? 'local';
+    final isMotion = json['is_motion'] as bool? ?? false;
+    final uploadLive = json['upload_live'] as bool? ?? false;
+
+    if (type == 'remote') {
+      return DraftPhotoItem(
+        isLocal: false,
+        url: json['url'] as String?,
+        isMotion: isMotion,
+        uploadLive: uploadLive,
+      );
+    } else {
+      final localIndex = json['local_index'] as int?;
+      File? file;
+      if (localIndex != null &&
+          localIndex >= 0 &&
+          localIndex < localFiles.length) {
+        file = localFiles[localIndex];
+      }
+      return DraftPhotoItem(
+        isLocal: true,
+        file: file,
+        isMotion: isMotion,
+        uploadLive: uploadLive,
+        uploadedUrl: json['uploaded_url'] as String?,
+        uploadedLive: json['uploaded_live'] as bool?,
+      );
+    }
+  }
+}
+
+/// 草稿数据：包含文字、心情与图片项列表
 class DraftData {
   final String feeling;
   final int? mood;
+  final List<DraftPhotoItem> photoItems;
   final List<File> images;
   /// 断点续传进度：图片序号 → 已上传成功的 URL
   final Map<int, String> uploaded;
@@ -331,9 +487,11 @@ class DraftData {
   const DraftData({
     required this.feeling,
     this.mood,
+    this.photoItems = const [],
     this.images = const [],
     this.uploaded = const {},
     this.liveFlags = const {},
     this.uploadedLive = const {},
   });
 }
+
