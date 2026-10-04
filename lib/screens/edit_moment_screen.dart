@@ -33,6 +33,15 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
   bool _isSaving = false;
   bool _isSavingDraft = false;
 
+  /// 快照：记录最近一次已保存/已恢复到草稿的状态，用于判定是否有尚未存草稿的修改
+  _EditorSnapshot? _lastSavedDraftSnapshot;
+
+  /// 是否发布/保存成功，成功后退出不需要触发防手滑拦截
+  bool _hasSavedSuccessfully = false;
+
+  /// 防止多次快速点击返回弹出多个确认框
+  bool _isExitDialogShowing = false;
+
   /// 断点续传/预上传：本地图片路径 → 已成功上传的远端 URL
   final Map<String, String> _uploadedUrls = {};
 
@@ -73,6 +82,81 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
     for (final p in _photos.where((p) => p.isLocal)) p.file!,
   ];
 
+  List<DraftPhotoItem> _buildDraftItems() {
+    final items = <DraftPhotoItem>[];
+    for (final p in _photos) {
+      if (p.isLocal && p.file != null) {
+        final path = p.file!.path;
+        items.add(
+          DraftPhotoItem(
+            isLocal: true,
+            file: p.file,
+            isMotion: p.isMotion,
+            uploadLive: p.uploadLive,
+            uploadedUrl: _uploadedUrls[path],
+            uploadedLive: _uploadedIsLive[path],
+          ),
+        );
+      } else if (!p.isLocal && p.url != null) {
+        items.add(
+          DraftPhotoItem(
+            isLocal: false,
+            url: p.url,
+            isMotion: p.isMotion,
+            uploadLive: p.uploadLive,
+          ),
+        );
+      }
+    }
+    return items;
+  }
+
+  _EditorSnapshot _takeCurrentSnapshot() {
+    return _EditorSnapshot(
+      feeling: _feelingController.text,
+      mood: _mood,
+      photoKeys: [
+        for (final p in _photos)
+          if (p.isLocal && p.file != null)
+            'local:${p.file!.path}:${p.uploadLive}'
+          else if (!p.isLocal && p.url != null)
+            'remote:${p.url}',
+      ],
+    );
+  }
+
+  bool get _hasChanges {
+    if (_hasSavedSuccessfully) return false;
+
+    // 1. 如果当前状态与最近一次保存/加载的草稿完全一致，说明没有未存草稿的新修改
+    if (_lastSavedDraftSnapshot != null &&
+        _lastSavedDraftSnapshot!.matches(
+          _feelingController.text,
+          _mood,
+          _photos,
+        )) {
+      return false;
+    }
+
+    // 2. 如果无草稿快照（未存草稿或已清空草稿）：
+    if (_isEdit) {
+      final orig = widget.existingMoment!;
+      if (_feelingController.text.trim() != orig.feeling.trim()) return true;
+      if (_mood != orig.mood) return true;
+      if (_photos.length != orig.imageUrls.length) return true;
+      for (var i = 0; i < _photos.length; i++) {
+        if (_photos[i].isLocal) return true;
+        if (_photos[i].url != orig.imageUrls[i]) return true;
+      }
+      return false;
+    } else {
+      if (_feelingController.text.trim().isNotEmpty) return true;
+      if (_mood != null) return true;
+      if (_photos.isNotEmpty) return true;
+      return false;
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -80,63 +164,188 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
       _feelingController.text = widget.existingMoment!.feeling;
       _mood = widget.existingMoment!.mood;
       _photos.addAll(widget.existingMoment!.imageUrls.map(PhotoEntry.url));
+      _loadDraftForEdit();
     } else {
       _loadDraft();
+    }
+  }
+
+  Future<void> _loadDraftForEdit() async {
+    final draft = await DraftService.load(_dateStr);
+    if (draft == null || !mounted) return;
+
+    final isDifferent = draft.feeling != widget.existingMoment!.feeling ||
+        draft.mood != widget.existingMoment!.mood ||
+        draft.photoItems.isNotEmpty ||
+        draft.images.isNotEmpty;
+
+    if (isDifferent) {
+      await _applyDraft(draft);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('已恢复未保存的草稿'),
+            action: SnackBarAction(
+              label: '放弃草稿',
+              onPressed: _discardDraftAndReloadOriginal,
+            ),
+          ),
+        );
+      }
     }
   }
 
   Future<void> _loadDraft() async {
     final draft = await DraftService.load(_dateStr);
     if (draft == null || !mounted) return;
-
-    final loadedPhotos = <PhotoEntry>[];
-    for (var i = 0; i < draft.images.length; i++) {
-      final f = draft.images[i];
-      final isMotion = await MotionPhotoHelper.isMotionPhoto(f);
-      // 从草稿恢复用户的实况开关状态，草稿未指定时默认传静态图 (false)
-      final uploadLive = isMotion && (draft.liveFlags[i] ?? false);
-      loadedPhotos.add(
-        PhotoEntry.file(
-          f,
-          isMotion: isMotion && uploadLive,
-          uploadLive: isMotion && uploadLive,
+    await _applyDraft(draft);
+    if (mounted &&
+        (draft.feeling.isNotEmpty ||
+            draft.mood != null ||
+            draft.photoItems.isNotEmpty ||
+            draft.images.isNotEmpty)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('已恢复未发布的草稿'),
+          action: SnackBarAction(
+            label: '清空草稿',
+            onPressed: () async {
+              await _discardDraftInternal();
+              if (mounted) {
+                setState(() {
+                  _feelingController.clear();
+                  _mood = null;
+                  _photos.clear();
+                  _uploadedUrls.clear();
+                  _uploadedIsLive.clear();
+                  _uploadStatuses.clear();
+                  _uploadProgress.clear();
+                });
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('草稿已清空')),
+                );
+              }
+            },
+          ),
         ),
       );
     }
+  }
 
-    setState(() {
-      _feelingController.text = draft.feeling;
-      _mood = draft.mood;
-      _photos.addAll(loadedPhotos);
-      // 恢复断点续传：草稿图片按序号与持久化的进度一一对应
+  Future<void> _applyDraft(DraftData draft) async {
+    final loadedPhotos = <PhotoEntry>[];
+
+    if (draft.photoItems.isNotEmpty) {
+      for (final item in draft.photoItems) {
+        if (!item.isLocal && item.url != null) {
+          loadedPhotos.add(
+            PhotoEntry.url(
+              item.url!,
+              isMotion: item.isMotion,
+              uploadLive: item.uploadLive,
+            ),
+          );
+        } else if (item.isLocal &&
+            item.file != null &&
+            await item.file!.exists()) {
+          final f = item.file!;
+          final isMotion = await MotionPhotoHelper.isMotionPhoto(f);
+          final uploadLive = isMotion && item.uploadLive;
+          loadedPhotos.add(
+            PhotoEntry.file(
+              f,
+              isMotion: isMotion && uploadLive,
+              uploadLive: isMotion && uploadLive,
+            ),
+          );
+          if (item.uploadedUrl != null && item.uploadedUrl!.isNotEmpty) {
+            final path = f.path;
+            final wasLive = item.uploadedLive ?? false;
+            if (wasLive == uploadLive) {
+              _uploadedUrls[path] = item.uploadedUrl!;
+              _uploadedIsLive[path] = wasLive;
+              _uploadStatuses[path] = PhotoUploadStatus.success;
+            } else {
+              _enqueueDelete(item.uploadedUrl!);
+            }
+          }
+        }
+      }
+    } else {
+      // 兼容旧版草稿（仅有 images）
+      for (var i = 0; i < draft.images.length; i++) {
+        final f = draft.images[i];
+        if (!await f.exists()) continue;
+        final isMotion = await MotionPhotoHelper.isMotionPhoto(f);
+        final uploadLive = isMotion && (draft.liveFlags[i] ?? false);
+        loadedPhotos.add(
+          PhotoEntry.file(
+            f,
+            isMotion: isMotion && uploadLive,
+            uploadLive: isMotion && uploadLive,
+          ),
+        );
+      }
       for (final e in draft.uploaded.entries) {
         if (e.key >= 0 && e.key < draft.images.length) {
-          final path = draft.images[e.key].path;
+          final f = draft.images[e.key];
+          final path = f.path;
           final wasLive = draft.uploadedLive[e.key] ?? false;
-          final shouldBeLive = _photos[e.key].uploadLive;
+          final shouldBeLive = e.key < loadedPhotos.length
+              ? loadedPhotos[e.key].uploadLive
+              : false;
 
           if (wasLive == shouldBeLive) {
             _uploadedUrls[path] = e.value;
             _uploadedIsLive[path] = wasLive;
             _uploadStatuses[path] = PhotoUploadStatus.success;
           } else {
-            // 实况状态不一致，需要清理旧图片并重新上传对应版本
             _enqueueDelete(e.value);
           }
         }
       }
+    }
+
+    setState(() {
+      _feelingController.text = draft.feeling;
+      _mood = draft.mood;
+      _photos.clear();
+      _photos.addAll(loadedPhotos);
     });
+
+    _lastSavedDraftSnapshot = _takeCurrentSnapshot();
 
     // 对草稿中尚未上传成功或需要重新上传的本地图片，自动加入预上传队列
     final unUploaded = <File>[];
     for (final p in _photos) {
-      if (p.isLocal && !_uploadedUrls.containsKey(p.file!.path)) {
+      if (p.isLocal &&
+          p.file != null &&
+          !_uploadedUrls.containsKey(p.file!.path)) {
         unUploaded.add(p.file!);
       }
     }
     if (unUploaded.isNotEmpty) {
       _enqueueUploads(unUploaded);
     }
+  }
+
+  Future<void> _discardDraftAndReloadOriginal() async {
+    await _discardDraftInternal();
+    if (!mounted) return;
+    setState(() {
+      _feelingController.text = widget.existingMoment!.feeling;
+      _mood = widget.existingMoment!.mood;
+      _photos.clear();
+      _photos.addAll(widget.existingMoment!.imageUrls.map(PhotoEntry.url));
+      _uploadedUrls.clear();
+      _uploadedIsLive.clear();
+      _uploadStatuses.clear();
+      _uploadProgress.clear();
+    });
+    _lastSavedDraftSnapshot = null;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('已放弃草稿并恢复原内容')),
+    );
   }
 
   @override
@@ -159,15 +368,14 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
   /// 新建模式下图片变动后即时落地草稿目录，防临时文件被系统清理；
   /// 同时持久化当前断点续传进度与实况开关设置，让进度与图片顺序保持一致。
   void _syncDraftImages() {
-    if (!_isEdit) {
-      DraftService.saveImages(
-        _dateStr,
-        _localFiles,
-        uploaded: _currentUploadProgress(),
-        liveFlags: _currentLiveFlags(),
-        uploadedLive: _currentUploadedLive(),
-      );
-    }
+    DraftService.saveImages(
+      _dateStr,
+      _localFiles,
+      uploaded: _currentUploadProgress(),
+      liveFlags: _currentLiveFlags(),
+      uploadedLive: _currentUploadedLive(),
+      items: _buildDraftItems(),
+    );
   }
 
   /// 当前实况开关设置：序号 → 是否上传实况
@@ -318,13 +526,12 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
         _uploadedIsLive[path] = isUploadingLive;
         _uploadStatuses[path] = PhotoUploadStatus.success;
         _uploadProgress.remove(path);
-        if (!_isEdit) {
-          DraftService.saveUploadProgress(
-            _dateStr,
-            _currentUploadProgress(),
-            uploadedLive: _currentUploadedLive(),
-          );
-        }
+        DraftService.saveUploadProgress(
+          _dateStr,
+          _currentUploadProgress(),
+          uploadedLive: _currentUploadedLive(),
+          items: _buildDraftItems(),
+        );
       }
     } on UploadCancelledException {
       debugPrint('[UploadQueue] 上传已主动取消并清理分片: $path');
@@ -350,20 +557,11 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
       _updateKeepAliveState();
 
       // 当所有图片传输任务全部完成（队列与进行中均为空），自动触发一次完整草稿保存
-      if (!_isEdit &&
-          _inFlightUploads.isEmpty &&
+      if (_inFlightUploads.isEmpty &&
           _pendingUploadQueue.isEmpty &&
           mounted) {
         try {
-          await DraftService.save(
-            _dateStr,
-            _feelingController.text.trim(),
-            _mood,
-            images: _localFiles,
-            uploaded: _currentUploadProgress(),
-            liveFlags: _currentLiveFlags(),
-            uploadedLive: _currentUploadedLive(),
-          );
+          await _saveDraftInternal();
         } catch (e) {
           debugPrint('[UploadQueue] 传输完毕自动存草稿异常: $e');
         }
@@ -603,20 +801,10 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
     setState(() => _isSaving = true);
 
     // 0. 点击发布立即执行一次存草稿，存好草稿再发，以免发布过程中被系统杀后台导致进度完全丢失
-    if (!_isEdit) {
-      try {
-        await DraftService.save(
-          _dateStr,
-          _feelingController.text.trim(),
-          _mood,
-          images: _localFiles,
-          uploaded: _currentUploadProgress(),
-          liveFlags: _currentLiveFlags(),
-          uploadedLive: _currentUploadedLive(),
-        );
-      } catch (e) {
-        debugPrint('发布前自动存草稿异常: $e');
-      }
+    try {
+      await _saveDraftInternal();
+    } catch (e) {
+      debugPrint('发布前自动存草稿异常: $e');
     }
 
     _updateKeepAliveState();
@@ -725,6 +913,7 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
 
       // 发布成功 → 清除草稿
       await DraftService.clear(_dateStr);
+      _hasSavedSuccessfully = true;
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -736,19 +925,9 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
       Navigator.pop(context, true);
     } catch (e) {
       // 发布失败时再次保存草稿（包含最新断点续传进度），防止用户内容丢失
-      if (!_isEdit) {
-        try {
-          await DraftService.save(
-            _dateStr,
-            _feelingController.text.trim(),
-            _mood,
-            images: _localFiles,
-            uploaded: _currentUploadProgress(),
-            liveFlags: _currentLiveFlags(),
-            uploadedLive: _currentUploadedLive(),
-          );
-        } catch (_) {}
-      }
+      try {
+        await _saveDraftInternal();
+      } catch (_) {}
 
       debugPrint('发布日记失败: $e');
       if (!mounted) return;
@@ -764,20 +943,64 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
     }
   }
 
+  Future<void> _saveDraftInternal() async {
+    final items = _buildDraftItems();
+    await DraftService.save(
+      _dateStr,
+      _feelingController.text,
+      _mood,
+      images: _localFiles,
+      uploaded: _currentUploadProgress(),
+      liveFlags: _currentLiveFlags(),
+      uploadedLive: _currentUploadedLive(),
+      items: items,
+    );
+    _lastSavedDraftSnapshot = _takeCurrentSnapshot();
+  }
+
+  Future<void> _discardDraftInternal() async {
+    await DraftService.clear(_dateStr);
+    _lastSavedDraftSnapshot = null;
+
+    // 取消正在进行的上传任务
+    _cancelledUploads.addAll(_inFlightUploads);
+    for (final uploadId in _inFlightUploadIds.values) {
+      ref.read(storageServiceProvider).abortUpload(uploadId);
+    }
+    _inFlightUploadIds.clear();
+    _pendingUploadQueue.clear();
+
+    // 清理本次新增且已预上传成功的孤儿云端文件
+    for (final p in _photos) {
+      if (p.isLocal && p.file != null) {
+        final uploadedUrl = _uploadedUrls[p.file!.path];
+        if (uploadedUrl != null && uploadedUrl.isNotEmpty) {
+          _enqueueDelete(uploadedUrl);
+        }
+      }
+    }
+
+    if (_hasForegroundKeepAlive) {
+      ForegroundServiceHelper.stop();
+      WakelockHelper.release();
+    }
+  }
+
   /// 存草稿
   Future<void> _handleSaveDraft() async {
+    final hasContent = _feelingController.text.trim().isNotEmpty ||
+        _mood != null ||
+        _photos.isNotEmpty;
+    if (!hasContent) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先输入感受或添加照片后再存草稿')),
+      );
+      return;
+    }
+
     setState(() => _isSavingDraft = true);
     try {
-      // save 内部会把图片复制进草稿目录（单一可靠入口）
-      await DraftService.save(
-        _dateStr,
-        _feelingController.text,
-        _mood,
-        images: _localFiles,
-        uploaded: _currentUploadProgress(),
-        liveFlags: _currentLiveFlags(),
-        uploadedLive: _currentUploadedLive(),
-      );
+      await _saveDraftInternal();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -796,6 +1019,82 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
     }
   }
 
+  Future<void> _handleBackPress() async {
+    if (_isSaving || _isSavingDraft) return;
+    if (!_hasChanges) {
+      Navigator.of(context).pop();
+      return;
+    }
+    if (_isExitDialogShowing || !mounted) return;
+    _isExitDialogShowing = true;
+    try {
+      final shouldPop = await _showExitConfirmDialog();
+      if (shouldPop && mounted) {
+        Navigator.of(context).pop();
+      }
+    } finally {
+      _isExitDialogShowing = false;
+    }
+  }
+
+  Future<bool> _showExitConfirmDialog() async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('退出编辑'),
+        content: const Text('当前内容有未保存的更改，是否保留草稿？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, null),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: Colors.red[600]),
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('放弃修改'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(
+              foregroundColor: AppTheme.primaryColor,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(
+              '保留草稿',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (result == null) {
+      // 取消退出，留在页面
+      return false;
+    }
+
+    if (result == true) {
+      // 保留草稿并退出
+      try {
+        await _saveDraftInternal();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('草稿已保存'),
+              backgroundColor: AppTheme.primaryColor,
+            ),
+          );
+        }
+      } catch (e) {
+        debugPrint('退出时保存草稿失败: $e');
+      }
+      return true;
+    } else {
+      // 放弃修改并退出
+      await _discardDraftInternal();
+      return true;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final localCount = _photos.where((p) => p.isLocal).length;
@@ -804,41 +1103,33 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
         .length;
 
     return PopScope(
-      canPop: true,
-      onPopInvokedWithResult: (didPop, result) {
-        if (!_isEdit) {
-          // 退出页面时自动存一次完整草稿，保留已录入的文本、心情、图片及已上传的进度
-          DraftService.save(
-            _dateStr,
-            _feelingController.text.trim(),
-            _mood,
-            images: _localFiles,
-            uploaded: _currentUploadProgress(),
-            liveFlags: _currentLiveFlags(),
-            uploadedLive: _currentUploadedLive(),
-          );
-        }
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        await _handleBackPress();
       },
       child: Scaffold(
         appBar: AppBar(
+          leading: BackButton(
+            onPressed: _handleBackPress,
+          ),
           title: Text(_isEdit ? AppStrings.editTitle : AppStrings.createTitle),
           actions: [
-            if (!_isEdit)
-              SizedBox(
-                width: 72,
-                child: TextButton(
-                  onPressed: _isSavingDraft || _isSaving
-                      ? null
-                      : _handleSaveDraft,
-                  child: _isSavingDraft
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text('存草稿'),
-                ),
+            SizedBox(
+              width: 72,
+              child: TextButton(
+                onPressed: _isSavingDraft || _isSaving
+                    ? null
+                    : _handleSaveDraft,
+                child: _isSavingDraft
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('存草稿'),
               ),
+            ),
             SizedBox(
               width: 84,
               child: TextButton(
@@ -1006,5 +1297,37 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
         );
       }),
     );
+  }
+}
+
+
+/// 编辑器状态快照：用于比对是否有未保存的草稿或更改
+class _EditorSnapshot {
+  final String feeling;
+  final int? mood;
+  final List<String> photoKeys;
+
+  _EditorSnapshot({
+    required this.feeling,
+    required this.mood,
+    required this.photoKeys,
+  });
+
+  bool matches(
+    String currentFeeling,
+    int? currentMood,
+    List<PhotoEntry> currentPhotos,
+  ) {
+    if (feeling.trim() != currentFeeling.trim()) return false;
+    if (mood != currentMood) return false;
+    if (photoKeys.length != currentPhotos.length) return false;
+    for (var i = 0; i < currentPhotos.length; i++) {
+      final p = currentPhotos[i];
+      final key = p.isLocal
+          ? 'local:${p.file?.path}:${p.uploadLive}'
+          : 'remote:${p.url}';
+      if (photoKeys[i] != key) return false;
+    }
+    return true;
   }
 }

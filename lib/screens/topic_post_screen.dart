@@ -28,6 +28,18 @@ class _TopicPostScreenState extends ConsumerState<TopicPostScreen> {
   final _service = TopicService();
   bool _isSaving = false;
   bool _isSavingDraft = false;
+  String? _loadedDraft;
+  bool _isExitDialogShowing = false;
+  bool _hasPublishedSuccessfully = false;
+
+  bool get _hasChanges {
+    if (_hasPublishedSuccessfully) return false;
+    final current = _contentController.text.trim();
+    if (_loadedDraft != null) {
+      return current != _loadedDraft;
+    }
+    return current.isNotEmpty;
+  }
 
   String get _draftKey {
     final userId = ref.read(currentUserProvider)?.uid ?? 'anonymous';
@@ -44,6 +56,7 @@ class _TopicPostScreenState extends ConsumerState<TopicPostScreen> {
     final content = await DraftService.loadTopicPost(_draftKey);
     if (!mounted || content == null) return;
     _contentController.text = content;
+    _loadedDraft = content.trim();
   }
 
   @override
@@ -64,6 +77,7 @@ class _TopicPostScreenState extends ConsumerState<TopicPostScreen> {
     setState(() => _isSavingDraft = true);
     try {
       await DraftService.saveTopicPost(_draftKey, content);
+      _loadedDraft = content;
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('草稿已保存')),
@@ -103,6 +117,7 @@ class _TopicPostScreenState extends ConsumerState<TopicPostScreen> {
     try {
       await _service.createPost(widget.topicId, currentUser.uid, content);
       await DraftService.clearTopicPost(_draftKey);
+      _hasPublishedSuccessfully = true;
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('发布成功'), backgroundColor: AppTheme.primaryColor),
@@ -129,11 +144,95 @@ class _TopicPostScreenState extends ConsumerState<TopicPostScreen> {
     }
   }
 
+  Future<void> _handleBackPress() async {
+    if (_isSaving || _isSavingDraft) return;
+    if (!_hasChanges) {
+      Navigator.of(context).pop();
+      return;
+    }
+    if (_isExitDialogShowing || !mounted) return;
+    _isExitDialogShowing = true;
+    try {
+      final shouldPop = await _showExitConfirmDialog();
+      if (shouldPop && mounted) {
+        Navigator.of(context).pop();
+      }
+    } finally {
+      _isExitDialogShowing = false;
+    }
+  }
+
+  Future<bool> _showExitConfirmDialog() async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('退出发帖'),
+        content: const Text('当前内容尚未发布，是否保留草稿？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, null),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: Colors.red[600]),
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('放弃'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(
+              foregroundColor: AppTheme.primaryColor,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(
+              '保留草稿',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (result == null) {
+      return false;
+    }
+
+    if (result == true) {
+      final content = _contentController.text.trim();
+      if (content.isNotEmpty) {
+        try {
+          await DraftService.saveTopicPost(_draftKey, content);
+          _loadedDraft = content;
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('草稿已保存'),
+                backgroundColor: AppTheme.primaryColor,
+              ),
+            );
+          }
+        } catch (_) {}
+      }
+      return true;
+    } else {
+      await DraftService.clearTopicPost(_draftKey);
+      return true;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('发帖'),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        await _handleBackPress();
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          leading: BackButton(
+            onPressed: _handleBackPress,
+          ),
+          title: const Text('发帖'),
         actions: [
           SizedBox(
             width: 72,
@@ -199,6 +298,7 @@ class _TopicPostScreenState extends ConsumerState<TopicPostScreen> {
             ),
           ],
         ),
+      ),
       ),
     );
   }
