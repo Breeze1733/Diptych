@@ -52,8 +52,8 @@ flutter:
 
 dependency_overrides:
   intl: 0.20.3
-  cupertino_ui: 1.1.1
-  material_ui: 1.5.0
+  cupertino_ui: 1.0.2
+  material_ui: 1.2.0
   clock: 1.1.3
   code_assets: 2.1.0
   hooks: 2.2.0
@@ -65,4 +65,3 @@ dependency_overrides:
   stack_trace: 1.12.2
   test_api: 0.7.14
   vector_math: 2.4.3
-
