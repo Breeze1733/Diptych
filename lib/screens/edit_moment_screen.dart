@@ -181,17 +181,6 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
 
     if (isDifferent) {
       await _applyDraft(draft);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('已恢复未保存的草稿'),
-            action: SnackBarAction(
-              label: '放弃草稿',
-              onPressed: _discardDraftAndReloadOriginal,
-            ),
-          ),
-        );
-      }
     }
   }
 
@@ -199,37 +188,6 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
     final draft = await DraftService.load(_dateStr);
     if (draft == null || !mounted) return;
     await _applyDraft(draft);
-    if (mounted &&
-        (draft.feeling.isNotEmpty ||
-            draft.mood != null ||
-            draft.photoItems.isNotEmpty ||
-            draft.images.isNotEmpty)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('已恢复未发布的草稿'),
-          action: SnackBarAction(
-            label: '清空草稿',
-            onPressed: () async {
-              await _discardDraftInternal();
-              if (mounted) {
-                setState(() {
-                  _feelingController.clear();
-                  _mood = null;
-                  _photos.clear();
-                  _uploadedUrls.clear();
-                  _uploadedIsLive.clear();
-                  _uploadStatuses.clear();
-                  _uploadProgress.clear();
-                });
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('草稿已清空')),
-                );
-              }
-            },
-          ),
-        ),
-      );
-    }
   }
 
   Future<void> _applyDraft(DraftData draft) async {
@@ -329,24 +287,7 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
     }
   }
 
-  Future<void> _discardDraftAndReloadOriginal() async {
-    await _discardDraftInternal();
-    if (!mounted) return;
-    setState(() {
-      _feelingController.text = widget.existingMoment!.feeling;
-      _mood = widget.existingMoment!.mood;
-      _photos.clear();
-      _photos.addAll(widget.existingMoment!.imageUrls.map(PhotoEntry.url));
-      _uploadedUrls.clear();
-      _uploadedIsLive.clear();
-      _uploadStatuses.clear();
-      _uploadProgress.clear();
-    });
-    _lastSavedDraftSnapshot = null;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('已放弃草稿并恢复原内容')),
-    );
-  }
+
 
   @override
   void dispose() {
