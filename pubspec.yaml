@@ -22,7 +22,7 @@ dependencies:
   # 日历
   table_calendar: ^3.3.0
   # 日期格式化
-  intl: ^0.20.2
+  intl: ^0.20.3
   # 缓存管理
   flutter_cache_manager: ^3.4.2
   # 图片缓存
@@ -50,5 +50,3 @@ flutter:
     - assets/not_posted_self.png
     - assets/not_posted_partner.png
 
-dependency_overrides:
-  intl: 0.20.3
