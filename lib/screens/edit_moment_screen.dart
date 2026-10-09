@@ -13,6 +13,7 @@ import '../utils/foreground_service_helper.dart';
 import '../utils/motion_photo_helper.dart';
 import '../utils/wakelock_helper.dart';
 import '../widgets/image_gallery.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import '../widgets/photo_grid_picker.dart';
 
 /// 发布/编辑动态页
@@ -164,24 +165,8 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
       _feelingController.text = widget.existingMoment!.feeling;
       _mood = widget.existingMoment!.mood;
       _photos.addAll(widget.existingMoment!.imageUrls.map(PhotoEntry.url));
-      _loadDraftForEdit();
-    } else {
-      _loadDraft();
     }
-  }
-
-  Future<void> _loadDraftForEdit() async {
-    final draft = await DraftService.load(_dateStr);
-    if (draft == null || !mounted) return;
-
-    final isDifferent = draft.feeling != widget.existingMoment!.feeling ||
-        draft.mood != widget.existingMoment!.mood ||
-        draft.photoItems.isNotEmpty ||
-        draft.images.isNotEmpty;
-
-    if (isDifferent) {
-      await _applyDraft(draft);
-    }
+    _loadDraft();
   }
 
   Future<void> _loadDraft() async {
@@ -312,6 +297,9 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
     DraftService.saveImages(
       _dateStr,
       _localFiles,
+      feeling: _feelingController.text,
+      mood: _mood,
+      updateMood: true,
       uploaded: _currentUploadProgress(),
       liveFlags: _currentLiveFlags(),
       uploadedLive: _currentUploadedLive(),
@@ -470,6 +458,9 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
         DraftService.saveUploadProgress(
           _dateStr,
           _currentUploadProgress(),
+          feeling: _feelingController.text,
+          mood: _mood,
+          updateMood: true,
           uploadedLive: _currentUploadedLive(),
           items: _buildDraftItems(),
         );
@@ -706,7 +697,7 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
       'author_id': authorId,
       'image_urls': imageUrls,
       'feeling': feeling,
-      if (_mood != null) 'mood': _mood,
+      'mood': _mood,
       'updated_at': now,
     };
 
@@ -807,13 +798,18 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
       if (_isEdit) {
         // 删除被移除的旧图
         for (final old in widget.existingMoment!.imageUrls) {
-          if (!imageUrls.contains(old)) storageService.deleteImage(old);
+          if (!imageUrls.contains(old)) {
+            storageService.deleteImage(old);
+            try {
+              await DefaultCacheManager().removeFile(old);
+            } catch (_) {}
+          }
         }
 
         await apiService.updateMoment(widget.existingMoment!.id, {
           'image_urls': imageUrls,
           'feeling': _feelingController.text.trim(),
-          if (_mood != null) 'mood': _mood,
+          'mood': _mood,
         });
         await _updateCacheAfterSave(currentUser.uid, imageUrls);
       } else {
@@ -827,12 +823,17 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
               ? imageUrls
               : existing.imageUrls;
           for (final old in existing.imageUrls) {
-            if (!finalUrls.contains(old)) storageService.deleteImage(old);
+            if (!finalUrls.contains(old)) {
+              storageService.deleteImage(old);
+              try {
+                await DefaultCacheManager().removeFile(old);
+              } catch (_) {}
+            }
           }
           await apiService.updateMoment(existing.id, {
             'image_urls': finalUrls,
             'feeling': _feelingController.text.trim(),
-            if (_mood != null) 'mood': _mood,
+            'mood': _mood,
           });
           await _updateCacheAfterSave(currentUser.uid, finalUrls);
         } else {
@@ -849,10 +850,32 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
 
       // 清理断点续传中已上传、但最终未使用的孤儿图片（如重试前被移除的图）
       for (final url in _uploadedUrls.values) {
-        if (!imageUrls.contains(url)) storageService.deleteImage(url);
+        if (!imageUrls.contains(url)) {
+          storageService.deleteImage(url);
+          try {
+            await DefaultCacheManager().removeFile(url);
+          } catch (_) {}
+        }
       }
 
-      // 发布成功 → 清除草稿
+      // 发布成功 → 将已上传的草稿/本地图片转移至日记图片缓存 (DefaultCacheManager)
+      // 避免后续下载缓存时重新从云端拉取自己的图片
+      try {
+        final localFiles = [
+          for (final p in _photos)
+            if (p.isLocal && p.file != null) p.file!,
+        ];
+        await DraftService.transferToMomentCache(
+          _dateStr,
+          localFiles,
+          _uploadedUrls,
+          finalImageUrls: imageUrls,
+        );
+      } catch (e) {
+        debugPrint('转移草稿图片至日记缓存异常: $e');
+      }
+
+      // 转移完成后清除草稿
       await DraftService.clear(_dateStr);
       _hasSavedSuccessfully = true;
 
