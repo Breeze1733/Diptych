@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import '../utils/motion_photo_helper.dart';
 
 /// 日记草稿服务：本地保存/加载/清除
@@ -182,6 +183,71 @@ class DraftService {
   }
 
   /// 清除草稿（含图片文件）
+  /// 将草稿/本地已上传图片同步转移至日记图片缓存 (DefaultCacheManager)。
+  /// [localFiles] 本次上传对应的本地文件列表（包含相册原图或草稿缓存文件）
+  /// [uploadedUrls] 本地路径 -> 云端 URL 映射
+  /// [finalImageUrls] 最终发布的日记包含的图片 URL 列表（只转移最终保留在日记中的图片）
+  ///
+  /// 仅在发布/保存日记成功后调用，转移完成后再调用 [clear] 清空草稿。若上传失败切勿调用。
+  /// 这样后续查看日记及后台预加载时，可直接命中本地缓存，无需重复从云端下载自己的图片。
+  static Future<void> transferToMomentCache(
+    String dateStr,
+    List<File> localFiles,
+    Map<String, String> uploadedUrls, {
+    List<String>? finalImageUrls,
+  }) async {
+    if (uploadedUrls.isEmpty) return;
+    final cacheManager = DefaultCacheManager();
+    final candidateFiles = <File>[...localFiles];
+
+    // 补充扫描草稿目录中已存在的序号与静态图文件
+    final dir = await _draftDir();
+    if (await dir.exists()) {
+      await for (final entity in dir.list()) {
+        if (entity is File && _fileName(entity).startsWith('${dateStr}_')) {
+          candidateFiles.add(entity);
+        }
+      }
+    }
+
+    final seenUrls = <String>{};
+    for (var i = 0; i < candidateFiles.length; i++) {
+      final file = candidateFiles[i];
+      final url = uploadedUrls[file.path];
+      if (url == null || url.isEmpty) continue;
+      if (finalImageUrls != null && !finalImageUrls.contains(url)) continue;
+      if (!seenUrls.add(url)) continue;
+
+      File fileToRead = file;
+      if (!await fileToRead.exists()) {
+        final fallback = File('${dir.path}/${dateStr}_img_$i.jpg');
+        if (await fallback.exists()) {
+          fileToRead = fallback;
+        } else {
+          continue;
+        }
+      }
+
+      try {
+        final bytes = await fileToRead.readAsBytes();
+        final ext = fileToRead.path.contains('.')
+            ? fileToRead.path.split('.').last.toLowerCase()
+            : 'jpg';
+        final validExt =
+            (ext == 'png' || ext == 'jpg' || ext == 'jpeg' || ext == 'webp')
+                ? ext
+                : 'jpg';
+        await cacheManager.putFile(
+          url,
+          bytes,
+          fileExtension: validExt,
+        );
+      } catch (e) {
+        // 单张转移失败不阻塞整体流程
+      }
+    }
+  }
+
   static Future<void> clear(String dateStr) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('$_prefix$dateStr');
@@ -200,6 +266,9 @@ class DraftService {
   static Future<void> saveImages(
     String dateStr,
     List<File> images, {
+    String? feeling,
+    int? mood,
+    bool updateMood = false,
     Map<int, String> uploaded = const {},
     Map<int, bool> liveFlags = const {},
     Map<int, bool> uploadedLive = const {},
@@ -212,6 +281,9 @@ class DraftService {
     await _persistUploadMetadata(
       dateStr,
       uploaded: uploaded,
+      feeling: feeling,
+      mood: mood,
+      updateMood: updateMood,
       liveFlags: liveFlags,
       uploadedLive: uploadedLive,
       items: items,
@@ -223,11 +295,17 @@ class DraftService {
     String dateStr,
     Map<int, String> uploaded, {
     Map<int, bool>? uploadedLive,
+    String? feeling,
+    int? mood,
+    bool updateMood = false,
     List<DraftPhotoItem>? items,
   }) async {
     await _persistUploadMetadata(
       dateStr,
       uploaded: uploaded,
+      feeling: feeling,
+      mood: mood,
+      updateMood: updateMood,
       uploadedLive: uploadedLive,
       items: items,
     );
@@ -308,6 +386,9 @@ class DraftService {
   /// 把上传元数据（断点续传进度、实况开关、已上传实况标识）写入草稿 JSON
   static Future<void> _persistUploadMetadata(
     String dateStr, {
+    String? feeling,
+    int? mood,
+    bool updateMood = false,
     Map<int, String>? uploaded,
     Map<int, bool>? liveFlags,
     Map<int, bool>? uploadedLive,
@@ -318,6 +399,19 @@ class DraftService {
     final data = raw == null
         ? <String, dynamic>{}
         : _safeDecodeMap(raw, <String, dynamic>{});
+
+    if (feeling != null) {
+      data['feeling'] = feeling;
+    }
+    if (updateMood) {
+      if (mood != null) {
+        data['mood'] = mood;
+      } else {
+        data.remove('mood');
+      }
+    } else if (mood != null) {
+      data['mood'] = mood;
+    }
 
     if (items != null) {
       int localCounter = 0;
