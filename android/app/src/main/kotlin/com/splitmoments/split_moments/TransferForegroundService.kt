@@ -125,11 +125,10 @@ class TransferForegroundService : Service() {
     }
 
     private fun buildNotification(title: String, content: String, maxProgress: Int, progress: Int): Notification {
-        val iconRes = applicationInfo.icon.takeIf { it != 0 } ?: android.R.drawable.stat_sys_download
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(content)
-            .setSmallIcon(iconRes)
+            .setSmallIcon(R.drawable.ic_stat_diptych)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)

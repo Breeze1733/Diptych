@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Status-bar icons use a small monochrome silhouette, not the painted launcher bitmap. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M4.5,3 L9.5,3 Q11,3 11,4.5 L11,19.5 Q11,21 9.5,21 L4.5,21 Q3,21 3,19.5 L3,4.5 Q3,3 4.5,3 Z M14.5,3 L19.5,3 Q21,3 21,4.5 L21,19.5 Q21,21 19.5,21 L14.5,21 Q13,21 13,19.5 L13,4.5 Q13,3 14.5,3 Z" />
+</vector>

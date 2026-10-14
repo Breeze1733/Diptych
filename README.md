@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/icon.png" alt="Diptych" width="96" height="96" />
+<img src="assets/icon.png" alt="Diptych" width="160" height="160" />
 
 # Diptych
 
@@ -13,7 +13,7 @@
 [![Flutter](https://img.shields.io/badge/Flutter-3.x-02569B?style=flat-square&logo=flutter&logoColor=white)]()
 [![Dart](https://img.shields.io/badge/Dart-3.12%2B-0175C2?style=flat-square&logo=dart&logoColor=white)]()
 [![Platform](https://img.shields.io/badge/Platform-Android-3DDC84?style=flat-square&logo=android&logoColor=white)]()
-[![Version](https://img.shields.io/badge/Version-1.1.13-4B8BBE?style=flat-square)]()
+[![Version](https://img.shields.io/badge/Version-1.1.19%2B36-4B8BBE?style=flat-square)]()
 [![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)]()
 [![Repo Size](https://img.shields.io/github/repo-size/Breeze1733/Diptych?style=flat-square&label=repo%20size)]()
 [![Last Commit](https://img.shields.io/github/last-commit/Breeze1733/Diptych?style=flat-square&label=last%20commit)]()
@@ -40,6 +40,7 @@
 - [功能特性](#功能特性)
 - [技术栈](#技术栈)
 - [项目结构](#项目结构)
+- [后端接口与本地副本](#后端接口与本地副本)
 - [快速开始](#快速开始)
   - [环境要求](#环境要求)
   - [获取代码](#获取代码)
@@ -55,39 +56,41 @@
 ## 功能特性
 
 - 🔐 **密钥登录** — 双方各持独立密钥，本地验证，无账号体系、无第三方登录
-- 🖼️ **每日双联** — 每天各写一条日记，支持多图照片、心情分（1–10）与文字感受
+- 🖼️ **每日双联** — 每人每天一条日记，支持多图照片、可选心情分（1–10）与文字感受；默认查看日期以本机时间早上 6:00 为界，凌晨 0:00–5:59 算前一天
 - ↔️ **左右分屏** — 主界面同时呈现两人当日内容，随时回看对方的记录
 - 💬 **互动评论** — 在对方（或自己）的日记下留言、回复，支持多级嵌套
-- 📸 **实况照片 (Live Photo)** — 支持 Android（小米/澎湃、荣耀、Pixel、三星等）动态照片与 iOS 实况照片的高速解析与无损提取；定制微信风格相册多选器，支持独立控制单张图片的实况开关；支持微信同款原画质全屏大图预览与无感轻触播放，日记卡片与缩略图专属动态角标展示
-- 📬 **信箱与通知中心** — 实时同步对方发布日记、评论、回复及话题动态；顶栏红点与未读计数感知，支持一键全部已读、单条已读与点击快速定位至对应日记或话题详情
-- 📅 **双人日历与状态区分** — 日历采用双方独立标记配色体系（己方已记、对方已记、双人同记 135° 专属双色渐变）；支持磨砂玻璃弹层交互、日记与日历纯本地零网络开销强一致同步与全量联网刷新
-- 🗂️ **话题广场** — 发起 / 参与话题讨论，不局限于当日内容，操作采用统一磨砂玻璃悬浮按钮
-- 🎨 **壁纸与视觉定制** — 支持日记主页与话题广场自定义壁纸，自由调节模糊度与透明度，提供全屏实时预览与区域调整
-- 📤 **智能串行上传与画廊预览** — 选图即触发后台串行静默上传，降低弱网突发并发压力；支持单张状态感知（等待/上传中/重试）、断点续传与全屏手势大图预览/缩放/删除
-- 🛡️ **草稿防丢与容灾机制** — 自动持久化草稿文字、已上传图片 URL 与实况开关状态映射，异常退出或发布失败时不丢进度、不重复上传
-- 🪟 **小窗自适应与比例缩放** — 针对折叠屏、平板及厂商（小米、荣耀等）悬浮小窗模式异常 Window Insets 进行系统级矫正；核心布局支持基准比例缩放，避免界面挤压与溢出
-- 🔋 **前台保活与 WakeLock** — 引入 Android 前台常驻通知服务与系统级 CPU/屏幕唤醒锁，防止大文件传输与后台下载被系统休眠中断
-- ⚡ **满速断点下载更新** — 集成系统级满速多线程/分块断点续传下载引擎，支持通知栏与应用内进度实时展示，下载完毕自动触发安装
-- 📡 **离线可用** — 本地多级缓存策略：日记、通知与日历标记本地持久化，断网也能查看，网络恢复后静默同步
+- 📸 **实况照片** — 识别 Android 多厂商 JPEG 中内嵌的 MP4，支持提取、播放与保存时的厂商元数据适配；定制相册多选器提供单张实况开关，开启时上传完整动态图，关闭时提取静态图。当前仓库提供 Android 平台工程
+- 📬 **信箱与通知中心** — 初始化通知列表、进入信箱及相关刷新操作时主动拉取日记、评论和话题通知；服务端取出后清空对应队列，客户端保存历史与已读状态。支持未读计数、单条/全部已读、清空信箱和跳转到对应日期或话题
+- 📅 **双人日历** — 区分己方、对方与双方都已记录的日期，支持双色标记和磨砂玻璃弹窗；优先读取本地日期缓存，加载日记时补充对应日期标记，手动刷新时联网全量同步
+- 🔎 **日记搜索** — 搜索双方日记正文与评论，按日期从新到旧返回；支持输入防抖、关键词摘要高亮、游标分页和点击回到对应日期
+- 🗂️ **话题广场** — 创建话题、查看讨论、发布纯文字帖子及删除自己的帖子；发帖支持保存和恢复文字草稿
+- 🎨 **壁纸定制** — 日记与话题分别设置壁纸；选图后按 9:16 裁剪，支持全屏预览和透明度调整，设置本地优先并同步至后端
+- 📤 **串行预上传与画廊** — 选图即触发后台串行上传，单张图片按 1 MB 分片发送，失败分片和合并请求自动重试；支持上传进度、失败重试、移除和拖拽排序，以及全屏图片预览、缩放和保存
+- 🛡️ **草稿与上传结果复用** — 日记草稿保存文字、心情、混合本地/远程图片顺序、实况状态与已上传 URL；恢复时复用已完成的图片上传，未完成的图片重新启动上传。提供手动存草稿、退出保留草稿和发布失败自动保存，评论与话题帖子也支持文字草稿
+- 🪟 **小窗适配** — 在 Flutter 根组件中修正异常的 MediaQuery 顶部/底部 Insets，主页与日记布局根据窗口尺寸缩放
+- 🔋 **传输保活** — Android 前台服务展示上传、图片预缓存和更新下载进度，配合带超时的 CPU WakeLock 降低后台传输被休眠打断的概率
+- ⚡ **应用内更新** — 启动后静默检查版本，也可在设置中手动检查；通过 Dart HTTP 流下载 APK，网络中断后用 HTTP Range 重连续传，下载完成调起系统安装，下次启动清理旧安装包
+- 📡 **缓存优先与离线浏览** — 用户、日记、日历和通知保存到本地，图片使用磁盘缓存；已缓存内容可离线浏览，日记缓存命中后后台刷新。发布、搜索、话题加载和首次获取未缓存内容需要网络
+- 🖼️ **上传后直接缓存** — 日记发布成功后，将本地已上传图片写入 DefaultCacheManager，避免查看自己的日记时再次下载同一张图片
 - ✂️ **头像裁剪** — 支持自定义头像，内置多比例裁剪功能
 
 ## 技术栈
 
 | 层 | 技术 |
 |---|---|
-| 框架 | Flutter 3.x / Dart 3.12+ |
+| 框架 | Flutter / Dart SDK `^3.12.2`，当前平台工程为 Android |
 | 状态管理 | [Riverpod](https://riverpod.dev/) 3.x (`flutter_riverpod 3.4.2`) |
-| 网络与传输 | `package:http` — REST API + 分片断点上传 |
+| 网络与传输 | `package:http` — REST API、串行分片上传与局部重试、HTTP Range 下载重连续传 |
 | 图片缓存 | `cached_network_image` + `flutter_cache_manager` |
 | 本地存储 | `shared_preferences`（日记/通知/日历标记本地缓存 + 登录态 + 草稿与上传状态元数据） |
 | 相册与图片选择 | `wechat_assets_picker`（微信风格相册多选） + `image_picker`（拍照） |
 | 实况照片与视频流 | 自研 `MotionPhotoHelper` 二进制流提取引擎 + `video_player`（实况播放） |
 | 图片预览 / 裁剪 | `photo_view`（微信同款手势缩放与切页） + `image_cropper`（多比例头像裁剪） |
 | 日历 | `table_calendar`（定制双人状态着色与磨砂玻璃交互） |
-| 窗口与厂商适配 | 原生 `MethodChannel` 厂商识别 + Window Insets 规范化矫正 + 响应式比例缩放 |
+| 窗口与厂商适配 | Flutter MediaQuery Insets 修正与比例缩放；原生 `MethodChannel` 厂商识别、媒体扫描 |
 | 本地化 | `flutter_localizations` + `intl`（简体中文本地化） |
-| 版本更新与下载 | `package_info_plus` + `open_filex` + 系统级满速断点下载引擎 |
-| 传输保活 | Android Foreground Service（前台通知服务） + WakeLock 唤醒锁 |
+| 版本更新与下载 | `package_info_plus` + Dart HTTP 流式下载 + 原生 APK 安装通道（`open_filex` 兜底） |
+| 传输保活 | Android Foreground Service（前台通知服务） + CPU PARTIAL_WAKE_LOCK |
 
 ## 项目结构
 
@@ -104,44 +107,44 @@ lib/
 │   ├── app_notification.dart  # 互动通知模型（日记/评论/话题通知、跳转元数据）
 │   ├── app_user.dart          # 用户模型（uid / nickname / avatarUrl）
 │   ├── calendar_marked_dates.dart # 日历双人记录状态模型（单人/双人同记）
-│   ├── moment.dart            # 日记模型（含评论 Comment 与实况属性）
+│   ├── moment.dart            # 日记与评论模型（图片 URL、心情、正文、回复关系）
 │   └── topic.dart             # 话题 / 帖子模型
 ├── providers/
 │   ├── auth_provider.dart     # 认证状态、用户数据加载
 │   ├── day_moment_provider.dart # 当日日记（缓存优先 + 后台刷新 + 日历状态联动）
 │   ├── notification_provider.dart # 未读通知计数与通知列表状态管理
 │   ├── selected_date_provider.dart # 当前选中的日期状态
-│   └── wallpaper_provider.dart # 背景壁纸与透明度/模糊度状态
+│   └── wallpaper_provider.dart # 日记/话题壁纸与透明度，本地优先初始化
 ├── screens/
 │   ├── login_screen.dart      # 密钥登录
-│   ├── feed_screen.dart       # 主页（分屏日记 + 日历入口 + 评论逻辑 + 信箱入口）
-│   ├── edit_moment_screen.dart # 日记编辑（串行异步上传 + 实况开关 + 断点续传 + 容灾）
+│   ├── feed_screen.dart       # 主页（分屏日记、日历、评论、搜索及信箱入口）
+│   ├── diary_search_screen.dart # 日记/评论搜索（高亮摘要、游标分页、日期跳转）
+│   ├── edit_moment_screen.dart # 日记编辑（串行预上传、实况开关、草稿恢复、缓存转移）
 │   ├── notification_screen.dart # 信箱与通知列表（未读标记、跳转上下文、一键已读）
 │   ├── profile_screen.dart    # 个人中心（设置 / 更新 / 缓存清理）
 │   ├── topics_screen.dart     # 话题列表
 │   ├── topic_detail_screen.dart # 话题详情与互动
-│   ├── topic_post_screen.dart # 话题发布（图片预览 + 异步上传）
-│   ├── wallpaper_settings_screen.dart # 壁纸参数配置
-│   ├── wallpaper_preview_screen.dart # 壁纸全屏实时效果预览
-│   └── wallpaper_zoom_screen.dart # 壁纸缩放与区域调整
+│   ├── topic_post_screen.dart # 话题纯文字发帖与草稿
+│   ├── wallpaper_settings_screen.dart # 壁纸选图、9:16 裁剪、上传及移除
+│   └── wallpaper_preview_screen.dart # 壁纸全屏预览与透明度调整
 ├── services/
-│   ├── api_service.dart       # REST API 调用（用户、日记、日历标记、消息通知）
+│   ├── api_service.dart       # REST API（用户、日记、搜索、日历标记、通知）
 │   ├── auth_service.dart      # 密钥验证 + SharedPreferences 持久化
-│   ├── cache_service.dart     # 日记 / 用户 / 日历双人状态 / 壁纸本地缓存
-│   ├── draft_service.dart     # 草稿（文本 + 本地与已上传图片元数据 + 实况标识）
+│   ├── cache_service.dart     # 日记、用户及双人日历状态缓存
+│   ├── draft_service.dart     # 日记/评论/帖子草稿，图片持久化与发布后缓存转移
 │   ├── notification_service.dart # 通知持久化缓存与服务端队列同步
-│   ├── storage_service.dart   # 图片上传与分片断点续传
+│   ├── storage_service.dart   # 1 MB 分片上传、局部重试、合并、中止及删除图片
 │   ├── topic_service.dart     # 话题 REST API
-│   └── update_service.dart    # 版本检测与 APK 满速断点下载安装
+│   └── update_service.dart    # 版本检测、APK 流式下载重连续传、安装及清理
 ├── utils/
 │   ├── cache_helper.dart      # 缓存大小计算与清理
-│   ├── date_helper.dart       # 日期格式化工具
+│   ├── date_helper.dart       # 日期格式化、6:00 换日、+08:00 时间序列化
 │   ├── diptych_asset_picker.dart # 定制相册选择器（微信风格交互、实况角标与独立开关）
 │   ├── file_helper.dart       # 文件与 MIME 类型工具
 │   ├── foreground_service_helper.dart # Android 前台保活服务通信通道
 │   ├── motion_photo_helper.dart # 实况照片解析器（多厂商动态照片二进制流提取与就地缓存）
 │   ├── url_helper.dart        # 相对路径转完整 URL
-│   └── wakelock_helper.dart   # 屏幕与 CPU WakeLock 保活
+│   └── wakelock_helper.dart   # CPU WakeLock 原生通道
 └── widgets/
     ├── avatar_widget.dart     # 头像组件
     ├── calendar_picker.dart   # 双人状态日历选择弹窗（磨砂玻璃材质、配色状态指示）
@@ -155,13 +158,33 @@ lib/
     └── wallpaper_layer.dart   # 全局/局部壁纸背景渲染层
 ```
 
+`android/` 包含 Kotlin 原生通道、传输前台服务与启动图标资源；`assets/` 保存应用图片及 README 预览图。
+
+应用标志使用透明圆角 PNG，Android 同时提供各密度启动图标、自适应图标及单色主题图标；资源说明与重新生成方式见 [图标资源](doc/icon-assets.md)。
+
+## 后端接口
+
+客户端通过 REST API 访问自托管后端，主要接口如下：
+
+| 用途 | 接口（相对于 API 基础地址） |
+|---|---|
+| 用户 | `POST /users/ensure`、`GET /users/:uid`、`PUT /users/:uid` |
+| 日记 | `GET /moments?date_str=…&author_ids=A,B`、`POST /moments`、`PUT /moments/:id` |
+| 搜索与日历 | `GET /moments/search`、`GET /moments/calendar/dates` |
+| 图片 | `POST /upload/chunk`、`POST /upload/merge`、`POST /upload/abort`、`POST /upload/delete` |
+| 话题与帖子 | `GET /topics`、`POST /topics`、`GET /topics/:id`、`POST /topics/:id/posts`、`DELETE /topics/:id/posts/:postId` |
+| 通知 | `GET /notifications?user_id=…`（取出后从服务端队列清除） |
+| 更新 | `GET /version/latest`、`GET /version/download` |
+
 ## 快速开始
 
 ### 环境要求
 
-- Flutter SDK 3.x / Dart SDK ≥ 3.12.2（运行 `flutter --version` 确认）
-- Android SDK Platform 36 + Build-Tools 36
-- JDK 17
+- 使用包含 Dart SDK ≥ 3.12.2 且 < 4.0.0 的 Flutter 稳定版（运行 `flutter --version` 确认）
+- Android SDK Platform 36，以及 Android Gradle Plugin 所需的 Build-Tools
+- Android NDK `28.2.13676358`（构建配置指定）
+- JDK 17；项目 Gradle Wrapper 使用 Gradle 8.14，Android Gradle Plugin 为 8.11.1
+- 可用的自托管后端与 Android 真机或模拟器
 
 ### 获取代码
 
@@ -193,11 +216,11 @@ class Secrets {
 }
 ```
 
-> 登录时通过 `Secrets.validateKey()` 校验密钥，仓库内不包含任何真实密钥。
+> 登录时通过 `Secrets.validateKey()` 在本地校验密钥，只保存用户角色 A/B。密钥配置不纳入 Git；本地校验不等同于服务端接口鉴权。
 
 ### 配置后端地址
 
-App 对接自托管 REST API，后端代码不在本仓库中。在 `lib/constants/` 下创建 `api_config.dart`（该文件已在 `.gitignore` 中排除，不会提交到仓库）：
+App 对接自托管 REST API，Git 跟踪的代码以客户端为主，本地后端副本见上文。在 `lib/constants/` 下创建 `api_config.dart`（该文件已在 `.gitignore` 中排除，不会提交到仓库）：
 
 ```dart
 class ApiConfig {
@@ -211,7 +234,7 @@ class ApiConfig {
 }
 ```
 
-> 全部网络请求均通过 `ApiConfig.apiBaseUrl` / `ApiConfig.siteUrl` 读取地址，无需逐个修改，仓库内不包含任何实际后端地址。
+> 客户端 API 请求使用 `ApiConfig.apiBaseUrl`，相对图片路径通过 `ApiConfig.siteUrl` 补全。服务端返回的绝对 URL 会保留原地址，因此迁移部署时也需更新后端对应配置。
 
 ### 安装依赖
 
@@ -235,9 +258,9 @@ flutter build apk --release
 
 ## 隐私与数据
 
-- 🔒 **数据自持** — 日记、图片与话题数据全部存储于自托管后端，不经过任何第三方云服务
-- 🔑 **密钥本地验证** — 登录密钥仅在本机校验，无账号体系，不上传账号信息
-- 📴 **离线可读** — 已缓存的内容在断网时仍可浏览
+- 🔒 **自托管数据** — 日记、图片与话题数据发送至配置的后端；客户端没有集成第三方账号登录或云数据库 SDK
+- 🔑 **本地登录校验** — 登录密钥在本机校验；API 请求携带用户角色/ID，当前客户端未发送登录密钥或鉴权令牌
+- 📴 **本地缓存与草稿** — 用户、日记、日历、通知及草稿元数据保存在 SharedPreferences，草稿图片保存在应用文档目录；图片和提取的视频使用本地缓存。已缓存日记与通知可离线查看，通知已读状态也由本机保存
 
 ## 贡献指南
 
