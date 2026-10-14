@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../constants/app_theme.dart';
+import '../constants/settings_theme.dart';
 import '../models/app_user.dart';
 import '../models/moment.dart';
 import '../providers/auth_provider.dart';
@@ -32,7 +33,8 @@ class WallpaperPreviewScreen extends ConsumerStatefulWidget {
       _WallpaperPreviewScreenState();
 }
 
-class _WallpaperPreviewScreenState extends ConsumerState<WallpaperPreviewScreen> {
+class _WallpaperPreviewScreenState
+    extends ConsumerState<WallpaperPreviewScreen> {
   late double _opacity;
   bool _applying = false;
 
@@ -72,14 +74,20 @@ class _WallpaperPreviewScreenState extends ConsumerState<WallpaperPreviewScreen>
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('已应用'), backgroundColor: AppTheme.primaryColor),
+        const SnackBar(
+          content: Text('已应用'),
+          backgroundColor: SettingsTheme.ink,
+        ),
       );
       Navigator.pop(context);
     } catch (e) {
       debugPrint('应用壁纸失败: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('应用失败，请稍后重试'), backgroundColor: Colors.red),
+        const SnackBar(
+          content: Text('应用失败，请稍后重试'),
+          backgroundColor: Colors.red,
+        ),
       );
     } finally {
       if (mounted) setState(() => _applying = false);
@@ -104,7 +112,8 @@ class _WallpaperPreviewScreenState extends ConsumerState<WallpaperPreviewScreen>
       id: 'preview_self',
       dateStr: dateStr,
       authorId: 'A',
-      feeling: '示例感受文字，用于预览壁纸与文字的对比效果。\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位',
+      feeling:
+          '示例感受文字，用于预览壁纸与文字的对比效果。\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位',
       mood: 8,
       comments: [
         Comment(
@@ -121,7 +130,8 @@ class _WallpaperPreviewScreenState extends ConsumerState<WallpaperPreviewScreen>
       id: 'preview_partner',
       dateStr: dateStr,
       authorId: 'B',
-      feeling: '对方的示例日记内容，同样用来预览壁纸效果。\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位',
+      feeling:
+          '对方的示例日记内容，同样用来预览壁纸效果。\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位',
       mood: 6,
       comments: [
         Comment(
@@ -172,13 +182,22 @@ class _WallpaperPreviewScreenState extends ConsumerState<WallpaperPreviewScreen>
         final (title, author) = samples[index];
         return ListTile(
           isThreeLine: true,
-          title: SelectableText(title, style: const TextStyle(fontWeight: FontWeight.w500)),
+          title: SelectableText(
+            title,
+            style: const TextStyle(fontWeight: FontWeight.w500),
+          ),
           subtitle: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('由 $author 创建', style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+              Text(
+                '由 $author 创建',
+                style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+              ),
               const SizedBox(height: 2),
-              Text('最新更新：示例时间', style: TextStyle(fontSize: 11, color: Colors.grey[400])),
+              Text(
+                '最新更新：示例时间',
+                style: TextStyle(fontSize: 11, color: Colors.grey[400]),
+              ),
             ],
           ),
           trailing: const Icon(Icons.chevron_right),
@@ -197,76 +216,91 @@ class _WallpaperPreviewScreenState extends ConsumerState<WallpaperPreviewScreen>
         : _buildTopicPreview();
 
     // 壁纸垫在整个 Scaffold 后面，Scaffold 保持正常布局，杜绝重叠/空档
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        WallpaperLayer(url: widget.url, opacity: _opacity),
-        Scaffold(
-          backgroundColor: Colors.transparent,
-          appBar: AppBar(
+    return SettingsTheme.wrap(
+      context,
+      Stack(
+        fit: StackFit.expand,
+        children: [
+          WallpaperLayer(url: widget.url, opacity: _opacity),
+          Scaffold(
             backgroundColor: Colors.transparent,
-            elevation: 0,
-            title: Text(isDiary ? '日记壁纸预览' : '话题壁纸预览'),
-            actions: [
-              TextButton(
-                onPressed: _applying ? null : _apply,
-                child: _applying
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Text('应用', style: TextStyle(fontWeight: FontWeight.w600)),
-              ),
-            ],
-          ),
-          body: body,
-          floatingActionButton: isDiary
-              ? null
-              : FloatingActionButton(
-                  onPressed: () {}, // 预览页不响应
-                  child: const Icon(Icons.add),
+            appBar: AppBar(
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+              title: Text(isDiary ? '日记壁纸预览' : '话题壁纸预览'),
+              actions: [
+                TextButton(
+                  onPressed: _applying ? null : _apply,
+                  child: _applying
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text(
+                          '应用',
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
                 ),
-          bottomNavigationBar: SafeArea(
-            child: Container(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                border: Border(top: BorderSide(color: Colors.grey[200]!)),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: [
-                      Text('不透明度', style: TextStyle(fontSize: 13, color: Colors.grey[600])),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Slider(
-                          value: _opacity,
-                          onChanged: (v) => setState(() => _opacity = v),
-                        ),
-                      ),
-                      SizedBox(
-                        width: 44,
-                        child: Text(
-                          '${(_opacity * 100).round()}%',
-                          textAlign: TextAlign.right,
-                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-                        ),
-                      ),
-                    ],
+              ],
+            ),
+            body: body,
+            floatingActionButton: isDiary
+                ? null
+                : FloatingActionButton(
+                    onPressed: () {}, // 预览页不响应
+                    child: const Icon(Icons.add),
                   ),
-                  Text(
-                    '拖动滑条实时预览，点右上角「应用」保存到云端',
-                    style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-                  ),
-                ],
+            bottomNavigationBar: SafeArea(
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  border: Border(top: BorderSide(color: Colors.grey[200]!)),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          '不透明度',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Slider(
+                            value: _opacity,
+                            onChanged: (v) => setState(() => _opacity = v),
+                          ),
+                        ),
+                        SizedBox(
+                          width: 44,
+                          child: Text(
+                            '${(_opacity * 100).round()}%',
+                            textAlign: TextAlign.right,
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    Text(
+                      '拖动滑条实时预览，点右上角「应用」保存到云端',
+                      style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

@@ -4,13 +4,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_cropper/image_cropper.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import '../constants/app_theme.dart';
+import '../constants/settings_theme.dart';
 import '../models/app_user.dart';
 import '../providers/auth_provider.dart';
 import '../providers/wallpaper_provider.dart';
 import '../services/update_service.dart';
+import '../services/network_diagnostics_service.dart';
+import '../services/cache_service.dart';
 import '../utils/cache_helper.dart';
 import '../utils/wakelock_helper.dart';
+import '../widgets/network_diagnostics_card.dart';
 import 'wallpaper_settings_screen.dart';
 
 /// 个人设置页：修改用户信息 + 检查更新
@@ -28,12 +31,14 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
   // 更新相关
   final _updateService = UpdateService();
-  String _updateStatus = '';         // 状态文字
+  final _networkService = NetworkDiagnosticsService();
+  String? _currentVersion;
+  String _updateStatus = ''; // 状态文字
   bool _isChecking = false;
   bool _isDownloading = false;
   double _downloadProgress = 0;
-  VersionInfo? _latestVersion;       // 检查到的最新版本；有值时下载按钮可用
-  String? _downloadedApkPath;        // 已下载完成的 APK 路径，支持随时直接点「立即安装」
+  VersionInfo? _latestVersion; // 检查到的最新版本；有值时下载按钮可用
+  String? _downloadedApkPath; // 已下载完成的 APK 路径，支持随时直接点「立即安装」
 
   // 缓存相关
   String _cacheSizeText = '点击计算';
@@ -45,12 +50,21 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     super.initState();
     final user = ref.read(currentUserProvider);
     _nicknameController = TextEditingController(text: user?.nickname ?? '');
+    _loadCurrentVersion();
+  }
+
+  Future<void> _loadCurrentVersion() async {
+    try {
+      final info = await _updateService.getCurrentVersion();
+      if (mounted) setState(() => _currentVersion = info.version);
+    } catch (_) {}
   }
 
   @override
   void dispose() {
     _nicknameController.dispose();
     _updateService.dispose();
+    _networkService.dispose();
     super.dispose();
   }
 
@@ -67,9 +81,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       uiSettings: [
         AndroidUiSettings(
           toolbarTitle: '裁剪头像',
-          toolbarColor: AppTheme.primaryColor,
+          toolbarColor: SettingsTheme.ink,
           toolbarWidgetColor: Colors.white,
-          activeControlsWidgetColor: AppTheme.primaryColor,
+          activeControlsWidgetColor: SettingsTheme.ink,
           initAspectRatio: CropAspectRatioPreset.square,
           lockAspectRatio: false,
           aspectRatioPresets: const [
@@ -82,7 +96,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         ),
       ],
     );
-    if (cropped != null) setState(() => _avatarFile = File(cropped.path));
+    if (cropped != null && mounted) {
+      setState(() => _avatarFile = File(cropped.path));
+    }
   }
 
   Future<void> _handleSave() async {
@@ -99,7 +115,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       if (_avatarFile != null) {
         final storageService = ref.read(storageServiceProvider);
         avatarUrl = await storageService.uploadImage(_avatarFile!, 'avatars');
-        if (user.avatarUrl.isNotEmpty) storageService.deleteImage(user.avatarUrl);
+        if (user.avatarUrl.isNotEmpty) {
+          storageService.deleteImage(user.avatarUrl);
+        }
       }
 
       final newNickname = _nicknameController.text.trim();
@@ -109,21 +127,30 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         avatarUrl: avatarUrl,
       );
 
-      ref.read(currentUserProvider.notifier).setUser(user.copyWith(
+      final updatedUser = user.copyWith(
         nickname: newNickname.isNotEmpty ? newNickname : user.nickname,
         avatarUrl: avatarUrl ?? user.avatarUrl,
-      ));
+      );
+      await CacheService.saveUser(updatedUser);
+      if (!mounted) return;
+      ref.read(currentUserProvider.notifier).setUser(updatedUser);
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('保存成功'), backgroundColor: AppTheme.primaryColor),
+        const SnackBar(
+          content: Text('保存成功'),
+          backgroundColor: SettingsTheme.ink,
+        ),
       );
       Navigator.pop(context);
     } catch (e) {
       debugPrint('保存个人资料失败: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('保存失败，请稍后重试'), backgroundColor: Colors.red),
+        const SnackBar(
+          content: Text('保存失败，请稍后重试'),
+          backgroundColor: Colors.red,
+        ),
       );
     } finally {
       if (_avatarFile != null) {
@@ -136,6 +163,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   // ─── 版本更新 ───
 
   Future<void> _checkUpdate() async {
+    if (_isChecking) return;
     setState(() {
       _isChecking = true;
       _updateStatus = '正在检查更新...';
@@ -145,6 +173,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     try {
       final current = await _updateService.getCurrentVersion();
       final latest = await _updateService.checkLatestVersion();
+      if (!mounted) return;
 
       if (_updateService.needUpdate(current, latest)) {
         setState(() {
@@ -249,20 +278,23 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   Future<void> _clearCache() async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('清理缓存'),
-        content: const Text('将清除日记缓存、图片缓存和临时文件，不会影响已发布的日记数据。确定继续？'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text('取消', style: TextStyle(color: Colors.grey[600])),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: FilledButton.styleFrom(backgroundColor: AppTheme.primaryColor),
-            child: const Text('确定'),
-          ),
-        ],
+      builder: (ctx) => SettingsTheme.wrap(
+        ctx,
+        AlertDialog(
+          title: const Text('清理缓存'),
+          content: const Text('将清除日记缓存、图片缓存和临时文件，不会影响已发布的日记数据。确定继续？'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text('取消', style: TextStyle(color: Colors.grey[600])),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: FilledButton.styleFrom(backgroundColor: SettingsTheme.ink),
+              child: const Text('确定'),
+            ),
+          ],
+        ),
       ),
     );
 
@@ -285,7 +317,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('已释放 ${CacheHelper.formatSize(freed)}'),
-          backgroundColor: AppTheme.primaryColor,
+          backgroundColor: SettingsTheme.ink,
         ),
       );
     } catch (e) {
@@ -296,7 +328,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         _cacheSizeText = '清理失败';
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('清理失败，请稍后重试'), backgroundColor: Colors.red),
+        const SnackBar(
+          content: Text('清理失败，请稍后重试'),
+          backgroundColor: Colors.red,
+        ),
       );
     }
   }
@@ -306,20 +341,23 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   Future<void> _handleLogout(WidgetRef ref) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('退出登录'),
-        content: const Text('确定要退出登录吗？'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text('取消', style: TextStyle(color: Colors.grey[600])),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('退出'),
-          ),
-        ],
+      builder: (ctx) => SettingsTheme.wrap(
+        ctx,
+        AlertDialog(
+          title: const Text('退出登录'),
+          content: const Text('确定要退出登录吗？'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text('取消', style: TextStyle(color: Colors.grey[600])),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+              child: const Text('退出'),
+            ),
+          ],
+        ),
       ),
     );
     if (confirmed == true) {
@@ -336,136 +374,304 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final user = ref.watch(currentUserProvider);
-    return Scaffold(
-      appBar: AppBar(title: const Text('设置')),
-      body: user == null
-          ? const Center(child: Text('用户数据未加载'))
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                // ═══ 用户信息 ═══
-                _buildSectionHeader('个人信息'),
-                const SizedBox(height: 12),
-                _buildUserInfoCard(user),
-                const SizedBox(height: 32),
-
-                // ═══ 外观 ═══
-                _buildSectionHeader('外观'),
-                const SizedBox(height: 12),
-                _buildWallpaperCard(),
-                const SizedBox(height: 32),
-
-                // ═══ 系统 ═══
-                _buildSectionHeader('系统'),
-                const SizedBox(height: 12),
-                _buildUpdateCard(),
-                const SizedBox(height: 16),
-                _buildCacheCard(),
-                const SizedBox(height: 32),
-                // 退出登录（小字，不常用）
-                Center(
-                  child: GestureDetector(
-                    onTap: () => _handleLogout(ref),
-                    child: Text(
-                      '退出登录',
-                      style: TextStyle(fontSize: 13, color: Colors.grey[400]),
+    return SettingsTheme.wrap(
+      context,
+      Scaffold(
+        appBar: AppBar(title: const Text('设置')),
+        body: SafeArea(
+          top: false,
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 560),
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+                children: [
+                  _buildIntro(),
+                  const SizedBox(height: 28),
+                  _buildSectionHeader('个人信息'),
+                  const SizedBox(height: 12),
+                  if (user != null)
+                    _buildUserInfoCard(user)
+                  else
+                    const Card(
+                      child: Padding(
+                        padding: EdgeInsets.all(20),
+                        child: Text(
+                          '个人资料暂未加载，可先检测网络连接。',
+                          style: TextStyle(color: SettingsTheme.muted),
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: 26),
+                  _buildSectionHeader('外观'),
+                  const SizedBox(height: 12),
+                  _buildWallpaperCard(),
+                  const SizedBox(height: 26),
+                  _buildSectionHeader('系统'),
+                  const SizedBox(height: 12),
+                  _buildUpdateCard(),
+                  const SizedBox(height: 12),
+                  NetworkDiagnosticsCard(service: _networkService),
+                  const SizedBox(height: 12),
+                  _buildCacheCard(),
+                  const SizedBox(height: 24),
+                  Center(
+                    child: TextButton.icon(
+                      onPressed: () => _handleLogout(ref),
+                      style: TextButton.styleFrom(
+                        foregroundColor: SettingsTheme.danger,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 12,
+                        ),
+                      ),
+                      icon: const Icon(Icons.logout_rounded, size: 17),
+                      label: const Text('退出登录', style: TextStyle(fontSize: 13)),
                     ),
                   ),
-                ),
-                const SizedBox(height: 16),
-              ],
+                ],
+              ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildIntro() {
+    return Row(
+      children: [
+        Image.asset('assets/icon.png', width: 46, height: 46),
+        const SizedBox(width: 14),
+        const Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '你的 Diptych',
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: -0.5,
+                ),
+              ),
+              SizedBox(height: 4),
+              Text(
+                '各自的视角，共同的日子。',
+                style: TextStyle(fontSize: 12, color: SettingsTheme.muted),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
   Widget _buildSectionHeader(String title) {
-    return Text(title, style: TextStyle(fontSize: 13, color: Colors.grey[500], fontWeight: FontWeight.w500));
+    return Padding(
+      padding: const EdgeInsets.only(left: 4),
+      child: Text(
+        title,
+        style: const TextStyle(
+          fontSize: 12,
+          color: SettingsTheme.muted,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 1,
+        ),
+      ),
+    );
   }
 
-  /// 壁纸设置入口
+  Widget _sectionIcon(IconData icon) {
+    return Container(
+      width: 42,
+      height: 42,
+      decoration: BoxDecoration(
+        color: SettingsTheme.accentSurface,
+        borderRadius: BorderRadius.circular(13),
+      ),
+      child: Icon(icon, color: SettingsTheme.accent, size: 22),
+    );
+  }
+
+  Widget _cardHeader(IconData icon, String title, String subtitle) {
+    return Row(
+      children: [
+        _sectionIcon(icon),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                subtitle,
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: SettingsTheme.muted,
+                  height: 1.4,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _openWallpaper() {
+    _networkService.cancel();
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const WallpaperSettingsScreen()),
+    );
+  }
+
   Widget _buildWallpaperCard() {
     final wallpaper = ref.watch(wallpaperSettingsProvider);
-    final hasAny = wallpaper.diaryUrl.isNotEmpty || wallpaper.topicUrl.isNotEmpty;
+    final hasAny =
+        wallpaper.diaryUrl.isNotEmpty || wallpaper.topicUrl.isNotEmpty;
     return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        leading: const Icon(Icons.wallpaper, color: AppTheme.primaryColor),
-        title: const Text('壁纸', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
-        subtitle: Text(
-          hasAny ? '日记与话题壁纸' : '设置日记与话题背景壁纸',
-          style: const TextStyle(fontSize: 13, color: Colors.grey),
-        ),
-        trailing: const Icon(Icons.chevron_right, color: Colors.grey),
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const WallpaperSettingsScreen()),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(22),
+        onTap: _openWallpaper,
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Row(
+            children: [
+              Expanded(
+                child: _cardHeader(
+                  Icons.wallpaper_rounded,
+                  '壁纸',
+                  hasAny ? '调整日记与话题的背景' : '为共同的日子添一点色彩',
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Icon(
+                Icons.arrow_forward_ios_rounded,
+                size: 14,
+                color: SettingsTheme.muted,
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
   Widget _buildUserInfoCard(AppUser user) {
+    final hasAvatar = _avatarFile != null || user.avatarUrl.isNotEmpty;
     return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(20),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 头像
-            GestureDetector(
-              onTap: _pickAvatar,
-              child: Stack(
-                children: [
-                  CircleAvatar(
-                    radius: 42,
-                    backgroundImage: _avatarFile != null
-                        ? FileImage(_avatarFile!)
-                        : (user.avatarUrl.isNotEmpty ? CachedNetworkImageProvider(user.avatarUrl) : null),
-                    child: (_avatarFile == null && user.avatarUrl.isEmpty)
-                        ? Text(user.nickname.isNotEmpty ? user.nickname[0] : '?',
-                            style: const TextStyle(fontSize: 32))
-                        : null,
-                  ),
-                  const Positioned(
-                    bottom: 0,
-                    right: 0,
-                    child: CircleAvatar(
-                      radius: 14,
-                      backgroundColor: AppTheme.primaryColor,
-                      child: Icon(Icons.camera_alt, size: 14, color: Colors.white),
+            Row(
+              children: [
+                Semantics(
+                  label: '更换头像',
+                  button: true,
+                  child: InkWell(
+                    onTap: _isSaving ? null : _pickAvatar,
+                    customBorder: const CircleBorder(),
+                    child: Stack(
+                      children: [
+                        CircleAvatar(
+                          radius: 32,
+                          backgroundColor: SettingsTheme.softSurface,
+                          foregroundColor: SettingsTheme.ink,
+                          backgroundImage: _avatarFile != null
+                              ? FileImage(_avatarFile!)
+                              : user.avatarUrl.isNotEmpty
+                              ? CachedNetworkImageProvider(user.avatarUrl)
+                              : null,
+                          child: !hasAvatar
+                              ? Text(
+                                  user.nickname.isNotEmpty
+                                      ? user.nickname.characters.first
+                                      : '你',
+                                  style: const TextStyle(
+                                    fontSize: 25,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                )
+                              : null,
+                        ),
+                        const Positioned(
+                          bottom: 0,
+                          right: 0,
+                          child: CircleAvatar(
+                            radius: 12,
+                            backgroundColor: SettingsTheme.ink,
+                            child: Icon(
+                              Icons.camera_alt_outlined,
+                              size: 12,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            // 昵称
-            SelectionContainer.disabled(
-              child: TextField(
-                controller: _nicknameController,
-                contextMenuBuilder: (context, editableTextState) =>
-                    AdaptiveTextSelectionToolbar.buttonItems(
-                  anchors: editableTextState.contextMenuAnchors,
-                  buttonItems: editableTextState.contextMenuButtonItems,
                 ),
-                decoration: const InputDecoration(
-                  labelText: '昵称',
-                  prefixIcon: Icon(Icons.person_outline),
+                const SizedBox(width: 16),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '个人资料',
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      SizedBox(height: 5),
+                      Text(
+                        '点头像更换照片',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: SettingsTheme.muted,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
+              ],
             ),
-            const SizedBox(height: 16),
-            // 保存
+            const SizedBox(height: 22),
+            TextField(
+              controller: _nicknameController,
+              enabled: !_isSaving,
+              decoration: const InputDecoration(
+                labelText: '昵称',
+                prefixIcon: Icon(Icons.person_outline_rounded, size: 20),
+              ),
+              style: const TextStyle(fontSize: 14),
+            ),
+            const SizedBox(height: 14),
             SizedBox(
               width: double.infinity,
-              height: 44,
               child: FilledButton(
                 onPressed: _isSaving ? null : _handleSave,
-                style: FilledButton.styleFrom(backgroundColor: AppTheme.primaryColor),
                 child: _isSaving
-                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Text('保存', style: TextStyle(fontSize: 15)),
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Text('保存资料'),
               ),
             ),
           ],
@@ -475,54 +681,58 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   }
 
   Widget _buildCacheCard() {
-    final bool hasCalc = !_isCalcCache && _cacheSizeText != '点击计算';
-    final bool isLoading = _isCalcCache || _isClearingCache;
-
+    final isLoading = _isCalcCache || _isClearingCache;
+    final hasSize =
+        !isLoading && _cacheSizeText != '点击计算' && _cacheSizeText != '获取失败';
     return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(20),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                const Icon(Icons.cleaning_services_outlined, color: AppTheme.primaryColor),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('缓存管理', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
-                      Text(
-                        hasCalc ? '当前占用 $_cacheSizeText' : _cacheSizeText,
-                        style: const TextStyle(fontSize: 13, color: Colors.grey),
-                      ),
-                    ],
-                  ),
-                ),
-                if (isLoading)
-                  const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
-                else if (hasCalc)
-                  OutlinedButton(
-                    onPressed: _clearCache,
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.red,
-                      side: const BorderSide(color: Colors.red),
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    ),
-                    child: const Text('清理', style: TextStyle(fontSize: 14)),
-                  )
-                else
-                  FilledButton(
-                    onPressed: _calcCacheSize,
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppTheme.primaryColor,
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    ),
-                    child: const Text('计算', style: TextStyle(fontSize: 14)),
-                  ),
-              ],
+            _cardHeader(
+              Icons.cleaning_services_outlined,
+              '缓存管理',
+              hasSize ? '当前占用 $_cacheSizeText' : '管理本机的图片与日记缓存',
             ),
+            const SizedBox(height: 16),
+            if (isLoading)
+              Row(
+                children: [
+                  const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  const SizedBox(width: 10),
+                  Text(
+                    _cacheSizeText,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: SettingsTheme.muted,
+                    ),
+                  ),
+                ],
+              )
+            else
+              Wrap(
+                spacing: 10,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton(
+                    onPressed: _calcCacheSize,
+                    child: Text(hasSize ? '重新计算' : '计算占用'),
+                  ),
+                  if (hasSize)
+                    TextButton(
+                      onPressed: _clearCache,
+                      style: TextButton.styleFrom(
+                        foregroundColor: SettingsTheme.danger,
+                      ),
+                      child: const Text('清理缓存'),
+                    ),
+                ],
+              ),
           ],
         ),
       ),
@@ -530,119 +740,68 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   }
 
   Widget _buildUpdateCard() {
-    // 下载中：两个按钮都消失，只显示进度条
-    if (_isDownloading) {
-      return Card(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _cardHeader(
+              Icons.system_update_alt_rounded,
+              '应用更新',
+              _currentVersion == null ? '保持最新，记录更顺畅' : '当前版本 $_currentVersion',
+            ),
+            const SizedBox(height: 16),
+            if (_isDownloading) ...[
+              LinearProgressIndicator(
+                value: _downloadProgress,
+                minHeight: 4,
+                borderRadius: BorderRadius.circular(4),
+                backgroundColor: SettingsTheme.softSurface,
+              ),
+              const SizedBox(height: 10),
+            ] else
+              Wrap(
+                spacing: 10,
+                runSpacing: 8,
                 children: [
-                  const Icon(Icons.system_update, color: AppTheme.primaryColor),
-                  const SizedBox(width: 12),
-                  const Expanded(
-                    child: Text('正在下载更新',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
+                  OutlinedButton(
+                    onPressed: _isChecking ? null : _checkUpdate,
+                    child: Text(_isChecking ? '检查中…' : '检查更新'),
                   ),
+                  if (_downloadedApkPath != null)
+                    FilledButton.icon(
+                      onPressed: () =>
+                          _updateService.installApk(_downloadedApkPath!),
+                      icon: const Icon(Icons.install_mobile_rounded, size: 16),
+                      label: const Text('立即安装'),
+                    )
+                  else if (_latestVersion != null)
+                    FilledButton(
+                      onPressed: _downloadAndInstall,
+                      child: const Text('下载更新'),
+                    ),
                 ],
               ),
-              const SizedBox(height: 12),
-              LinearProgressIndicator(value: _downloadProgress, color: AppTheme.primaryColor),
-              const SizedBox(height: 8),
-              Text(
-                _updateStatus,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: _updateStatus.contains('失败') ? Colors.red : Colors.grey[600],
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    // 常态：检查更新 + 下载更新两个按钮
-    return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            Row(
-              children: [
-                const Icon(Icons.system_update, color: AppTheme.primaryColor),
-                const SizedBox(width: 12),
-                const Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('检查更新', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
-                      Text('检测并安装最新版本', style: TextStyle(fontSize: 13, color: Colors.grey)),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                FilledButton(
-                  onPressed: _isChecking ? null : _checkUpdate,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTheme.primaryColor,
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  ),
-                  child: Text(_isChecking ? '检查中' : '检查更新',
-                      style: const TextStyle(fontSize: 14)),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    _downloadedApkPath != null ? '安装新版本' : '下载更新',
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                if (_downloadedApkPath != null)
-                  FilledButton.icon(
-                    onPressed: () => _updateService.installApk(_downloadedApkPath!),
-                    icon: const Icon(Icons.install_mobile, size: 16),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: Colors.green.shade600,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    ),
-                    label: const Text('立即安装', style: TextStyle(fontSize: 14)),
-                  )
-                else
-                  // 无可用更新时置灰，有更新（_latestVersion 非空）才可点
-                  FilledButton(
-                    onPressed: _latestVersion == null ? null : _downloadAndInstall,
-                    style: FilledButton.styleFrom(
-                      backgroundColor: _latestVersion == null
-                          ? Colors.grey.shade300
-                          : AppTheme.primaryColor,
-                      foregroundColor: _latestVersion == null ? Colors.grey.shade500 : Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    ),
-                    child: const Text('下载更新', style: TextStyle(fontSize: 14)),
-                  ),
-              ],
-            ),
             if (_updateStatus.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text(
-                _updateStatus,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: _updateStatus.contains('失败') ? Colors.red : Colors.grey[600],
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: SettingsTheme.softSurface,
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                textAlign: TextAlign.center,
+                child: Text(
+                  _updateStatus,
+                  style: TextStyle(
+                    fontSize: 12,
+                    height: 1.6,
+                    color: _updateStatus.contains('失败')
+                        ? SettingsTheme.danger
+                        : SettingsTheme.muted,
+                  ),
+                ),
               ),
             ],
           ],

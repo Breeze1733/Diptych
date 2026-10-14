@@ -14,12 +14,13 @@ if (keystorePropertiesFile.exists()) {
 
 android {
     namespace = "com.splitmoments.split_moments"
-    compileSdk = 36
+    compileSdk = 37
+    buildToolsVersion = "37.0.0"
     ndkVersion = "28.2.13676358"
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+        sourceCompatibility = JavaVersion.VERSION_25
+        targetCompatibility = JavaVersion.VERSION_25
     }
 
     defaultConfig {
@@ -49,6 +50,10 @@ android {
 
     buildTypes {
         release {
+            // Flutter enables these by default; keep the release policy explicit.
+            // AGP 9+ automatically uses optimized resource shrinking.
+            isMinifyEnabled = true
+            isShrinkResources = true
             signingConfig = if (keystorePropertiesFile.exists()) {
                 signingConfigs.getByName("release")
             } else {
@@ -59,8 +64,9 @@ android {
 }
 
 kotlin {
+    jvmToolchain(25)
     compilerOptions {
-        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_25
     }
 }
 
