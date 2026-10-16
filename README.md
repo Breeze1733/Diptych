@@ -46,14 +46,6 @@
   <em>日记与留言 · 双人日历 · Diptych 设置</em>
 </div>
 
-<br/>
-
-<div align="center">
-  <img src="pic/image-preview.png" width="30%" alt="磨砂透明操作栏的大图预览" />
-  <br/>
-  <em>大图预览</em>
-</div>
-
 ---
 
 ## 目录
