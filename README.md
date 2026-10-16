@@ -25,25 +25,25 @@
 以下为当前界面的示例截图，使用“用户A / 用户B”、示例头像和壁纸展示布局。
 
 <div align="center">
-  <img src="pic/diary.png" width="30%" alt="双联日记主页" />
+  <img src="pic/diary.png" width="30%" alt="日记页面" />
   &nbsp;&nbsp;&nbsp;
-  <img src="pic/topics.png" width="30%" alt="话题与示例壁纸" />
+  <img src="pic/topics.png" width="30%" alt="话题页面" />
   &nbsp;&nbsp;&nbsp;
-  <img src="pic/edit-diary.png" width="30%" alt="写日记" />
+  <img src="pic/settings.png" width="30%" alt="设置页面" />
   <br/>
-  <em>双联日记 · 话题 · 写日记</em>
+  <em>日记页面 · 话题页面 · 设置页面</em>
 </div>
 
 <br/>
 
 <div align="center">
-  <img src="pic/diary-detail.png" width="30%" alt="日记与留言" />
+  <img src="pic/edit-diary.png" width="30%" alt="编辑日记界面" />
   &nbsp;&nbsp;&nbsp;
-  <img src="pic/calendar.png" width="30%" alt="双方尚未发布日记时的双人日历" />
+  <img src="pic/diary-detail.png" width="30%" alt="日记详情页" />
   &nbsp;&nbsp;&nbsp;
-  <img src="pic/settings.png" width="30%" alt="Diptych 设置" />
+  <img src="pic/calendar.png" width="30%" alt="日历统计视图" />
   <br/>
-  <em>日记与留言 · 双人日历 · Diptych 设置</em>
+  <em>编辑日记界面 · 日记详情页 · 日历统计视图</em>
 </div>
 
 ---
