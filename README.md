@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/icon.png" alt="Diptych" width="160" height="160" />
+<img src="pic/icon.png" alt="Diptych" width="160" height="160" />
 
 # Diptych
 
@@ -22,14 +22,36 @@
 
 ## 预览
 
+以下为当前界面的示例截图，使用“用户A / 用户B”、示例头像和壁纸展示布局。
+
 <div align="center">
-  <img src="assets/homepage.png" width="30%" alt="软件主页" />
+  <img src="pic/diary.png" width="30%" alt="双联日记主页" />
   &nbsp;&nbsp;&nbsp;
-  <img src="assets/moment.png" width="30%" alt="分屏日记" />
+  <img src="pic/topics.png" width="30%" alt="话题与示例壁纸" />
   &nbsp;&nbsp;&nbsp;
-  <img src="assets/topic.png" width="30%" alt="话题广场" />
+  <img src="pic/edit-diary.png" width="30%" alt="写日记" />
   <br/>
-  <em>软件主页 · 分屏日记 · 话题广场</em>
+  <em>双联日记 · 话题 · 写日记</em>
+</div>
+
+<br/>
+
+<div align="center">
+  <img src="pic/diary-detail.png" width="30%" alt="日记与留言" />
+  &nbsp;&nbsp;&nbsp;
+  <img src="pic/calendar.png" width="30%" alt="双方尚未发布日记时的双人日历" />
+  &nbsp;&nbsp;&nbsp;
+  <img src="pic/settings.png" width="30%" alt="Diptych 设置" />
+  <br/>
+  <em>日记与留言 · 双人日历 · Diptych 设置</em>
+</div>
+
+<br/>
+
+<div align="center">
+  <img src="pic/image-preview.png" width="30%" alt="磨砂透明操作栏的大图预览" />
+  <br/>
+  <em>大图预览</em>
 </div>
 
 ---
@@ -61,11 +83,12 @@
 - 💬 **互动评论** — 在对方（或自己）的日记下留言、回复，支持多级嵌套
 - 📸 **实况照片** — 识别 Android 多厂商 JPEG 中内嵌的 MP4，支持提取、播放与保存时的厂商元数据适配；定制相册多选器提供单张实况开关，开启时上传完整动态图，关闭时提取静态图。当前仓库提供 Android 平台工程
 - 📬 **信箱与通知中心** — 初始化通知列表、进入信箱及相关刷新操作时主动拉取日记、评论和话题通知；服务端取出后清空对应队列，客户端保存历史与已读状态。支持未读计数、单条/全部已读、清空信箱和跳转到对应日期或话题
-- 📅 **双人日历** — 区分己方、对方与双方都已记录的日期，支持双色标记和磨砂玻璃弹窗；优先读取本地日期缓存，加载日记时补充对应日期标记，手动刷新时联网全量同步
+- 📅 **双人日历** — 区分己方、对方与双方都已记录的日期，支持蓝粉双色标记和纸页日历弹窗；优先读取本地日期缓存，加载日记时补充对应日期标记，手动刷新时联网全量同步
 - 🔎 **日记搜索** — 搜索双方日记正文与评论，按日期从新到旧返回；支持输入防抖、关键词摘要高亮、游标分页和点击回到对应日期
 - 🗂️ **话题广场** — 创建话题、查看讨论、发布纯文字帖子及删除自己的帖子；发帖支持保存和恢复文字草稿
+- 🪶 **纸页双联界面** — 暖白、墨蓝与陶土色统一全局风格；底部紧凑切换日记、话题与我的，日期栏紧凑单行；双联页固定一屏，4:3 封面与完整正文在各自纸页内部滚动，底部固定“展开日记与留言”入口。编辑、留言与回复在展开页内完成并更新，心情统一显示分数；双方未记录时左下角悬浮显示写日记入口。写日记以心情、照片、文字三张卡片填满一屏，心情单行排列，照片保留两行六格位置，多余照片与长文字分别在卡片内滚动；顶栏直接提供搜索、信箱和刷新，我的页面保留壁纸设置及检测连通性入口
 - 🎨 **壁纸定制** — 日记与话题分别设置壁纸；选图后按 9:16 裁剪，支持全屏预览和透明度调整，设置本地优先并同步至后端；可一键设为白色背景，该操作仅保存在本机并保留原壁纸，方便恢复
-- 📤 **串行预上传与画廊** — 选图即触发后台串行上传，单张图片按 1 MB 分片发送，失败分片和合并请求自动重试；支持上传进度、失败重试、移除和拖拽排序，以及全屏图片预览、缩放和保存
+- 📤 **串行预上传与画廊** — 选图即触发后台串行上传，单张图片按 1 MB 分片发送，失败分片和合并请求自动重试；支持上传进度、失败重试、移除和拖拽排序，以及全屏图片预览、缩放和保存；大图铺满预览区域，磨砂透明操作栏可点按图片隐藏或显示
 - 🛡️ **草稿与上传结果复用** — 日记草稿保存文字、心情、混合本地/远程图片顺序、实况状态与已上传 URL；恢复时复用已完成的图片上传，未完成的图片重新启动上传。提供手动存草稿、退出保留草稿和发布失败自动保存，评论与话题帖子也支持文字草稿
 - 🪟 **小窗适配** — 在 Flutter 根组件中修正异常的 MediaQuery 顶部/底部 Insets，主页与日记布局根据窗口尺寸缩放
 - 🔋 **传输保活** — Android 前台服务展示上传、图片预缓存和更新下载进度，配合带超时的 CPU WakeLock 降低后台传输被休眠打断的概率
@@ -87,7 +110,7 @@
 | 相册与图片选择 | `wechat_assets_picker`（微信风格相册多选） + `image_picker`（拍照） |
 | 实况照片与视频流 | 自研 `MotionPhotoHelper` 二进制流提取引擎 + `video_player`（实况播放） |
 | 图片预览 / 裁剪 | `photo_view`（微信同款手势缩放与切页） + `image_cropper`（多比例头像裁剪） |
-| 日历 | `table_calendar`（定制双人状态着色与磨砂玻璃交互） |
+| 日历 | `table_calendar`（定制双人蓝粉双色与日期选择） |
 | 窗口与厂商适配 | Flutter MediaQuery Insets 修正与比例缩放；原生 `MethodChannel` 厂商识别、媒体扫描 |
 | 本地化 | `flutter_localizations` + `intl`（简体中文本地化） |
 | 版本更新与下载 | `package_info_plus` + Dart HTTP 流式下载 + 原生 APK 安装通道（`open_filex` 兜底） |
@@ -101,8 +124,8 @@ lib/
 ├── app.dart                   # 根组件，根据登录状态路由与小窗 Insets 矫正
 ├── constants/
 │   ├── api_config.dart        # 后端 API 地址配置（git 忽略，创建方式见下文）
-│   ├── app_theme.dart         # 全局主题（颜色、文字样式）
-│   ├── settings_theme.dart    # 设置页与壁纸设置的暖白/深蓝灰配色
+│   ├── app_theme.dart         # 纸页双联全局主题（暖白 / 墨蓝 / 陶土色与统一组件）
+│   ├── settings_theme.dart    # 设置页兼容入口，复用全局主题
 │   ├── secrets.dart           # 双方密钥配置（git 忽略，创建方式见下文）
 │   └── strings.dart           # 中文字符串常量
 ├── models/
@@ -120,7 +143,8 @@ lib/
 │   └── wallpaper_provider.dart # 日记/话题壁纸与透明度，本地优先初始化
 ├── screens/
 │   ├── login_screen.dart      # 密钥登录
-│   ├── feed_screen.dart       # 主页（分屏日记、日历、评论、搜索及信箱入口）
+│   ├── home_screen.dart       # 底部导航（日记 / 话题 / 我的，保留已访问页面状态）
+│   ├── feed_screen.dart       # 双联日记（日期切换、展开阅读、顶栏搜索 / 信箱 / 刷新）
 │   ├── diary_search_screen.dart # 日记/评论搜索（高亮摘要、游标分页、日期跳转）
 │   ├── edit_moment_screen.dart # 日记编辑（串行预上传、实况开关、草稿恢复、缓存转移）
 │   ├── notification_screen.dart # 信箱与通知列表（未读标记、跳转上下文、一键已读）
@@ -151,11 +175,12 @@ lib/
 │   └── wakelock_helper.dart   # CPU WakeLock 原生通道
 └── widgets/
     ├── avatar_widget.dart     # 头像组件
-    ├── calendar_picker.dart   # 双人状态日历选择弹窗（磨砂玻璃材质、配色状态指示）
-    ├── date_header.dart       # 日期切换栏与快速回到今天
+    ├── calendar_picker.dart   # 双人状态日历选择弹窗（纸页材质、蓝粉双色状态指示）
+    ├── date_header.dart       # 紧凑日期切换栏与日历入口
     ├── day_split_view.dart    # 左右分屏日记展示容器
-    ├── frosted_pill_button.dart # 统一磨砂玻璃悬浮胶囊按钮
+    ├── frosted_pill_button.dart # 墨蓝实心主操作按钮（保留原组件接口）
     ├── image_gallery.dart     # 全屏手势画廊（原图高清预览、微信手势与实况轻触播放）
+    ├── image_preview_chrome.dart # 可隐藏的图片操作层与磨砂玻璃面板
     ├── live_photo_badge.dart  # 实况照片动态徽标与开关角标
     ├── moment_card.dart       # 单条日记卡片（含实况角标与评论树）
     ├── network_diagnostics_card.dart # 手动网络检测、响应分档、详情及冷却状态
@@ -163,7 +188,11 @@ lib/
     └── wallpaper_layer.dart   # 全局/局部壁纸背景渲染层
 ```
 
-`android/` 包含 Kotlin 原生通道、传输前台服务与启动图标资源；`assets/` 保存应用图片及 README 预览图。
+`android/` 包含 Kotlin 原生通道、传输前台服务与启动图标资源；`assets/` 只保存 APK 使用的应用图片，目前为应用图标和双方未发布状态贴图，均在 `pubspec.yaml` 中声明。
+
+展示图片统一放在 `pic/`：README 引用的图标和截图放在该目录下，未引用的备选图片、历史截图及原始素材放在 `pic/ignore/`。后者已由 `.gitignore` 忽略，不提交到仓库。以后更新截图时直接替换 `pic/` 中对应的文件；新增图片如需展示，应同步更新 README 引用。
+
+示例截图统一使用“用户A / 用户B”，头像分别取 `assets/not_posted_self.png` 和 `assets/not_posted_partner.png`；日记与话题使用各自的示例壁纸，壁纸原图保存在 `pic/ignore/`。
 
 应用标志使用透明圆角 PNG，Android 同时提供各密度启动图标、自适应图标及单色主题图标，资源位于 `assets/` 与 `android/app/src/main/res/`。
 
@@ -281,6 +310,7 @@ flutter build apk --release
 - **发现问题**：请先搜索是否已有类似 [Issue](https://github.com/Breeze1733/Diptych/issues)，若无则新建并描述复现步骤与设备信息
 - **提交代码**：Fork 仓库 → 基于 `main` 分支新建特性分支 → 提交 PR，按改动需要运行 `flutter analyze` 静态检查或在设备上验证
 - **代码风格**：遵循 `analysis_options.yaml` 中的 `flutter_lints` 规则
+- **图片维护**：README 图片引用统一使用 `pic/` 路径；未引用的图片移入 `pic/ignore/`，应用运行及 APK 构建资源留在 `assets/` 或 Android 原生资源目录
 
 ## License
 

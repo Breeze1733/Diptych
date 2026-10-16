@@ -10,6 +10,9 @@ lib/constants/api_config.dart
 temp/
 latest-apk/
 
+# README 未引用的备选图片、历史截图和原始素材
+/pic/ignore/
+
 # Miscellaneous
 *.class
 *.log
