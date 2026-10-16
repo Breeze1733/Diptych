@@ -1,5 +1,6 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+
 import '../constants/app_theme.dart';
 
 /// 壁纸背景层：永远放在页面最底层，不拦截手势、不遮挡内容。
@@ -16,7 +17,9 @@ class WallpaperLayer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (url.isEmpty) {
-      return const SizedBox.shrink(); // 无壁纸 → 保持默认背景，不占位不转圈
+      return const IgnorePointer(
+        child: ColoredBox(color: AppTheme.backgroundColor),
+      );
     }
     return IgnorePointer(
       child: Stack(
@@ -26,10 +29,16 @@ class WallpaperLayer extends StatelessWidget {
             imageUrl: url,
             fit: BoxFit.cover,
             // 加载/失败都用背景色兜底，绝不显示转圈
-            placeholder: (_, _) => const ColoredBox(color: AppTheme.backgroundColor),
-            errorWidget: (_, _, _) => const ColoredBox(color: AppTheme.backgroundColor),
+            placeholder: (_, _) =>
+                const ColoredBox(color: AppTheme.backgroundColor),
+            errorWidget: (_, _, _) =>
+                const ColoredBox(color: AppTheme.backgroundColor),
           ),
-          Container(color: Colors.white.withValues(alpha: (1 - opacity).clamp(0.0, 1.0))),
+          Container(
+            color: Colors.white.withValues(
+              alpha: (1 - opacity).clamp(0.0, 1.0),
+            ),
+          ),
         ],
       ),
     );

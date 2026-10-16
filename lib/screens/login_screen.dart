@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../constants/app_theme.dart';
 import '../constants/strings.dart';
 import '../providers/auth_provider.dart';
@@ -48,93 +49,118 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppTheme.backgroundColor,
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 40),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // Logo 图标
-                  Container(
-                    width: 80,
-                    height: 80,
-                    decoration: BoxDecoration(
-                      color: AppTheme.primaryColor.withAlpha(25),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Image.asset(
-                      'assets/icon.png',
-                      width: 40,
-                      height: 40,
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-
-                  // 标题
-                  const Text(
-                    'Diptych',
-                    style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    AppStrings.loginTitle,
-                    style: TextStyle(fontSize: 16, color: Colors.grey[600]),
-                  ),
-                  const SizedBox(height: 40),
-
-                  // 密钥输入框
-                  SelectionContainer.disabled(
-                    child: TextFormField(
-                      controller: _keyController,
-                      contextMenuBuilder: (context, editableTextState) =>
-                          AdaptiveTextSelectionToolbar.buttonItems(
-                        anchors: editableTextState.contextMenuAnchors,
-                        buttonItems: editableTextState.contextMenuButtonItems,
+            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 40),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Logo 图标
+                    Container(
+                      width: 88,
+                      height: 88,
+                      decoration: BoxDecoration(
+                        color: AppTheme.surfaceColor,
+                        borderRadius: BorderRadius.circular(24),
                       ),
-                      decoration: InputDecoration(
-                        labelText: AppStrings.loginHint,
-                        prefixIcon: const Icon(Icons.vpn_key_outlined),
-                        errorText: _errorText,
+                      child: Image.asset(
+                        'assets/icon.png',
+                        width: 40,
+                        height: 40,
                       ),
-                      obscureText: true,
-                      validator: (v) {
-                        if (v == null || v.trim().isEmpty) return '请输入密钥';
-                        return null;
-                      },
-                      onFieldSubmitted: (_) => _handleLogin(),
                     ),
-                  ),
-                  const SizedBox(height: 24),
+                    const SizedBox(height: 28),
 
-                  // 登录按钮
-                  SizedBox(
-                    width: double.infinity,
-                    height: 48,
-                    child: FilledButton(
-                      onPressed: _isLoading ? null : _handleLogin,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppTheme.primaryColor,
+                    // 标题
+                    const Text(
+                      'Diptych',
+                      style: TextStyle(
+                        fontSize: 32,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: -0.8,
+                        color: AppTheme.textPrimary,
                       ),
-                      child: _isLoading
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Text(
-                              AppStrings.loginButton,
-                              style: TextStyle(fontSize: 16),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      AppStrings.loginTitle,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      '把各自的一天，写在同一页。',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 40),
+
+                    // 密钥输入框
+                    SelectionContainer.disabled(
+                      child: TextFormField(
+                        controller: _keyController,
+                        contextMenuBuilder: (context, editableTextState) =>
+                            AdaptiveTextSelectionToolbar.buttonItems(
+                              anchors: editableTextState.contextMenuAnchors,
+                              buttonItems:
+                                  editableTextState.contextMenuButtonItems,
                             ),
+                        decoration: InputDecoration(
+                          labelText: AppStrings.loginHint,
+                          prefixIcon: const Icon(Icons.vpn_key_outlined),
+                          errorText: _errorText,
+                        ),
+                        obscureText: true,
+                        autocorrect: false,
+                        enableSuggestions: false,
+                        validator: (v) {
+                          if (v == null || v.trim().isEmpty) return '请输入密钥';
+                          return null;
+                        },
+                        onFieldSubmitted: (_) => _handleLogin(),
+                      ),
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 24),
+
+                    // 登录按钮
+                    SizedBox(
+                      width: double.infinity,
+                      height: 52,
+                      child: FilledButton(
+                        onPressed: _isLoading ? null : _handleLogin,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppTheme.primaryColor,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        child: _isLoading
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Text(
+                                AppStrings.loginButton,
+                                style: TextStyle(fontSize: 16),
+                              ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

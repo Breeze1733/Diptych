@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../constants/app_theme.dart';
 import '../constants/settings_theme.dart';
 import '../models/app_user.dart';
@@ -10,6 +11,7 @@ import '../services/cache_service.dart';
 import '../utils/date_helper.dart';
 import '../widgets/date_header.dart';
 import '../widgets/day_split_view.dart';
+import '../widgets/frosted_pill_button.dart';
 import '../widgets/wallpaper_layer.dart';
 
 /// 壁纸透明度预览页：
@@ -112,8 +114,7 @@ class _WallpaperPreviewScreenState
       id: 'preview_self',
       dateStr: dateStr,
       authorId: 'A',
-      feeling:
-          '示例感受文字，用于预览壁纸与文字的对比效果。\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位',
+      feeling: '示例感受文字，用于预览壁纸与文字的对比效果。\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位',
       mood: 8,
       comments: [
         Comment(
@@ -130,8 +131,7 @@ class _WallpaperPreviewScreenState
       id: 'preview_partner',
       dateStr: dateStr,
       authorId: 'B',
-      feeling:
-          '对方的示例日记内容，同样用来预览壁纸效果。\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位',
+      feeling: '对方的示例日记内容，同样用来预览壁纸效果。\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位\n换行占位',
       mood: 6,
       comments: [
         Comment(
@@ -154,9 +154,9 @@ class _WallpaperPreviewScreenState
         // 与日记页一致的日期顶栏（示例日期）
         DateHeader(
           dateText: DateHelper.toChineseDate(DateTime.now()),
+          date: DateTime.now(),
           onCalendarTap: () {}, // 预览页日历不响应
         ),
-        const Divider(height: 1, thickness: 1, color: AppTheme.dividerColor),
         // 与日记页一致的分屏卡片，昵称固定「用户A/用户B」，头像留空
         DaySplitView(
           myMoment: selfMoment,
@@ -168,7 +168,7 @@ class _WallpaperPreviewScreenState
     );
   }
 
-  /// 话题壁纸预览：与话题列表页一致的示例布局
+  /// 话题壁纸预览：与话题列表页一致的示例布局。
   Widget _buildTopicPreview() {
     const samples = [
       ('示例话题文字', '用户A'),
@@ -176,31 +176,77 @@ class _WallpaperPreviewScreenState
       ('推荐一部值得看的电影', '用户A'),
     ];
     return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 104),
       itemCount: samples.length,
-      separatorBuilder: (_, _) => const Divider(height: 1),
+      separatorBuilder: (_, _) => const SizedBox(height: 12),
       itemBuilder: (context, index) {
         final (title, author) = samples[index];
-        return ListTile(
-          isThreeLine: true,
-          title: SelectableText(
-            title,
-            style: const TextStyle(fontWeight: FontWeight.w500),
+        return Material(
+          color: AppTheme.surfaceColor.withAlpha(235),
+          borderRadius: BorderRadius.circular(20),
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: AppTheme.accentSurface,
+                    borderRadius: BorderRadius.circular(13),
+                  ),
+                  child: const Icon(
+                    Icons.forum_outlined,
+                    size: 20,
+                    color: AppTheme.accentColor,
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SelectableText(
+                        title,
+                        style: const TextStyle(
+                          fontSize: 17,
+                          height: 1.4,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.textPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '由 $author 创建',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                      const SizedBox(height: 5),
+                      const Text(
+                        '更新于 今天 14:30',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Padding(
+                  padding: EdgeInsets.only(top: 3),
+                  child: Icon(
+                    Icons.chevron_right_rounded,
+                    size: 20,
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+              ],
+            ),
           ),
-          subtitle: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '由 $author 创建',
-                style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                '最新更新：示例时间',
-                style: TextStyle(fontSize: 11, color: Colors.grey[400]),
-              ),
-            ],
-          ),
-          trailing: const Icon(Icons.chevron_right),
         );
       },
     );
@@ -227,6 +273,11 @@ class _WallpaperPreviewScreenState
             appBar: AppBar(
               backgroundColor: Colors.transparent,
               elevation: 0,
+              scrolledUnderElevation: 0,
+              surfaceTintColor: Colors.transparent,
+              flexibleSpace: isDiary
+                  ? ColoredBox(color: AppTheme.surfaceColor.withAlpha(235))
+                  : null,
               title: Text(isDiary ? '日记壁纸预览' : '话题壁纸预览'),
               actions: [
                 TextButton(
@@ -247,54 +298,54 @@ class _WallpaperPreviewScreenState
             body: body,
             floatingActionButton: isDiary
                 ? null
-                : FloatingActionButton(
-                    onPressed: () {}, // 预览页不响应
-                    child: const Icon(Icons.add),
-                  ),
-            bottomNavigationBar: SafeArea(
-              child: Container(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  border: Border(top: BorderSide(color: Colors.grey[200]!)),
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Row(
-                      children: [
-                        Text(
-                          '不透明度',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Colors.grey[600],
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Slider(
-                            value: _opacity,
-                            onChanged: (v) => setState(() => _opacity = v),
-                          ),
-                        ),
-                        SizedBox(
-                          width: 44,
-                          child: Text(
-                            '${(_opacity * 100).round()}%',
-                            textAlign: TextAlign.right,
-                            style: const TextStyle(
+                : FrostedPillButton(label: '创建话题', onTap: () {}),
+            bottomNavigationBar: Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                border: Border(top: BorderSide(color: Colors.grey[200]!)),
+              ),
+              child: SafeArea(
+                top: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          Text(
+                            '不透明度',
+                            style: TextStyle(
                               fontSize: 13,
-                              fontWeight: FontWeight.w600,
+                              color: Colors.grey[600],
                             ),
                           ),
-                        ),
-                      ],
-                    ),
-                    Text(
-                      '拖动滑条实时预览，点右上角「应用」保存到云端',
-                      style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-                    ),
-                  ],
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Slider(
+                              value: _opacity,
+                              onChanged: (v) => setState(() => _opacity = v),
+                            ),
+                          ),
+                          SizedBox(
+                            width: 44,
+                            child: Text(
+                              '${(_opacity * 100).round()}%',
+                              textAlign: TextAlign.right,
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      Text(
+                        '拖动滑条实时预览，点右上角「应用」保存到云端',
+                        style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),

@@ -1,11 +1,12 @@
-import '../widgets/frosted_pill_button.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../constants/app_theme.dart';
 import '../providers/auth_provider.dart';
 import '../providers/wallpaper_provider.dart';
 import '../services/topic_service.dart';
 import '../utils/date_helper.dart';
+import '../widgets/frosted_pill_button.dart';
 import '../widgets/wallpaper_layer.dart';
 import 'topic_detail_screen.dart';
 
@@ -58,18 +59,20 @@ class _TopicsScreenState extends ConsumerState<TopicsScreen> {
   /// 并行拉取每个话题的详情，计算最新更新时间
   /// （列表接口只返回创建时间，最新帖子时间需从详情里取）
   Future<void> _loadLatestUpdates(List<dynamic> topics) async {
-    final results = await Future.wait(topics.map((t) async {
-      try {
-        final detail = await _service.getTopic(t.id);
-        DateTime latest = t.createdAt;
-        for (final p in detail.posts) {
-          if (p.createdAt.isAfter(latest)) latest = p.createdAt;
+    final results = await Future.wait(
+      topics.map((t) async {
+        try {
+          final detail = await _service.getTopic(t.id);
+          DateTime latest = t.createdAt;
+          for (final p in detail.posts) {
+            if (p.createdAt.isAfter(latest)) latest = p.createdAt;
+          }
+          return MapEntry<String, DateTime>(t.id, latest);
+        } catch (_) {
+          return MapEntry<String, DateTime>(t.id, t.createdAt);
         }
-        return MapEntry<String, DateTime>(t.id, latest);
-      } catch (_) {
-        return MapEntry<String, DateTime>(t.id, t.createdAt);
-      }
-    }));
+      }),
+    );
     if (!mounted) return;
     setState(() {
       for (final e in results) {
@@ -93,23 +96,28 @@ class _TopicsScreenState extends ConsumerState<TopicsScreen> {
             autofocus: true,
             contextMenuBuilder: (context, editableTextState) =>
                 AdaptiveTextSelectionToolbar.buttonItems(
-              anchors: editableTextState.contextMenuAnchors,
-              buttonItems: editableTextState.contextMenuButtonItems,
-            ),
+                  anchors: editableTextState.contextMenuAnchors,
+                  buttonItems: editableTextState.contextMenuButtonItems,
+                ),
             decoration: const InputDecoration(hintText: '输入话题标题'),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: Text('取消', style: TextStyle(color: Colors.grey[600])),
+            child: const Text(
+              '取消',
+              style: TextStyle(color: AppTheme.textSecondary),
+            ),
           ),
           FilledButton(
             onPressed: () {
               final text = controller.text.trim();
               if (text.isNotEmpty) Navigator.pop(ctx, text);
             },
-            style: FilledButton.styleFrom(backgroundColor: AppTheme.primaryColor),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppTheme.primaryColor,
+            ),
             child: const Text('创建'),
           ),
         ],
@@ -126,7 +134,10 @@ class _TopicsScreenState extends ConsumerState<TopicsScreen> {
       debugPrint('创建话题失败: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('创建失败，请稍后重试'), backgroundColor: Colors.red),
+        const SnackBar(
+          content: Text('创建失败，请稍后重试'),
+          backgroundColor: AppTheme.dangerColor,
+        ),
       );
     }
   }
@@ -146,19 +157,37 @@ class _TopicsScreenState extends ConsumerState<TopicsScreen> {
     return Stack(
       fit: StackFit.expand,
       children: [
-        WallpaperLayer(url: wallpaper.topicUrl, opacity: wallpaper.topicOpacity),
+        WallpaperLayer(
+          url: wallpaper.topicUrl,
+          opacity: wallpaper.topicOpacity,
+        ),
         Scaffold(
           backgroundColor: Colors.transparent,
           appBar: AppBar(
             backgroundColor: Colors.transparent,
+            surfaceTintColor: Colors.transparent,
+            scrolledUnderElevation: 0,
             elevation: 0,
-            title: const Text('话题'),
+            toolbarHeight: 44,
+            actions: [
+              IconButton(
+                onPressed: _loading ? null : _loadTopics,
+                tooltip: '刷新话题',
+                icon: const Icon(Icons.refresh_rounded),
+              ),
+              const SizedBox(width: 8),
+            ],
           ),
-          floatingActionButton: FrostedPillButton(
-            label: '创建话题',
-            onTap: _createTopic,
+          floatingActionButton: Padding(
+            padding: EdgeInsets.only(
+              bottom:
+                  (MediaQuery.paddingOf(context).bottom -
+                          MediaQuery.viewPaddingOf(context).bottom)
+                      .clamp(0.0, double.infinity),
+            ),
+            child: FrostedPillButton(label: '创建话题', onTap: _createTopic),
           ),
-          body: _buildBody(),
+          body: SafeArea(top: false, child: _buildBody()),
         ),
       ],
     );
@@ -173,11 +202,24 @@ class _TopicsScreenState extends ConsumerState<TopicsScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.cloud_off, size: 48, color: Colors.grey),
+            const Icon(
+              Icons.cloud_off_outlined,
+              size: 48,
+              color: AppTheme.textSecondary,
+            ),
             const SizedBox(height: 12),
-            const Text('加载话题失败', style: TextStyle(color: Colors.grey, fontSize: 16)),
+            const Text(
+              '加载话题失败',
+              style: TextStyle(color: AppTheme.textPrimary, fontSize: 16),
+            ),
             const SizedBox(height: 4),
-            Text(_error!, style: TextStyle(color: Colors.grey[400], fontSize: 12)),
+            Text(
+              _error!,
+              style: const TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 13,
+              ),
+            ),
             const SizedBox(height: 16),
             OutlinedButton(onPressed: _loadTopics, child: const Text('重试')),
           ],
@@ -189,11 +231,25 @@ class _TopicsScreenState extends ConsumerState<TopicsScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.forum_outlined, size: 48, color: Colors.grey[300]),
+            const Icon(
+              Icons.forum_outlined,
+              size: 48,
+              color: AppTheme.selfColor,
+            ),
             const SizedBox(height: 12),
-            Text('暂无话题', style: TextStyle(color: Colors.grey[500], fontSize: 16)),
+            const Text(
+              '聊聊今天以外的事',
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
             const SizedBox(height: 4),
-            Text('点击右下角 + 新建', style: TextStyle(color: Colors.grey[400], fontSize: 13)),
+            const Text(
+              '从一个话题开始，慢慢交换想法',
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+            ),
           ],
         ),
       );
@@ -202,37 +258,94 @@ class _TopicsScreenState extends ConsumerState<TopicsScreen> {
     return RefreshIndicator(
       onRefresh: _loadTopics,
       child: ListView.separated(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 104),
         itemCount: _topics!.length,
-        separatorBuilder: (_, _) => const Divider(height: 1),
+        separatorBuilder: (_, _) => const SizedBox(height: 12),
         itemBuilder: (context, index) {
           final topic = _topics![index];
-          return ListTile(
-            isThreeLine: true,
-            title: SelectableText(topic.title, style: const TextStyle(fontWeight: FontWeight.w500)),
-            subtitle: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '由 ${_nickFor(topic.authorId)} 创建',
-                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+          return Material(
+            color: AppTheme.surfaceColor.withAlpha(235),
+            borderRadius: BorderRadius.circular(20),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: () async {
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => TopicDetailScreen(topicId: topic.id),
+                  ),
+                );
+                _loadTopics();
+              },
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: AppTheme.accentSurface,
+                        borderRadius: BorderRadius.circular(13),
+                      ),
+                      child: const Icon(
+                        Icons.forum_outlined,
+                        size: 20,
+                        color: AppTheme.accentColor,
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SelectableText(
+                            topic.title,
+                            style: const TextStyle(
+                              fontSize: 17,
+                              height: 1.4,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.textPrimary,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            '由 ${_nickFor(topic.authorId)} 创建',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: AppTheme.textSecondary,
+                            ),
+                          ),
+                          const SizedBox(height: 5),
+                          Text(
+                            _latestUpdate[topic.id] != null
+                                ? '更新于 ${DateHelper.toFriendlyDateTime(_latestUpdate[topic.id]!)}'
+                                : '正在同步最近动态…',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: AppTheme.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    const Padding(
+                      padding: EdgeInsets.only(top: 3),
+                      child: Icon(
+                        Icons.chevron_right_rounded,
+                        size: 20,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  _latestUpdate[topic.id] != null
-                      ? '最新更新：${DateHelper.toFriendlyDateTime(_latestUpdate[topic.id]!)}'
-                      : '最新更新：加载中…',
-                  style: TextStyle(fontSize: 11, color: Colors.grey[400]),
-                ),
-              ],
+              ),
             ),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () async {
-              await Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => TopicDetailScreen(topicId: topic.id)),
-              );
-              _loadTopics();
-            },
           );
         },
       ),

@@ -68,9 +68,8 @@ class _TopicPostScreenState extends ConsumerState<TopicPostScreen> {
   Future<void> _handleSaveDraft() async {
     final content = _contentController.text.trim();
     if (content.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请输入帖子内容后再保存草稿')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('请输入帖子内容后再保存草稿')));
       return;
     }
 
@@ -79,14 +78,16 @@ class _TopicPostScreenState extends ConsumerState<TopicPostScreen> {
       await DraftService.saveTopicPost(_draftKey, content);
       _loadedDraft = content;
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('草稿已保存')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('草稿已保存')));
     } catch (e) {
       debugPrint('保存草稿失败: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('保存草稿失败，请重试'), backgroundColor: Colors.red),
+        const SnackBar(
+          content: Text('保存草稿失败，请重试'),
+          backgroundColor: AppTheme.dangerColor,
+        ),
       );
     } finally {
       if (mounted) setState(() => _isSavingDraft = false);
@@ -96,9 +97,8 @@ class _TopicPostScreenState extends ConsumerState<TopicPostScreen> {
   Future<void> _handlePublish() async {
     final content = _contentController.text.trim();
     if (content.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请输入帖子内容')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('请输入帖子内容')));
       return;
     }
 
@@ -120,7 +120,10 @@ class _TopicPostScreenState extends ConsumerState<TopicPostScreen> {
       _hasPublishedSuccessfully = true;
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('发布成功'), backgroundColor: AppTheme.primaryColor),
+        const SnackBar(
+          content: Text('发布成功'),
+          backgroundColor: AppTheme.primaryColor,
+        ),
       );
       Navigator.pop(context, true);
     } catch (e) {
@@ -134,7 +137,7 @@ class _TopicPostScreenState extends ConsumerState<TopicPostScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('发布失败，已自动为您保存为草稿，请重试'),
-          backgroundColor: Colors.red,
+          backgroundColor: AppTheme.dangerColor,
         ),
       );
     } finally {
@@ -174,14 +177,12 @@ class _TopicPostScreenState extends ConsumerState<TopicPostScreen> {
             child: const Text('取消'),
           ),
           TextButton(
-            style: TextButton.styleFrom(foregroundColor: Colors.red[600]),
+            style: TextButton.styleFrom(foregroundColor: AppTheme.dangerColor),
             onPressed: () => Navigator.pop(ctx, false),
             child: const Text('放弃'),
           ),
           TextButton(
-            style: TextButton.styleFrom(
-              foregroundColor: AppTheme.primaryColor,
-            ),
+            style: TextButton.styleFrom(foregroundColor: AppTheme.primaryColor),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text(
               '保留草稿',
@@ -228,15 +229,12 @@ class _TopicPostScreenState extends ConsumerState<TopicPostScreen> {
         await _handleBackPress();
       },
       child: Scaffold(
+        backgroundColor: AppTheme.backgroundColor,
         appBar: AppBar(
-          leading: BackButton(
-            onPressed: _handleBackPress,
-          ),
-          title: const Text('发帖'),
-        actions: [
-          SizedBox(
-            width: 72,
-            child: TextButton(
+          leading: BackButton(onPressed: _handleBackPress),
+          title: const Text('写回复'),
+          actions: [
+            TextButton(
               onPressed: _isSavingDraft || _isSaving ? null : _handleSaveDraft,
               child: _isSavingDraft
                   ? const SizedBox(
@@ -246,59 +244,99 @@ class _TopicPostScreenState extends ConsumerState<TopicPostScreen> {
                     )
                   : const Text('存草稿'),
             ),
-          ),
-          SizedBox(
-            width: 56,
-            child: TextButton(
-              onPressed: _isSaving || _isSavingDraft ? null : _handlePublish,
-              child: _isSaving
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Text(
-                      '发布',
-                      style: TextStyle(fontWeight: FontWeight.w600),
-                    ),
-            ),
-          ),
-          const SizedBox(width: 4),
-        ],
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              widget.topicTitle,
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 20),
-            const Text(
-              '帖子内容',
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
-            ),
-            const SizedBox(height: 8),
-            SelectionContainer.disabled(
-              child: TextField(
-                controller: _contentController,
-                autofocus: true,
-                minLines: 8,
-                maxLines: null,
-                scrollPhysics: const NeverScrollableScrollPhysics(),
-                contextMenuBuilder: (context, editableTextState) =>
-                    AdaptiveTextSelectionToolbar.buttonItems(
-                  anchors: editableTextState.contextMenuAnchors,
-                  buttonItems: editableTextState.contextMenuButtonItems,
-                ),
-                decoration: const InputDecoration(hintText: '写下你的想法...'),
+            Padding(
+              padding: const EdgeInsets.only(right: 16, left: 4),
+              child: FilledButton(
+                onPressed: _isSaving || _isSavingDraft ? null : _handlePublish,
+                style: FilledButton.styleFrom(minimumSize: const Size(72, 42)),
+                child: _isSaving
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Text(
+                        '发布',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
               ),
             ),
           ],
         ),
-      ),
+        body: Align(
+          alignment: Alignment.topCenter,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 760),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      color: AppTheme.accentSurface,
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          '正在聊',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: AppTheme.accentColor,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          widget.topicTitle,
+                          style: const TextStyle(
+                            fontSize: 17,
+                            height: 1.5,
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.textPrimary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  SelectionContainer.disabled(
+                    child: TextField(
+                      controller: _contentController,
+                      autofocus: true,
+                      minLines: 12,
+                      maxLines: null,
+                      scrollPhysics: const NeverScrollableScrollPhysics(),
+                      style: const TextStyle(
+                        fontSize: 16,
+                        height: 1.8,
+                        color: AppTheme.textPrimary,
+                      ),
+                      contextMenuBuilder: (context, editableTextState) =>
+                          AdaptiveTextSelectionToolbar.buttonItems(
+                            anchors: editableTextState.contextMenuAnchors,
+                            buttonItems:
+                                editableTextState.contextMenuButtonItems,
+                          ),
+                      decoration: const InputDecoration(
+                        hintText: '写下你的想法…',
+                        contentPadding: EdgeInsets.all(20),
+                        fillColor: AppTheme.surfaceColor,
+                        filled: true,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

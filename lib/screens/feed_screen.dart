@@ -1,7 +1,8 @@
 import "dart:math" as math;
-import '../widgets/frosted_pill_button.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../constants/app_theme.dart';
 import '../constants/strings.dart';
 import '../models/moment.dart';
@@ -17,11 +18,11 @@ import '../utils/date_helper.dart';
 import '../widgets/calendar_picker.dart';
 import '../widgets/date_header.dart';
 import '../widgets/day_split_view.dart';
+import '../widgets/moment_card.dart';
 import '../widgets/wallpaper_layer.dart';
 import 'edit_moment_screen.dart';
 import 'notification_screen.dart';
 import 'profile_screen.dart';
-import 'topics_screen.dart';
 import 'diary_search_screen.dart';
 
 /// 是否已静默检查过更新（仅触发一次）
@@ -33,7 +34,9 @@ class AutoUpdateCheckedNotifier extends Notifier<bool> {
 }
 
 final _autoUpdateCheckedProvider =
-    NotifierProvider<AutoUpdateCheckedNotifier, bool>(AutoUpdateCheckedNotifier.new);
+    NotifierProvider<AutoUpdateCheckedNotifier, bool>(
+      AutoUpdateCheckedNotifier.new,
+    );
 
 class _CommentDialogResult {
   final String content;
@@ -42,7 +45,67 @@ class _CommentDialogResult {
   const _CommentDialogResult(this.content, {required this.saveDraft});
 }
 
-/// 主页面：顶栏 + 日视图分屏 + FAB
+class _DiaryCommentDialog extends StatefulWidget {
+  final String initialText;
+  final bool isReply;
+
+  const _DiaryCommentDialog({required this.initialText, required this.isReply});
+
+  @override
+  State<_DiaryCommentDialog> createState() => _DiaryCommentDialogState();
+}
+
+class _DiaryCommentDialogState extends State<_DiaryCommentDialog> {
+  late final _controller = TextEditingController(text: widget.initialText);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit({required bool saveDraft}) {
+    final text = _controller.text.trim();
+    if (text.isNotEmpty) {
+      Navigator.pop(context, _CommentDialogResult(text, saveDraft: saveDraft));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(widget.isReply ? '回复评论' : AppStrings.commentTitle),
+    content: SelectionContainer.disabled(
+      child: TextField(
+        controller: _controller,
+        maxLines: 3,
+        contextMenuBuilder: (context, editableTextState) =>
+            AdaptiveTextSelectionToolbar.buttonItems(
+              anchors: editableTextState.contextMenuAnchors,
+              buttonItems: editableTextState.contextMenuButtonItems,
+            ),
+        decoration: InputDecoration(
+          hintText: widget.isReply ? '写下回复...' : AppStrings.commentHint,
+        ),
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: Text(AppStrings.cancel),
+      ),
+      TextButton(
+        onPressed: () => _submit(saveDraft: true),
+        child: const Text('存草稿'),
+      ),
+      FilledButton(
+        onPressed: () => _submit(saveDraft: false),
+        child: Text(AppStrings.confirm),
+      ),
+    ],
+  );
+}
+
+/// Diary section: quiet app chrome, date picker and the two daily entries.
 class FeedScreen extends ConsumerWidget {
   const FeedScreen({super.key});
 
@@ -51,86 +114,84 @@ class FeedScreen extends ConsumerWidget {
     final selectedDate = ref.watch(selectedDateProvider);
     final currentUser = ref.watch(currentUserProvider);
     final partner = ref.watch(partnerUserProvider);
-
-    // 确保用户数据已加载
     final loadUsersAsync = ref.watch(loadUsersProvider);
-    // 预加载日历圆点数据
     ref.watch(markedDatesProvider);
-    // 触发壁纸初始化（本地优先，云端兜底）
     ref.watch(initWallpaperProvider);
     final wallpaper = ref.watch(wallpaperSettingsProvider);
-    // 监听未读通知数量
     final unreadNotificationCount = ref.watch(unreadNotificationCountProvider);
-
-    // 窗口尺寸与比例放缩因子（基准设计尺寸 375x700）
+    final isLoading = ref.watch(dayMomentsProvider).isLoading;
     final screenSize = MediaQuery.sizeOf(context);
-    final scaleW = screenSize.width / 375.0;
-    final scaleH = screenSize.height / 700.0;
-    final scale = math.min(scaleW, scaleH).clamp(0.65, 1.0);
-    final double iconSize = (20.0 * scale).clamp(14.0, 20.0);
-    final double buttonSize = (44.0 * scale).clamp(28.0, 48.0);
+    final scale = math
+        .min(screenSize.width / 375, screenSize.height / 700)
+        .clamp(.65, 1.0);
 
-    // 用户数据加载完成后，静默检查更新（仅一次）
     final hasChecked = ref.watch(_autoUpdateCheckedProvider);
     if (!hasChecked && loadUsersAsync is AsyncData) {
-      ref.read(_autoUpdateCheckedProvider.notifier).markChecked();
-      _silentCheckUpdate(context);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!context.mounted || ref.read(_autoUpdateCheckedProvider)) return;
+        ref.read(_autoUpdateCheckedProvider.notifier).markChecked();
+        _silentCheckUpdate(context);
+      });
     }
 
-    // 壁纸垫在整个 Scaffold 后面（顶栏底下也能透出），
-    // Scaffold 保持正常布局：不 extendBodyBehindAppBar、不做手动避让，杜绝重叠/空档
     return Stack(
       fit: StackFit.expand,
       children: [
-        WallpaperLayer(url: wallpaper.diaryUrl, opacity: wallpaper.diaryOpacity),
+        WallpaperLayer(
+          url: wallpaper.diaryUrl,
+          opacity: wallpaper.diaryOpacity,
+        ),
         Scaffold(
           backgroundColor: Colors.transparent,
           appBar: AppBar(
-            backgroundColor: Colors.transparent,
+            backgroundColor: AppTheme.surfaceColor.withAlpha(235),
+            surfaceTintColor: Colors.transparent,
             elevation: 0,
-            toolbarHeight: (kToolbarHeight * scale).clamp(42.0, 56.0),
-            titleSpacing: (NavigationToolbar.kMiddleSpacing * scale).clamp(8.0, 16.0),
-            title: Text(
-              AppStrings.appTitle,
-              style: TextStyle(
-                fontSize: (20.0 * scale).clamp(14.0, 20.0),
-                fontWeight: FontWeight.w600,
-              ),
+            toolbarHeight: (kToolbarHeight * scale).clamp(44.0, 56.0),
+            title: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Image.asset(
+                  'assets/icon.png',
+                  width: 28,
+                  height: 28,
+                  excludeFromSemantics: true,
+                ),
+                const SizedBox(width: 9),
+                const Flexible(
+                  child: Text(
+                    AppStrings.appTitle,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontFamily: 'serif',
+                      fontSize: 24,
+                      fontWeight: FontWeight.w500,
+                      letterSpacing: -.7,
+                    ),
+                  ),
+                ),
+              ],
             ),
             actions: [
-              // 搜索日记
               IconButton(
-                iconSize: iconSize,
-                padding: EdgeInsets.zero,
-                constraints: BoxConstraints.tightFor(width: buttonSize, height: buttonSize),
-                icon: const Icon(Icons.search),
                 tooltip: '搜索日记',
+                icon: const Icon(Icons.search_rounded, size: 22),
                 onPressed: () => Navigator.push(
                   context,
                   MaterialPageRoute(builder: (_) => const DiarySearchScreen()),
                 ),
               ),
-              // 话题
               IconButton(
-                iconSize: iconSize,
-                padding: EdgeInsets.zero,
-                constraints: BoxConstraints.tightFor(width: buttonSize, height: buttonSize),
-                icon: const Icon(Icons.forum_outlined),
-                tooltip: '话题',
-                onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const TopicsScreen())),
-              ),
-              // 信箱通知（带未读角标）
-              IconButton(
-                iconSize: iconSize,
-                padding: EdgeInsets.zero,
-                constraints: BoxConstraints.tightFor(width: buttonSize, height: buttonSize),
                 icon: Badge(
+                  backgroundColor: AppTheme.accentColor,
                   isLabelVisible: unreadNotificationCount > 0,
                   label: Text(
-                    unreadNotificationCount > 99 ? '99+' : '$unreadNotificationCount',
-                    style: TextStyle(fontSize: (10.0 * scale).clamp(7.0, 10.0)),
+                    unreadNotificationCount > 99
+                        ? '99+'
+                        : '$unreadNotificationCount',
+                    style: const TextStyle(fontSize: 11),
                   ),
-                  child: Icon(Icons.mail_outline, size: iconSize),
+                  child: const Icon(Icons.mail_outline_rounded, size: 22),
                 ),
                 tooltip: '信箱',
                 onPressed: () => Navigator.push(
@@ -138,99 +199,80 @@ class FeedScreen extends ConsumerWidget {
                   MaterialPageRoute(builder: (_) => const NotificationScreen()),
                 ),
               ),
-              // 刷新按钮
-              _buildRefreshButton(ref, scale, iconSize, buttonSize),
-              // 个人设置
               IconButton(
-                iconSize: iconSize,
-                padding: EdgeInsets.zero,
-                constraints: BoxConstraints.tightFor(width: buttonSize, height: buttonSize),
-                icon: const Icon(Icons.settings_outlined),
-                tooltip: '个人设置',
-                onPressed: () => _openProfile(context),
+                tooltip: isLoading ? '正在刷新' : '刷新',
+                onPressed: isLoading
+                    ? null
+                    : () {
+                        ref.invalidate(dayMomentsProvider);
+                        syncCalendarMarkedDatesFromNetwork(ref);
+                        ref.read(notificationListProvider.notifier).sync();
+                      },
+                icon: isLoading
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.refresh_rounded, size: 22),
               ),
-              SizedBox(width: (8.0 * scale).clamp(4.0, 8.0)),
+              const SizedBox(width: 8),
             ],
           ),
-          body: _buildBody(
-              ref, loadUsersAsync, currentUser, partner, selectedDate, context, scale),
-          // FAB 仅在没有自己的动态时显示（用于新建）
-          floatingActionButton: _buildFabIfNeeded(ref, currentUser, context),
+          body: SafeArea(
+            top: false,
+            child: _buildBody(
+              ref,
+              loadUsersAsync,
+              currentUser,
+              partner,
+              selectedDate,
+              context,
+              scale,
+            ),
+          ),
         ),
       ],
     );
   }
 
-  /// 刷新按钮（加载中显示转圈）
-  Widget _buildRefreshButton(WidgetRef ref, double scale, double iconSize, double buttonSize) {
-    final isLoading = ref.watch(dayMomentsProvider).isLoading;
-    return IconButton(
-      iconSize: iconSize,
-      padding: EdgeInsets.zero,
-      constraints: BoxConstraints.tightFor(width: buttonSize, height: buttonSize),
-      icon: isLoading
-          ? SizedBox(
-              width: iconSize,
-              height: iconSize,
-              child: CircularProgressIndicator(strokeWidth: (2.0 * scale).clamp(1.5, 2.0)),
-            )
-          : const Icon(Icons.refresh),
-      tooltip: '刷新',
-      onPressed: isLoading
-          ? null
-          : () {
-              ref.invalidate(dayMomentsProvider);
-              syncCalendarMarkedDatesFromNetwork(ref);
-              ref.read(notificationListProvider.notifier).sync();
-            },
-    );
-  }
-
-  /// 仅在自己的动态为空时显示绿色新建按钮
-  Widget? _buildFabIfNeeded(WidgetRef ref, currentUser, BuildContext context) {
-    if (currentUser == null) return null;
-
-    final dayMomentsAsync = ref.watch(dayMomentsProvider);
-    return dayMomentsAsync.when(
-      skipLoadingOnRefresh: true,
-      data: (data) {
-        final myMoment = data['myMoment'];
-        // 已有动态就不显示 FAB（编辑在卡片内操作）
-        if (myMoment != null) return null;
-        return FrostedPillButton(
-          label: AppStrings.createTitle,
-          onTap: () => _openCreateEditor(ref, context),
-        );
-      },
-      loading: () => null,
-      error: (_, _) => null,
-    );
-  }
-
-  Widget _buildBody(WidgetRef ref, AsyncValue<void> loadUsersAsync,
-      currentUser, partner, DateTime selectedDate, BuildContext context, double scale) {
+  Widget _buildBody(
+    WidgetRef ref,
+    AsyncValue<void> loadUsersAsync,
+    currentUser,
+    partner,
+    DateTime selectedDate,
+    BuildContext context,
+    double scale,
+  ) {
     // 只有彻底加载失败且无用户数据才显示错误
     if (currentUser == null && loadUsersAsync.hasError) {
       debugPrint('加载用户数据失败: ${loadUsersAsync.error}');
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.cloud_off, size: 48, color: Colors.grey),
-              const SizedBox(height: 12),
-              const Text(
-                '加载用户信息失败\n请检查网络或后端服务后重试',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey, fontSize: 15, height: 1.5),
-              ),
-              const SizedBox(height: 16),
-              OutlinedButton(
-                onPressed: () => ref.invalidate(loadUsersProvider),
-                child: const Text('重试'),
-              ),
-            ],
+      return _paperArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.cloud_off, size: 48, color: Colors.grey),
+                const SizedBox(height: 12),
+                const Text(
+                  '加载用户信息失败\n请检查网络或后端服务后重试',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.grey,
+                    fontSize: 15,
+                    height: 1.5,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                OutlinedButton(
+                  onPressed: () => ref.invalidate(loadUsersProvider),
+                  child: const Text('重试'),
+                ),
+              ],
+            ),
           ),
         ),
       );
@@ -241,18 +283,38 @@ class FeedScreen extends ConsumerWidget {
       children: [
         DateHeader(
           dateText: DateHelper.toChineseDate(selectedDate),
+          date: selectedDate,
           onCalendarTap: () => _openCalendar(context, ref),
+          onPreviousDay: _canChangeDay(selectedDate, -1)
+              ? () => _changeDay(ref, selectedDate, -1)
+              : null,
+          onNextDay: _canChangeDay(selectedDate, 1)
+              ? () => _changeDay(ref, selectedDate, 1)
+              : null,
           scale: scale,
         ),
-        const Divider(height: 1, thickness: 1, color: AppTheme.dividerColor),
         if (currentUser != null && partner != null)
-          _buildDayView(ref, currentUser, partner, context, scale),
+          _buildDayView(ref, currentUser, partner, context, scale)
+        else
+          Expanded(child: _paperArea()),
       ],
     );
   }
 
+  /// 非日记内容状态也铺满同一张纸面，不额外覆盖已有的双联纸页。
+  Widget _paperArea({Widget? child}) => ColoredBox(
+    color: AppTheme.surfaceColor.withAlpha(235),
+    child: SizedBox.expand(child: child),
+  );
+
   /// 构建日视图
-  Widget _buildDayView(WidgetRef ref, currentUser, partner, BuildContext context, double scale) {
+  Widget _buildDayView(
+    WidgetRef ref,
+    currentUser,
+    partner,
+    BuildContext context,
+    double scale,
+  ) {
     final dayMomentsAsync = ref.watch(dayMomentsProvider);
 
     return dayMomentsAsync.when(
@@ -261,6 +323,8 @@ class FeedScreen extends ConsumerWidget {
         final myMoment = data['myMoment'];
         final partnerMoment = data['partnerMoment'];
         return DaySplitView(
+          onCreateMyMoment: () => _openCreateEditor(ref, context),
+          onOpenReading: (moment) => _openReading(context, moment),
           myMoment: myMoment,
           partnerMoment: partnerMoment,
           myNickname: currentUser.nickname,
@@ -271,11 +335,11 @@ class FeedScreen extends ConsumerWidget {
           // 编辑自己的动态
           onEditMyMoment: myMoment != null
               ? () => _openEditor(
-                    context,
-                    ref,
-                    ref.read(selectedDateProvider),
-                    myMoment,
-                  )
+                  context,
+                  ref,
+                  ref.read(selectedDateProvider),
+                  myMoment,
+                )
               : null,
           // 评论对方的动态
           onCommentPartner: partnerMoment != null
@@ -293,32 +357,126 @@ class FeedScreen extends ConsumerWidget {
               ? (parent) => _openCommentDialog(context, ref, myMoment, parent)
               : null,
           onReplyPartnerComment: partnerMoment != null
-              ? (parent) => _openCommentDialog(context, ref, partnerMoment, parent)
+              ? (parent) =>
+                    _openCommentDialog(context, ref, partnerMoment, parent)
               : null,
         );
       },
-      loading: () => const Expanded(child: SizedBox()),
+      loading: () => Expanded(child: _paperArea()),
       error: (e, _) {
         debugPrint('加载日记失败: $e');
         return Expanded(
-          child: Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.cloud_off, size: 48, color: Colors.grey),
-                const SizedBox(height: 12),
-                const Text('加载失败，请检查网络后重试', style: TextStyle(color: Colors.grey, fontSize: 15)),
-                const SizedBox(height: 16),
-                OutlinedButton(
-                  onPressed: () => ref.invalidate(dayMomentsProvider),
-                  child: const Text('重试'),
-                ),
-              ],
+          child: _paperArea(
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.cloud_off, size: 48, color: Colors.grey),
+                  const SizedBox(height: 12),
+                  const Text(
+                    '加载失败，请检查网络后重试',
+                    style: TextStyle(color: Colors.grey, fontSize: 15),
+                  ),
+                  const SizedBox(height: 16),
+                  OutlinedButton(
+                    onPressed: () => ref.invalidate(dayMomentsProvider),
+                    child: const Text('重试'),
+                  ),
+                ],
+              ),
             ),
           ),
         );
       },
     );
+  }
+
+  void _openReading(BuildContext context, Moment initialMoment) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (readingContext) => Consumer(
+          builder: (context, readingRef, _) {
+            final day = readingRef.watch(dayMomentsProvider).value;
+            var moment = initialMoment;
+            if (day != null) {
+              for (final entry in day.values) {
+                if (entry?.id == initialMoment.id) moment = entry!;
+              }
+            }
+            final currentUser = readingRef.watch(currentUserProvider);
+            final partner = readingRef.watch(partnerUserProvider);
+            final isSelf = moment.authorId == currentUser?.uid;
+            final author = isSelf ? currentUser : partner;
+            final other = isSelf ? partner : currentUser;
+            final nickname = author?.nickname.trim();
+            final displayName = nickname == null || nickname.isEmpty
+                ? (isSelf ? '我' : 'TA')
+                : nickname;
+            final currentMoment = moment;
+            return Scaffold(
+              appBar: AppBar(title: Text('$displayName 的日记')),
+              body: SafeArea(
+                top: false,
+                child: SingleChildScrollView(
+                  key: PageStorageKey('reading-${currentMoment.id}'),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 680),
+                      child: MomentCard(
+                        key: ValueKey(currentMoment.id),
+                        moment: currentMoment,
+                        nickname: displayName,
+                        avatarUrl: author?.avatarUrl,
+                        partnerNickname: other?.nickname ?? '',
+                        isSelf: isSelf,
+                        expandedReading: true,
+                        onEdit: () => _openEditor(
+                          readingContext,
+                          readingRef,
+                          DateHelper.parseDateStr(currentMoment.dateStr),
+                          currentMoment,
+                        ),
+                        onComment: () => _openCommentDialog(
+                          readingContext,
+                          readingRef,
+                          currentMoment,
+                          null,
+                        ),
+                        onDeleteComment: (comment) => _deleteComment(
+                          readingContext,
+                          readingRef,
+                          currentMoment,
+                          comment,
+                        ),
+                        onReplyComment: (parent) => _openCommentDialog(
+                          readingContext,
+                          readingRef,
+                          currentMoment,
+                          parent,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  bool _canChangeDay(DateTime selected, int delta) {
+    final next = DateTime(selected.year, selected.month, selected.day + delta);
+    return !next.isBefore(CalendarPicker.firstDate) &&
+        !next.isAfter(CalendarPicker.lastDate);
+  }
+
+  void _changeDay(WidgetRef ref, DateTime selected, int delta) {
+    if (!_canChangeDay(selected, delta)) return;
+    ref
+        .read(selectedDateProvider.notifier)
+        .setDate(DateTime(selected.year, selected.month, selected.day + delta));
   }
 
   /// 打开日历选择器
@@ -338,9 +496,7 @@ class FeedScreen extends ConsumerWidget {
     final date = ref.read(selectedDateProvider);
     final result = await Navigator.push<bool>(
       context,
-      MaterialPageRoute(
-        builder: (_) => EditMomentScreen(date: date),
-      ),
+      MaterialPageRoute(builder: (_) => EditMomentScreen(date: date)),
     );
     if (result == true) {
       _refresh(ref);
@@ -357,10 +513,8 @@ class FeedScreen extends ConsumerWidget {
     final result = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
-        builder: (_) => EditMomentScreen(
-          date: date,
-          existingMoment: existingMoment,
-        ),
+        builder: (_) =>
+            EditMomentScreen(date: date, existingMoment: existingMoment),
       ),
     );
     if (result == true) {
@@ -393,54 +547,13 @@ class FeedScreen extends ConsumerWidget {
     final savedDraft = await DraftService.loadComment(draftKey);
     if (!context.mounted) return;
 
-    final controller = TextEditingController(text: savedDraft ?? '');
-    final title = replyTo != null ? '回复评论' : AppStrings.commentTitle;
     final result = await showDialog<_CommentDialogResult>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(title),
-        content: SelectionContainer.disabled(
-          child: TextField(
-            controller: controller,
-            maxLines: 3,
-            contextMenuBuilder: (context, editableTextState) =>
-                AdaptiveTextSelectionToolbar.buttonItems(
-              anchors: editableTextState.contextMenuAnchors,
-              buttonItems: editableTextState.contextMenuButtonItems,
-            ),
-            decoration: InputDecoration(
-              hintText: replyTo != null ? '写下回复...' : AppStrings.commentHint,
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(AppStrings.cancel, style: TextStyle(color: Colors.grey[600])),
-          ),
-          TextButton(
-            onPressed: () {
-              final text = controller.text.trim();
-              if (text.isNotEmpty) {
-                Navigator.pop(ctx, _CommentDialogResult(text, saveDraft: true));
-              }
-            },
-            child: const Text('存草稿'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final text = controller.text.trim();
-              if (text.isNotEmpty) {
-                Navigator.pop(ctx, _CommentDialogResult(text, saveDraft: false));
-              }
-            },
-            style: FilledButton.styleFrom(backgroundColor: AppTheme.primaryColor),
-            child: Text(AppStrings.confirm),
-          ),
-        ],
+      builder: (ctx) => _DiaryCommentDialog(
+        initialText: savedDraft ?? '',
+        isReply: replyTo != null,
       ),
     );
-    controller.dispose();
 
     if (result == null || result.content.isEmpty) return;
 
@@ -448,15 +561,17 @@ class FeedScreen extends ConsumerWidget {
       try {
         await DraftService.saveComment(draftKey, result.content);
         if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('评论草稿已保存')),
-          );
+          ScaffoldMessenger.of(context)
+              .showSnackBar(const SnackBar(content: Text('评论草稿已保存')));
         }
       } catch (e) {
         debugPrint('评论草稿保存失败: $e');
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('评论草稿保存失败，请重试'), backgroundColor: Colors.red),
+            const SnackBar(
+              content: Text('评论草稿保存失败，请重试'),
+              backgroundColor: Colors.red,
+            ),
           );
         }
       }
@@ -522,7 +637,11 @@ class FeedScreen extends ConsumerWidget {
   }
 
   /// 更新本地缓存中某条日记的评论
-  Future<void> _updateCachedMomentComments(WidgetRef ref, String momentId, List<Comment> comments) async {
+  Future<void> _updateCachedMomentComments(
+    WidgetRef ref,
+    String momentId,
+    List<Comment> comments,
+  ) async {
     final dateStr = DateHelper.toDateStr(ref.read(selectedDateProvider));
     final cached = await CacheService.loadDayMoments(dateStr);
     if (cached == null) return;
@@ -550,7 +669,10 @@ class FeedScreen extends ConsumerWidget {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text(AppStrings.cancel, style: TextStyle(color: Colors.grey[600])),
+            child: Text(
+              AppStrings.cancel,
+              style: TextStyle(color: Colors.grey[600]),
+            ),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
@@ -570,7 +692,9 @@ class FeedScreen extends ConsumerWidget {
       if (c.replyTo == comment.id) toRemove.add(c.id);
     }
 
-    final newComments = moment.comments.where((c) => !toRemove.contains(c.id)).toList();
+    final newComments = moment.comments
+        .where((c) => !toRemove.contains(c.id))
+        .toList();
 
     final apiService = ref.read(apiServiceProvider);
     try {
@@ -584,7 +708,10 @@ class FeedScreen extends ConsumerWidget {
       debugPrint('删除评论失败: $e');
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('删除失败，请稍后重试'), backgroundColor: Colors.red),
+          const SnackBar(
+            content: Text('删除失败，请稍后重试'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     }
@@ -596,14 +723,6 @@ class FeedScreen extends ConsumerWidget {
     updateMarkedDateCache(ref);
     syncCalendarMarkedDatesFromNetwork(ref);
     ref.read(notificationListProvider.notifier).sync();
-  }
-
-  /// 打开个人设置
-  void _openProfile(BuildContext context) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const ProfileScreen()),
-    );
   }
 
   /// 静默检查更新（后端不通不报错）。
@@ -631,11 +750,16 @@ class FeedScreen extends ConsumerWidget {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx, false),
-              child: Text(AppStrings.cancel, style: TextStyle(color: Colors.grey[600])),
+              child: Text(
+                AppStrings.cancel,
+                style: TextStyle(color: Colors.grey[600]),
+              ),
             ),
             FilledButton(
               onPressed: () => Navigator.pop(ctx, true),
-              style: FilledButton.styleFrom(backgroundColor: AppTheme.primaryColor),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppTheme.primaryColor,
+              ),
               child: const Text('前往设置'),
             ),
           ],
@@ -654,5 +778,4 @@ class FeedScreen extends ConsumerWidget {
       // 后端不通，静默跳过
     }
   }
-
 }

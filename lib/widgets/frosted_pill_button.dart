@@ -1,7 +1,8 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 
-/// 磨砂玻璃胶囊悬浮按钮（用于“写日记”、“创建话题”等操作按钮，保持尺寸与位置绝对一致）
+import '../constants/app_theme.dart';
+
+/// 兼容旧入口的墨蓝主操作按钮，保持原有尺寸和调用方式。
 class FrostedPillButton extends StatelessWidget {
   final String label;
   final VoidCallback onTap;
@@ -18,53 +19,40 @@ class FrostedPillButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final double radius = height / 2;
-    final borderRadius = BorderRadius.circular(radius);
+    final borderRadius = BorderRadius.circular(14);
+    final icon = label.contains('日记') || label.contains('编辑')
+        ? Icons.edit_outlined
+        : Icons.add_rounded;
 
-    return Container(
+    return SizedBox(
       width: width,
       height: height,
-      decoration: BoxDecoration(
+      child: Material(
+        color: AppTheme.primaryColor,
         borderRadius: borderRadius,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withAlpha(25),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: borderRadius,
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-          child: Container(
-            width: width,
-            height: height,
-            decoration: BoxDecoration(
-              color: Colors.white.withAlpha(200),
-              borderRadius: borderRadius,
-              border: Border.all(
-                color: Colors.white.withAlpha(180),
-                width: 1.5,
-              ),
-            ),
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                borderRadius: borderRadius,
-                onTap: onTap,
-                child: Center(
+        child: InkWell(
+          borderRadius: borderRadius,
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, size: 17, color: AppTheme.surfaceColor),
+                const SizedBox(width: 6),
+                Flexible(
                   child: Text(
                     label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                      fontSize: 15,
+                      fontSize: 14,
                       fontWeight: FontWeight.w600,
-                      color: Colors.black87,
+                      color: AppTheme.surfaceColor,
                     ),
                   ),
                 ),
-              ),
+              ],
             ),
           ),
         ),

@@ -1,6 +1,8 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../constants/app_theme.dart';
 import '../models/moment.dart';
 import '../providers/auth_provider.dart';
@@ -12,8 +14,8 @@ import '../widgets/avatar_widget.dart';
 class _SearchHit {
   final Moment moment;
   final String sourceLabel; // "日记" 或 "评论"
-  final String content;     // 包含关键词的正文
-  final String authorId;    // 该内容的作者
+  final String content; // 包含关键词的正文
+  final String authorId; // 该内容的作者
 
   const _SearchHit({
     required this.moment,
@@ -23,7 +25,7 @@ class _SearchHit {
   });
 }
 
-/// 日记搜索页面（参考微信搜索聊天记录）
+/// 日记搜索页面。
 class DiarySearchScreen extends ConsumerStatefulWidget {
   const DiarySearchScreen({super.key});
 
@@ -136,22 +138,26 @@ class _DiarySearchScreenState extends ConsumerState<DiarySearchScreen> {
       for (final m in res.items) {
         // 1. 日记正文匹配
         if (m.feeling.toLowerCase().contains(qLower)) {
-          newHits.add(_SearchHit(
-            moment: m,
-            sourceLabel: '日记',
-            content: m.feeling,
-            authorId: m.authorId,
-          ));
+          newHits.add(
+            _SearchHit(
+              moment: m,
+              sourceLabel: '日记',
+              content: m.feeling,
+              authorId: m.authorId,
+            ),
+          );
         }
         // 2. 评论匹配
         for (final c in m.comments) {
           if (c.content.toLowerCase().contains(qLower)) {
-            newHits.add(_SearchHit(
-              moment: m,
-              sourceLabel: '评论',
-              content: c.content,
-              authorId: c.authorId,
-            ));
+            newHits.add(
+              _SearchHit(
+                moment: m,
+                sourceLabel: '评论',
+                content: c.content,
+                authorId: c.authorId,
+              ),
+            );
           }
         }
       }
@@ -206,18 +212,25 @@ class _DiarySearchScreenState extends ConsumerState<DiarySearchScreen> {
     // 前置文字：最多 _snippetRadius 字，不足实际是多少就多少，绝不填充补空
     final hasMoreBefore = matchIndex > _snippetRadius;
     final start = hasMoreBefore ? matchIndex - _snippetRadius : 0;
-    final prefixRaw = content.substring(start, matchIndex).replaceAll(RegExp(r'[\r\n]+'), ' ');
+    final prefixRaw = content
+        .substring(start, matchIndex)
+        .replaceAll(RegExp(r'[\r\n]+'), ' ');
     final prefix = (hasMoreBefore ? '...' : '') + prefixRaw;
 
     // 关键词原字形
-    final keywordText = content.substring(matchIndex, matchIndex + keyword.length);
+    final keywordText = content.substring(
+      matchIndex,
+      matchIndex + keyword.length,
+    );
 
     // 后置文字：最多 _snippetRadius 字，不足实际是多少就多少，绝不填充补空
     final endOfKeyword = matchIndex + keyword.length;
     final remaining = content.length - endOfKeyword;
     final hasMoreAfter = remaining > _snippetRadius;
     final end = hasMoreAfter ? endOfKeyword + _snippetRadius : content.length;
-    final suffixRaw = content.substring(endOfKeyword, end).replaceAll(RegExp(r'[\r\n]+'), ' ');
+    final suffixRaw = content
+        .substring(endOfKeyword, end)
+        .replaceAll(RegExp(r'[\r\n]+'), ' ');
     final suffix = suffixRaw + (hasMoreAfter ? '...' : '');
 
     return Text.rich(
@@ -225,25 +238,20 @@ class _DiarySearchScreenState extends ConsumerState<DiarySearchScreen> {
         children: [
           TextSpan(
             text: prefix,
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.grey[600],
-            ),
+            style: const TextStyle(fontSize: 14, color: AppTheme.textSecondary),
           ),
           TextSpan(
             text: keywordText,
             style: const TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.bold,
-              color: AppTheme.primaryColor,
+              color: AppTheme.textPrimary,
+              backgroundColor: AppTheme.accentSurface,
             ),
           ),
           TextSpan(
             text: suffix,
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.grey[600],
-            ),
+            style: const TextStyle(fontSize: 14, color: AppTheme.textSecondary),
           ),
         ],
       ),
@@ -281,8 +289,10 @@ class _DiarySearchScreenState extends ConsumerState<DiarySearchScreen> {
     return Scaffold(
       backgroundColor: AppTheme.backgroundColor,
       appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0.5,
+        backgroundColor: AppTheme.backgroundColor,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        toolbarHeight: 72,
         titleSpacing: 0,
         automaticallyImplyLeading: false,
         title: Padding(
@@ -291,10 +301,10 @@ class _DiarySearchScreenState extends ConsumerState<DiarySearchScreen> {
             children: [
               Expanded(
                 child: Container(
-                  height: 38,
+                  height: 48,
                   decoration: BoxDecoration(
-                    color: Colors.grey[100],
-                    borderRadius: BorderRadius.circular(8),
+                    color: AppTheme.surfaceColor,
+                    borderRadius: BorderRadius.circular(14),
                   ),
                   child: TextField(
                     controller: _searchController,
@@ -306,14 +316,28 @@ class _DiarySearchScreenState extends ConsumerState<DiarySearchScreen> {
                     style: const TextStyle(fontSize: 15),
                     decoration: InputDecoration(
                       hintText: '搜索日记内容、感受或评论',
-                      hintStyle: TextStyle(fontSize: 14, color: Colors.grey[400]),
+                      hintStyle: const TextStyle(
+                        fontSize: 14,
+                        color: AppTheme.textSecondary,
+                      ),
+                      filled: false,
                       border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
                       isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(vertical: 9),
-                      prefixIcon: Icon(Icons.search, size: 20, color: Colors.grey[500]),
+                      contentPadding: const EdgeInsets.symmetric(vertical: 14),
+                      prefixIcon: const Icon(
+                        Icons.search,
+                        size: 20,
+                        color: AppTheme.textSecondary,
+                      ),
                       suffixIcon: _searchController.text.isNotEmpty
                           ? IconButton(
-                              icon: Icon(Icons.cancel, size: 18, color: Colors.grey[400]),
+                              icon: const Icon(
+                                Icons.cancel,
+                                size: 18,
+                                color: AppTheme.textSecondary,
+                              ),
                               onPressed: () {
                                 _searchController.clear();
                                 _performSearch('', isLoadMore: false);
@@ -329,9 +353,12 @@ class _DiarySearchScreenState extends ConsumerState<DiarySearchScreen> {
                 onPressed: () => Navigator.pop(context),
                 style: TextButton.styleFrom(
                   padding: const EdgeInsets.symmetric(horizontal: 8),
-                  minimumSize: const Size(40, 38),
+                  minimumSize: const Size(44, 48),
                 ),
-                child: const Text('取消', style: TextStyle(fontSize: 15, color: AppTheme.primaryColor)),
+                child: const Text(
+                  '取消',
+                  style: TextStyle(fontSize: 15, color: AppTheme.primaryColor),
+                ),
               ),
             ],
           ),
@@ -343,9 +370,7 @@ class _DiarySearchScreenState extends ConsumerState<DiarySearchScreen> {
 
   Widget _buildBody() {
     if (_isSearching) {
-      return const Center(
-        child: CircularProgressIndicator(strokeWidth: 2.5),
-      );
+      return const Center(child: CircularProgressIndicator(strokeWidth: 2.5));
     }
 
     if (_errorMessage != null) {
@@ -353,9 +378,19 @@ class _DiarySearchScreenState extends ConsumerState<DiarySearchScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.error_outline, size: 48, color: Colors.grey[400]),
+            const Icon(
+              Icons.error_outline,
+              size: 48,
+              color: AppTheme.textSecondary,
+            ),
             const SizedBox(height: 12),
-            Text(_errorMessage!, style: TextStyle(color: Colors.grey[600], fontSize: 14)),
+            Text(
+              _errorMessage!,
+              style: const TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 14,
+              ),
+            ),
             const SizedBox(height: 16),
             FilledButton.tonal(
               onPressed: () => _performSearch(_keyword, isLoadMore: false),
@@ -371,9 +406,12 @@ class _DiarySearchScreenState extends ConsumerState<DiarySearchScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.search, size: 54, color: Colors.grey[300]),
+            const Icon(Icons.search, size: 54, color: AppTheme.textSecondary),
             const SizedBox(height: 12),
-            Text('搜索日记内容、感受或评论', style: TextStyle(color: Colors.grey[400], fontSize: 14)),
+            const Text(
+              '搜索日记内容、感受或评论',
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+            ),
           ],
         ),
       );
@@ -384,9 +422,19 @@ class _DiarySearchScreenState extends ConsumerState<DiarySearchScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.sentiment_dissatisfied_outlined, size: 48, color: Colors.grey[300]),
+            const Icon(
+              Icons.sentiment_dissatisfied_outlined,
+              size: 48,
+              color: AppTheme.textSecondary,
+            ),
             const SizedBox(height: 12),
-            Text('未找到与 “$_keyword” 相关的日记', style: TextStyle(color: Colors.grey[500], fontSize: 14)),
+            Text(
+              '未找到与 “$_keyword” 相关的日记',
+              style: const TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 14,
+              ),
+            ),
           ],
         ),
       );
@@ -394,9 +442,9 @@ class _DiarySearchScreenState extends ConsumerState<DiarySearchScreen> {
 
     return ListView.separated(
       controller: _scrollController,
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
       itemCount: _hits.length + (_hasMore ? 1 : 0),
-      separatorBuilder: (_, _) => const Divider(height: 1, indent: 68, color: Color(0xFFEEEEEE)),
+      separatorBuilder: (_, _) => const SizedBox(height: 12),
       itemBuilder: (context, index) {
         if (index >= _hits.length) {
           return const Padding(
@@ -416,11 +464,13 @@ class _DiarySearchScreenState extends ConsumerState<DiarySearchScreen> {
         final avatarUrl = _getAvatarUrl(hit.authorId);
 
         return Material(
-          color: Colors.white,
+          color: AppTheme.surfaceColor,
+          borderRadius: BorderRadius.circular(20),
+          clipBehavior: Clip.antiAlias,
           child: InkWell(
             onTap: () => _navigateToDate(hit.moment.dateStr),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              padding: const EdgeInsets.all(18),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -432,30 +482,43 @@ class _DiarySearchScreenState extends ConsumerState<DiarySearchScreen> {
                       children: [
                         Row(
                           children: [
-                            Text(
-                              authorName,
-                              style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFF576B95),
+                            Expanded(
+                              child: Text(
+                                authorName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppTheme.selfColor,
+                                ),
                               ),
                             ),
                             const SizedBox(width: 6),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 5,
+                                vertical: 1,
+                              ),
                               decoration: BoxDecoration(
-                                color: Colors.grey[100],
-                                borderRadius: BorderRadius.circular(4),
+                                color: AppTheme.softSurface,
+                                borderRadius: BorderRadius.circular(6),
                               ),
                               child: Text(
                                 hit.sourceLabel,
-                                style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: AppTheme.textSecondary,
+                                ),
                               ),
                             ),
-                            const Spacer(),
+                            const SizedBox(width: 10),
                             Text(
                               hit.moment.dateStr,
-                              style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: AppTheme.textSecondary,
+                              ),
                             ),
                           ],
                         ),

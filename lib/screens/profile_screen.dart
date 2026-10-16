@@ -1,9 +1,11 @@
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_cropper/image_cropper.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+
 import '../constants/settings_theme.dart';
 import '../models/app_user.dart';
 import '../providers/auth_provider.dart';
@@ -142,7 +144,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           backgroundColor: SettingsTheme.ink,
         ),
       );
-      Navigator.pop(context);
+      if (Navigator.of(context).canPop()) Navigator.pop(context);
     } catch (e) {
       debugPrint('保存个人资料失败: $e');
       if (!mounted) return;
@@ -374,12 +376,13 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final user = ref.watch(currentUserProvider);
+    final canPop = Navigator.of(context).canPop();
     return SettingsTheme.wrap(
       context,
       Scaffold(
-        appBar: AppBar(title: const Text('设置')),
+        appBar: canPop ? AppBar() : null,
         body: SafeArea(
-          top: false,
+          top: !canPop,
           child: Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 560),
@@ -409,9 +412,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   const SizedBox(height: 26),
                   _buildSectionHeader('系统'),
                   const SizedBox(height: 12),
-                  _buildUpdateCard(),
-                  const SizedBox(height: 12),
                   NetworkDiagnosticsCard(service: _networkService),
+                  const SizedBox(height: 12),
+                  _buildUpdateCard(),
                   const SizedBox(height: 12),
                   _buildCacheCard(),
                   const SizedBox(height: 24),
@@ -448,7 +451,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '你的 Diptych',
+                'Diptych 设置',
                 style: TextStyle(
                   fontSize: 22,
                   fontWeight: FontWeight.w600,
@@ -549,7 +552,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               Expanded(
                 child: _cardHeader(
                   Icons.wallpaper_rounded,
-                  '壁纸',
+                  '壁纸设置',
                   hasAny ? '调整日记与话题的背景' : '为共同的日子添一点色彩',
                 ),
               ),

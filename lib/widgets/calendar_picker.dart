@@ -1,32 +1,44 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:table_calendar/table_calendar.dart';
+
+import '../constants/app_theme.dart';
 import '../constants/strings.dart';
 import '../models/calendar_marked_dates.dart';
+import '../providers/auth_provider.dart';
 import '../providers/day_moment_provider.dart';
 import '../utils/date_helper.dart';
 
-/// 日历选择器弹窗（透明磨砂玻璃质感，正圆形双人状态配色与紧凑行间距）
+/// 日历以原有蓝粉圆形色块表示双方记录，双色渐变表示双方同记。
 class CalendarPicker extends ConsumerStatefulWidget {
   final DateTime selectedDate;
 
-  const CalendarPicker({
-    super.key,
-    required this.selectedDate,
-  });
+  const CalendarPicker({super.key, required this.selectedDate});
 
-  /// 显示日历选择弹窗，返回选中的日期，null 表示取消
+  static DateTime get firstDate => DateTime(2024, 1, 1);
+
+  /// 与日记页面保持一致，凌晨六点前仍属于前一天。
+  static DateTime get lastDate {
+    final today = DateHelper.effectiveNow;
+    return DateTime(today.year, today.month, today.day);
+  }
+
+  static DateTime clampDate(DateTime date) {
+    final normalized = DateTime(date.year, date.month, date.day);
+    if (normalized.isBefore(firstDate)) return firstDate;
+    if (normalized.isAfter(lastDate)) return lastDate;
+    return normalized;
+  }
+
+  /// 显示日历选择弹窗，返回选中的日期，null 表示取消。
   static Future<DateTime?> show(
     BuildContext context, {
     required DateTime selectedDate,
   }) {
     return showDialog<DateTime>(
       context: context,
-      barrierColor: Colors.black.withAlpha(60),
-      builder: (_) => CalendarPicker(
-        selectedDate: selectedDate,
-      ),
+      barrierColor: AppTheme.primaryColor.withValues(alpha: 0.24),
+      builder: (_) => CalendarPicker(selectedDate: selectedDate),
     );
   }
 
@@ -39,24 +51,20 @@ class _CalendarPickerState extends ConsumerState<CalendarPicker> {
   late DateTime _selectedDay;
   bool _isRefreshing = false;
 
-  // 状态配色方案（严格绑定用户 ID：晴空蓝 + 柔嫩浅粉）
-  static const Color _colorUserA = Color(0xFF38BDF8); // 晴空浅蓝 (Sky Blue)
-  static const Color _colorUserB = Color(0xFFFDA4AF); // 柔嫩浅粉 (Soft Light Pink)
+  // 用户 A/B 的颜色绑定沿用记录模型，不随当前登录账号改变。
+  static const _colorUserA = Color(0xFF38BDF8);
+  static const _colorUserB = Color(0xFFFDA4AF);
 
   @override
   void initState() {
     super.initState();
-    _focusedDay = widget.selectedDate;
-    _selectedDay = widget.selectedDate;
+    _selectedDay = CalendarPicker.clampDate(widget.selectedDate);
+    _focusedDay = _selectedDay;
   }
 
-  /// 联网刷新所有日期的日记情况
   Future<void> _handleRefresh() async {
     if (_isRefreshing) return;
-    setState(() {
-      _isRefreshing = true;
-    });
-
+    setState(() => _isRefreshing = true);
     try {
       await syncCalendarMarkedDatesFromNetwork(ref, throwOnError: true);
       if (mounted) {
@@ -64,7 +72,6 @@ class _CalendarPickerState extends ConsumerState<CalendarPicker> {
           const SnackBar(
             content: Text('已同步最新日记记录'),
             duration: Duration(seconds: 2),
-            behavior: SnackBarBehavior.floating,
           ),
         );
       }
@@ -75,140 +82,92 @@ class _CalendarPickerState extends ConsumerState<CalendarPicker> {
           const SnackBar(
             content: Text('同步失败，请检查网络后重试'),
             duration: Duration(seconds: 2),
-            behavior: SnackBarBehavior.floating,
           ),
         );
       }
     } finally {
-      if (mounted) {
-        setState(() {
-          _isRefreshing = false;
-        });
-      }
+      if (mounted) setState(() => _isRefreshing = false);
     }
   }
 
-  /// 构建正圆形统一单元格
   Widget _buildDayCell(
-    BuildContext context,
     DateTime day,
     CalendarMarkedDates markedDates, {
     required bool isSelected,
     required bool isToday,
     required bool isDisabled,
+    required String userAName,
+    required String userBName,
   }) {
     final status = markedDates.getStatus(day);
-    final hasRecord = status != CalendarDateStatus.none;
+    final hasA =
+        status == CalendarDateStatus.userA || status == CalendarDateStatus.both;
+    final hasB =
+        status == CalendarDateStatus.userB || status == CalendarDateStatus.both;
+    final hasRecord = hasA || hasB;
+    final textColor = isDisabled
+        ? AppTheme.textSecondary.withValues(alpha: 0.42)
+        : hasRecord
+        ? AppTheme.surfaceColor
+        : AppTheme.textPrimary;
+    final recordNames = [if (hasA) userAName, if (hasB) userBName];
 
-    BoxDecoration? innerDecoration;
-    Color textColor;
-
-    if (hasRecord) {
-      textColor = Colors.white;
-      switch (status) {
-        case CalendarDateStatus.both:
-          // 135° 双色渐变 + 紫色微光阴影 (正圆形)
-          innerDecoration = BoxDecoration(
-            shape: BoxShape.circle,
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [_colorUserA, _colorUserB],
+    return Semantics(
+      label:
+          '${DateHelper.toChineseDate(day)}，'
+          '${hasRecord ? '${recordNames.join('、')}的记录' : '未记录'}',
+      selected: isSelected,
+      enabled: !isDisabled,
+      child: ExcludeSemantics(
+        child: Center(
+          child: Container(
+            width: 38,
+            height: 38,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: isSelected
+                  ? Border.all(color: _colorUserA, width: 2)
+                  : isToday && !hasRecord
+                  ? Border.all(color: _colorUserA.withValues(alpha: 0.6))
+                  : null,
             ),
-            boxShadow: [
-              BoxShadow(
-                color: const Color(0xFFA78BFA).withAlpha(80),
-                blurRadius: 6,
-                spreadRadius: 0.5,
-                offset: const Offset(0, 1.5),
+            child: Container(
+              width: 30,
+              height: 30,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: hasA && hasB
+                    ? null
+                    : hasA
+                    ? _colorUserA
+                    : hasB
+                    ? _colorUserB
+                    : isSelected
+                    ? _colorUserA.withValues(alpha: 0.12)
+                    : null,
+                gradient: hasA && hasB
+                    ? const LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [_colorUserA, _colorUserB],
+                      )
+                    : null,
               ),
-            ],
-          );
-          break;
-        case CalendarDateStatus.userA:
-          // 纯蓝/靛青色色块，无边框 (正圆形)
-          innerDecoration = const BoxDecoration(
-            shape: BoxShape.circle,
-            color: _colorUserA,
-          );
-          break;
-        case CalendarDateStatus.userB:
-          // 纯玫红/粉红色块，无边框 (正圆形)
-          innerDecoration = const BoxDecoration(
-            shape: BoxShape.circle,
-            color: _colorUserB,
-          );
-          break;
-        case CalendarDateStatus.none:
-          break;
-      }
-    } else {
-      if (isDisabled) {
-        textColor = Colors.grey[400]!;
-      } else if (isToday) {
-        textColor = _colorUserA;
-      } else {
-        textColor = Colors.black87;
-      }
-    }
-
-    // 正圆形外圈高亮轮廓环 / 偏白色发亮边框（柔和微光，不突兀）
-    BoxDecoration? outerDecoration;
-    if (isSelected) {
-      outerDecoration = BoxDecoration(
-        shape: BoxShape.circle,
-        border: Border.all(
-          color: Colors.white,
-          width: 2,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.white.withAlpha(220),
-            blurRadius: 6,
-            spreadRadius: 1,
+              child: Text(
+                '${day.day}',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: hasRecord || isSelected || isToday
+                      ? FontWeight.w600
+                      : FontWeight.w400,
+                  color: textColor,
+                ),
+              ),
+            ),
           ),
-          BoxShadow(
-            color: const Color(0xFF64748B).withAlpha(60),
-            blurRadius: 4,
-            offset: const Offset(0, 1),
-          ),
-        ],
-      );
-    } else if (isToday && !hasRecord) {
-      outerDecoration = BoxDecoration(
-        shape: BoxShape.circle,
-        border: Border.all(
-          color: const Color(0xFF94A3B8).withAlpha(120),
-          width: 1.2,
         ),
-      );
-    }
-
-    final Widget textWidget = Center(
-      child: Text(
-        '${day.day}',
-        style: TextStyle(
-          color: textColor,
-          fontSize: 13.5,
-          fontWeight: (hasRecord || isSelected || isToday)
-              ? FontWeight.w600
-              : FontWeight.normal,
-        ),
-      ),
-    );
-
-    return Center(
-      child: Container(
-        width: 32,
-        height: 32,
-        decoration: outerDecoration,
-        padding: isSelected ? const EdgeInsets.all(2) : EdgeInsets.zero,
-        child: innerDecoration != null
-            ? Container(
-                decoration: innerDecoration,
-                child: textWidget,
-              )
-            : textWidget,
       ),
     );
   }
@@ -217,246 +176,184 @@ class _CalendarPickerState extends ConsumerState<CalendarPicker> {
   Widget build(BuildContext context) {
     final markedDatesAsync = ref.watch(markedDatesProvider);
     final markedDates = markedDatesAsync.value ?? CalendarMarkedDates.empty();
+    final effectiveToday = CalendarPicker.lastDate;
+    final currentUser = ref.watch(currentUserProvider);
+    final partner = ref.watch(partnerUserProvider);
+    String nameFor(String uid) {
+      final nickname = currentUser?.uid == uid
+          ? currentUser?.nickname
+          : partner?.uid == uid
+          ? partner?.nickname
+          : null;
+      final trimmed = nickname?.trim();
+      return trimmed == null || trimmed.isEmpty ? '用户$uid' : trimmed;
+    }
 
-    final dialogRadius = BorderRadius.circular(20);
+    final userAName = nameFor('A');
+    final userBName = nameFor('B');
+
     return Dialog(
-      backgroundColor: Colors.transparent,
+      backgroundColor: AppTheme.surfaceColor,
+      surfaceTintColor: Colors.transparent,
       elevation: 0,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: dialogRadius,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withAlpha(20),
-              blurRadius: 20,
-              offset: const Offset(0, 8),
-            ),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: dialogRadius,
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.white.withAlpha(210), // 半透明磨砂玻璃白底
-                borderRadius: dialogRadius,
-                border: Border.all(
-                  color: Colors.white.withAlpha(180), // 玻璃高光反光边框
-                  width: 1.5,
-                ),
-              ),
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // 顶栏：标题与右上角刷新按钮
-                Row(
-                  children: [
-                    const SizedBox(width: 36), // 占位保持中间标题完美居中
-                    Expanded(
-                      child: Center(
-                        child: Text(
-                          AppStrings.selectDate,
-                          style: const TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.black87,
-                          ),
-                        ),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(22),
+        side: const BorderSide(color: AppTheme.dividerColor),
+      ),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 400),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  const SizedBox(width: 40),
+                  Expanded(
+                    child: Text(
+                      AppStrings.selectDate,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.textPrimary,
                       ),
                     ),
-                    SizedBox(
-                      width: 36,
-                      height: 36,
-                      child: _isRefreshing
-                          ? const Center(
-                              child: SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              ),
-                            )
-                          : IconButton(
-                              icon: const Icon(Icons.refresh, size: 20),
-                              tooltip: '联网同步记录',
-                              onPressed: _handleRefresh,
-                              splashRadius: 18,
-                              padding: EdgeInsets.zero,
+                  ),
+                  SizedBox(
+                    width: 40,
+                    height: 40,
+                    child: _isRefreshing
+                        ? const Center(
+                            child: SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
                             ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-
-                // 日历主体（紧凑行间距）
-                TableCalendar(
-                  firstDay: DateTime(2024, 1, 1),
-                  lastDay: DateTime.now(),
-                  focusedDay: _focusedDay,
-                  rowHeight: 38, // 缩小每一行高度，去除多余留白，整体更紧凑
-                  daysOfWeekHeight: 24,
-                  selectedDayPredicate: (day) =>
-                      DateHelper.isSameDay(_selectedDay, day),
-                  onDaySelected: (selectedDay, focusedDay) {
-                    setState(() {
-                      _selectedDay = selectedDay;
-                      _focusedDay = focusedDay;
-                    });
-                  },
-                  onPageChanged: (focusedDay) {
-                    _focusedDay = focusedDay;
-                  },
-                  headerStyle: HeaderStyle(
-                    formatButtonVisible: false,
-                    titleCentered: true,
-                    headerPadding: const EdgeInsets.symmetric(vertical: 4),
-                    titleTextStyle: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.black87,
-                    ),
-                    titleTextFormatter: (date, locale) =>
-                        '${date.year}年${date.month}月',
-                  ),
-                  calendarBuilders: CalendarBuilders(
-                    // 星期表头：单字中文 一 二 三 四 五 六 日
-                    dowBuilder: (context, day) {
-                      const weekdays = ['一', '二', '三', '四', '五', '六', '日'];
-                      final text = weekdays[day.weekday - 1];
-                      final isWeekend = day.weekday == DateTime.saturday ||
-                          day.weekday == DateTime.sunday;
-                      return Center(
-                        child: Text(
-                          text,
-                          style: TextStyle(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w600,
-                            color: isWeekend ? Colors.grey[500] : Colors.grey[700],
+                          )
+                        : IconButton(
+                            icon: const Icon(Icons.refresh_rounded, size: 21),
+                            color: AppTheme.textSecondary,
+                            tooltip: '联网同步记录',
+                            onPressed: _handleRefresh,
                           ),
-                        ),
-                      );
-                    },
-                    defaultBuilder: (context, day, focusedDay) => _buildDayCell(
-                      context,
-                      day,
-                      markedDates,
-                      isSelected: false,
-                      isToday: false,
-                      isDisabled: false,
-                    ),
-                    selectedBuilder: (context, day, focusedDay) => _buildDayCell(
-                      context,
-                      day,
-                      markedDates,
-                      isSelected: true,
-                      isToday: DateHelper.isSameDay(day, DateTime.now()),
-                      isDisabled: false,
-                    ),
-                    todayBuilder: (context, day, focusedDay) => _buildDayCell(
-                      context,
-                      day,
-                      markedDates,
-                      isSelected: DateHelper.isSameDay(day, _selectedDay),
-                      isToday: true,
-                      isDisabled: false,
-                    ),
-                    outsideBuilder: (context, day, focusedDay) =>
-                        const SizedBox.shrink(),
-                    disabledBuilder: (context, day, focusedDay) => _buildDayCell(
-                      context,
-                      day,
-                      markedDates,
-                      isSelected: false,
-                      isToday: false,
-                      isDisabled: true,
-                    ),
                   ),
-                ),
-                const SizedBox(height: 8),
-
-                // 按钮行（磨砂玻璃材质）
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    _buildFrostedButton(
-                      text: AppStrings.cancel,
-                      onTap: () => Navigator.pop(context),
-                      textColor: Colors.grey[700]!,
-                      bgColor: Colors.white.withAlpha(140),
-                      borderColor: Colors.white.withAlpha(200),
-                    ),
-                    const SizedBox(width: 10),
-                    _buildFrostedButton(
-                      text: AppStrings.confirm,
-                      onTap: () => Navigator.pop(context, _selectedDay),
-                      textColor: Colors.white,
-                      bgColor: _colorUserA.withAlpha(220),
-                      borderColor: Colors.white.withAlpha(200),
-                      boxShadow: [
-                        BoxShadow(
-                          color: _colorUserA.withAlpha(90),
-                          blurRadius: 10,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    ),
-  );
-  }
-  Widget _buildFrostedButton({
-    required String text,
-    required VoidCallback onTap,
-    required Color textColor,
-    required Color bgColor,
-    required Color borderColor,
-    List<BoxShadow>? boxShadow,
-  }) {
-    final btnRadius = BorderRadius.circular(10);
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: btnRadius,
-        boxShadow: boxShadow,
-      ),
-      child: ClipRRect(
-        borderRadius: btnRadius,
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-          child: Container(
-            decoration: BoxDecoration(
-              color: bgColor,
-              borderRadius: btnRadius,
-              border: Border.all(
-                color: borderColor,
-                width: 1.2,
+                ],
               ),
-            ),
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                borderRadius: btnRadius,
-                onTap: onTap,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
-                  child: Text(
-                    text,
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: textColor,
-                    ),
+              const SizedBox(height: 8),
+              TableCalendar(
+                firstDay: CalendarPicker.firstDate,
+                lastDay: effectiveToday,
+                focusedDay: CalendarPicker.clampDate(_focusedDay),
+                currentDay: effectiveToday,
+                startingDayOfWeek: StartingDayOfWeek.monday,
+                rowHeight: 46,
+                daysOfWeekHeight: 28,
+                selectedDayPredicate: (day) =>
+                    DateHelper.isSameDay(_selectedDay, day),
+                onDaySelected: (selectedDay, focusedDay) {
+                  setState(() {
+                    _selectedDay = CalendarPicker.clampDate(selectedDay);
+                    _focusedDay = CalendarPicker.clampDate(focusedDay);
+                  });
+                },
+                onPageChanged: (focusedDay) {
+                  _focusedDay = CalendarPicker.clampDate(focusedDay);
+                },
+                headerStyle: HeaderStyle(
+                  formatButtonVisible: false,
+                  titleCentered: true,
+                  headerPadding: const EdgeInsets.symmetric(vertical: 4),
+                  leftChevronIcon: const Icon(
+                    Icons.chevron_left_rounded,
+                    color: AppTheme.textSecondary,
+                  ),
+                  rightChevronIcon: const Icon(
+                    Icons.chevron_right_rounded,
+                    color: AppTheme.textSecondary,
+                  ),
+                  titleTextStyle: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.textPrimary,
+                  ),
+                  titleTextFormatter: (date, locale) =>
+                      '${date.year}年${date.month}月',
+                ),
+                calendarBuilders: CalendarBuilders(
+                  dowBuilder: (context, day) {
+                    const weekdays = ['一', '二', '三', '四', '五', '六', '日'];
+                    return Center(
+                      child: Text(
+                        weekdays[day.weekday - 1],
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                    );
+                  },
+                  defaultBuilder: (context, day, focusedDay) => _buildDayCell(
+                    day,
+                    markedDates,
+                    isSelected: false,
+                    isToday: false,
+                    isDisabled: false,
+                    userAName: userAName,
+                    userBName: userBName,
+                  ),
+                  selectedBuilder: (context, day, focusedDay) => _buildDayCell(
+                    day,
+                    markedDates,
+                    isSelected: true,
+                    isToday: DateHelper.isSameDay(day, effectiveToday),
+                    isDisabled: false,
+                    userAName: userAName,
+                    userBName: userBName,
+                  ),
+                  todayBuilder: (context, day, focusedDay) => _buildDayCell(
+                    day,
+                    markedDates,
+                    isSelected: DateHelper.isSameDay(day, _selectedDay),
+                    isToday: true,
+                    isDisabled: false,
+                    userAName: userAName,
+                    userBName: userBName,
+                  ),
+                  outsideBuilder: (context, day, focusedDay) =>
+                      const SizedBox.shrink(),
+                  disabledBuilder: (context, day, focusedDay) => _buildDayCell(
+                    day,
+                    markedDates,
+                    isSelected: false,
+                    isToday: false,
+                    isDisabled: true,
+                    userAName: userAName,
+                    userBName: userBName,
                   ),
                 ),
               ),
-            ),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: Text(AppStrings.cancel),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(
+                      context,
+                      CalendarPicker.clampDate(_selectedDay),
+                    ),
+                    child: Text(AppStrings.confirm),
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
       ),

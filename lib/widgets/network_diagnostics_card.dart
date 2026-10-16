@@ -94,10 +94,10 @@ class _NetworkDiagnosticsCardState extends State<NetworkDiagnosticsCard>
 
   Color _resultColor(NetworkDiagnosticsResult result) {
     if (result.cancelled) return SettingsTheme.muted;
-    if (result.isUnstable) return const Color(0xFFB27A35);
+    if (result.isUnstable) return SettingsTheme.accent;
     return switch (result.quality) {
-      NetworkQuality.fast || NetworkQuality.normal => const Color(0xFF587D6A),
-      NetworkQuality.slow => const Color(0xFFB27A35),
+      NetworkQuality.fast || NetworkQuality.normal => SettingsTheme.ink,
+      NetworkQuality.slow => SettingsTheme.accent,
       NetworkQuality.verySlow => SettingsTheme.danger,
       null => SettingsTheme.danger,
     };
@@ -134,7 +134,7 @@ class _NetworkDiagnosticsCardState extends State<NetworkDiagnosticsCard>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '网络检测',
+                        '检测连通性',
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w600,
@@ -142,7 +142,7 @@ class _NetworkDiagnosticsCardState extends State<NetworkDiagnosticsCard>
                       ),
                       SizedBox(height: 3),
                       Text(
-                        '检查与日记服务器的连接',
+                        '检查服务器连接与响应耗时',
                         style: TextStyle(
                           fontSize: 12,
                           color: SettingsTheme.muted,
@@ -185,9 +185,13 @@ class _NetworkDiagnosticsCardState extends State<NetworkDiagnosticsCard>
                         onPressed: _service.cancel,
                         child: const Text('取消检测'),
                       )
-                    : FilledButton(
+                    : FilledButton.icon(
                         onPressed: _cooldown > 0 ? null : _start,
-                        child: Text(
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size(132, 46),
+                        ),
+                        icon: const Icon(Icons.network_check_rounded, size: 18),
+                        label: Text(
                           _cooldown > 0
                               ? '$_cooldown 秒后重测'
                               : result == null

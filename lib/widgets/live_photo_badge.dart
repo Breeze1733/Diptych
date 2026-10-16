@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../constants/app_theme.dart';
+
 /// 对角线斜杠绘制器：用于在未勾选实况的角标上画一条清晰的对角斜杠
 class DiagonalSlashPainter extends CustomPainter {
   final Color color;
@@ -66,7 +68,7 @@ class LivePhotoBadge extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
       decoration: BoxDecoration(
         color: isLiveSelected
-            ? const Color(0xFF07C160).withAlpha(230)
+            ? AppTheme.primaryColor.withAlpha(230)
             : Colors.black.withAlpha(160),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(

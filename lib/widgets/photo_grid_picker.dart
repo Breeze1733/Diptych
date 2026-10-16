@@ -1,7 +1,10 @@
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+
+import '../constants/app_theme.dart';
 import '../utils/diptych_asset_picker.dart';
 import '../utils/motion_photo_helper.dart';
 import 'live_photo_badge.dart';
@@ -52,7 +55,7 @@ class PhotoEntry {
   }
 }
 
-/// 微信风格图片九宫格选择器
+/// 图片九宫格选择器
 /// 已选图片 + 末尾一个灰色"+"框；点"+"可拍照或从相册多选，图片右上角可删除
 class PhotoGridPicker extends StatelessWidget {
   final List<PhotoEntry> entries;
@@ -65,6 +68,9 @@ class PhotoGridPicker extends StatelessWidget {
   final ValueChanged<int>? onTap;
   final ValueChanged<int>? onToggleLive;
 
+  /// When bounded, show this many rows and scroll additional photos internally.
+  final int? visibleRows;
+
   const PhotoGridPicker({
     super.key,
     required this.entries,
@@ -76,6 +82,7 @@ class PhotoGridPicker extends StatelessWidget {
     this.onRetry,
     this.onTap,
     this.onToggleLive,
+    this.visibleRows,
   });
 
   Future<void> _pickImages(BuildContext context) async {
@@ -109,7 +116,9 @@ class PhotoGridPicker extends StatelessWidget {
       if (picked != null) {
         final file = File(picked.path);
         final isMotion = await MotionPhotoHelper.isMotionPhoto(file);
-        onAdded([PhotoEntry.file(file, isMotion: isMotion, uploadLive: isMotion)]);
+        onAdded([
+          PhotoEntry.file(file, isMotion: isMotion, uploadLive: isMotion),
+        ]);
       }
     } else {
       try {
@@ -128,33 +137,100 @@ class PhotoGridPicker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
-        mainAxisSpacing: 6,
-        crossAxisSpacing: 6,
-      ),
-      itemCount: entries.length + 1,
-      itemBuilder: (context, index) {
-        if (index == entries.length) return _buildAddTile(context);
-        return _buildPhotoTile(index);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final rows = visibleRows;
+        final bounded = rows != null && constraints.hasBoundedHeight;
+        final spacing = bounded
+            ? (constraints.maxHeight / 12).clamp(0.0, 8.0)
+            : 8.0;
+        final minimumSlots = bounded ? rows * 3 : 0;
+        final itemCount = entries.length + 1 < minimumSlots
+            ? minimumSlots
+            : entries.length + 1;
+        return GridView.builder(
+          key: const ValueKey('diary-photo-grid'),
+          primary: false,
+          padding: EdgeInsets.zero,
+          shrinkWrap: !bounded,
+          physics: bounded
+              ? const ClampingScrollPhysics()
+              : const NeverScrollableScrollPhysics(),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 3,
+            mainAxisSpacing: spacing,
+            crossAxisSpacing: spacing,
+            mainAxisExtent: bounded
+                ? ((constraints.maxHeight - spacing * (rows - 1)) / rows).clamp(
+                    .1,
+                    double.infinity,
+                  )
+                : null,
+          ),
+          itemCount: itemCount,
+          itemBuilder: (context, index) {
+            final Widget tile;
+            if (index == entries.length) {
+              tile = _buildAddTile(context);
+            } else if (index > entries.length) {
+              tile = DecoratedBox(
+                decoration: BoxDecoration(
+                  color: AppTheme.softSurface,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              );
+            } else {
+              tile = _buildPhotoTile(index);
+            }
+            return KeyedSubtree(
+              key: ValueKey('photo-slot-$index'),
+              child: tile,
+            );
+          },
+        );
       },
     );
   }
 
   /// 灰色"+"框
   Widget _buildAddTile(BuildContext context) {
-    return GestureDetector(
-      onTap: () => _pickImages(context),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.grey[100],
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: Colors.grey[300]!),
+    return Tooltip(
+      message: '添加照片',
+      child: Material(
+        color: AppTheme.softSurface,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          onTap: () => _pickImages(context),
+          borderRadius: BorderRadius.circular(14),
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: AppTheme.dividerColor),
+            ),
+            child: LayoutBuilder(
+              builder: (context, constraints) => Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.add_photo_alternate_outlined,
+                    size: (constraints.maxHeight * .5).clamp(0.0, 28.0),
+                    color: AppTheme.primaryColor,
+                  ),
+                  if (constraints.maxHeight >= 62) ...[
+                    const SizedBox(height: 6),
+                    const Text(
+                      '添加照片',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
         ),
-        child: Icon(Icons.add, size: 36, color: Colors.grey[400]),
       ),
     );
   }
@@ -188,7 +264,7 @@ class PhotoGridPicker extends StatelessWidget {
             feedback: Material(
               color: Colors.transparent,
               elevation: 6,
-              borderRadius: BorderRadius.circular(6),
+              borderRadius: BorderRadius.circular(14),
               child: SizedBox(
                 width: constraints.maxWidth,
                 height: constraints.maxHeight,
@@ -214,7 +290,7 @@ class PhotoGridPicker extends StatelessWidget {
                     IgnorePointer(
                       child: DecoratedBox(
                         decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(6),
+                          borderRadius: BorderRadius.circular(14),
                           border: Border.all(
                             color: Theme.of(context).colorScheme.primary,
                             width: 3,
@@ -243,13 +319,15 @@ class PhotoGridPicker extends StatelessWidget {
         : CachedNetworkImage(
             imageUrl: entry.url!,
             fit: BoxFit.cover,
-            placeholder: (_, _) => Container(color: Colors.grey[100]),
-            errorWidget: (_, _, _) =>
-                Icon(Icons.broken_image, color: Colors.grey[300]),
+            placeholder: (_, _) => Container(color: AppTheme.softSurface),
+            errorWidget: (_, _, _) => const Icon(
+              Icons.broken_image_outlined,
+              color: AppTheme.textSecondary,
+            ),
           );
 
     return Container(
-      decoration: BoxDecoration(borderRadius: BorderRadius.circular(6)),
+      decoration: BoxDecoration(borderRadius: BorderRadius.circular(14)),
       clipBehavior: Clip.antiAlias,
       child: Stack(
         fit: StackFit.expand,
@@ -270,8 +348,9 @@ class PhotoGridPicker extends StatelessWidget {
                       value: progress,
                       strokeWidth: 3.0,
                       backgroundColor: Colors.white24,
-                      valueColor:
-                          const AlwaysStoppedAnimation<Color>(Colors.white),
+                      valueColor: const AlwaysStoppedAnimation<Color>(
+                        Colors.white,
+                      ),
                     ),
                   ),
                   if (progress != null)
@@ -313,20 +392,28 @@ class PhotoGridPicker extends StatelessWidget {
             Container(
               color: Colors.black54,
               alignment: Alignment.center,
-              child: const Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.refresh, color: Colors.white, size: 24),
-                  SizedBox(height: 3),
-                  Text(
-                    '轻点重试',
-                    style: TextStyle(
+              child: LayoutBuilder(
+                builder: (context, constraints) => Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.refresh,
                       color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w500,
+                      size: (constraints.maxHeight * .6).clamp(0.0, 24.0),
                     ),
-                  ),
-                ],
+                    if (constraints.maxHeight >= 48) ...[
+                      const SizedBox(height: 3),
+                      const Text(
+                        '轻点重试',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
               ),
             ),
           // 封面标记（第一张）
@@ -363,15 +450,16 @@ class PhotoGridPicker extends StatelessWidget {
             Positioned(
               top: 0,
               right: 0,
-              child: GestureDetector(
-                onTap: () => onRemoved(index),
-                child: Container(
-                  padding: const EdgeInsets.all(3),
+              child: IconButton(
+                onPressed: () => onRemoved(index),
+                tooltip: '删除照片',
+                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                padding: const EdgeInsets.all(8),
+                icon: Container(
+                  padding: const EdgeInsets.all(5),
                   decoration: const BoxDecoration(
                     color: Colors.black54,
-                    borderRadius: BorderRadius.only(
-                      bottomLeft: Radius.circular(6),
-                    ),
+                    shape: BoxShape.circle,
                   ),
                   child: const Icon(Icons.close, size: 14, color: Colors.white),
                 ),

@@ -1,14 +1,21 @@
 import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import '../constants/app_theme.dart';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:photo_view/photo_view_gallery.dart';
 import 'package:video_player/video_player.dart';
+
 import '../utils/file_helper.dart';
 import '../utils/motion_photo_helper.dart';
 import 'photo_grid_picker.dart';
 import 'live_photo_badge.dart';
+import 'image_preview_chrome.dart';
 
 /// 弹出半透明底色的图片列表（一行三张，可滑动），点击单张进入全屏查看
 void showImageGallery(BuildContext context, List<String> urls) {
@@ -40,6 +47,7 @@ void showFullScreenPreview(
         urls: urls,
         entries: entries,
         initialIndex: initialIndex,
+        onToggleLive: onToggleLive,
       ),
     ),
   );
@@ -217,6 +225,7 @@ class _FullScreenImageState extends State<FullScreenImage> {
   late int _currentIndex;
   late PageController _pageController;
   bool _isDownloading = false;
+  bool _controlsVisible = true;
 
   // 实况状态
   VideoPlayerController? _videoController;
@@ -422,7 +431,10 @@ class _FullScreenImageState extends State<FullScreenImage> {
             debugPrint('保存图片失败: $e');
             if (!mounted) return;
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('保存失败，请检查存储权限后重试'), backgroundColor: Colors.red),
+              const SnackBar(
+                content: Text('保存失败，请检查存储权限后重试'),
+                backgroundColor: Colors.red,
+              ),
             );
           } finally {
             if (mounted) setState(() => _isDownloading = false);
@@ -455,21 +467,22 @@ class _FullScreenImageState extends State<FullScreenImage> {
       await FileHelper.scanFile(targetFile.path);
 
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('已保存到 ${targetFile.path}')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('已保存到 ${targetFile.path}')));
     } catch (e) {
       debugPrint('下载图片失败: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('下载失败，请检查网络后重试'), backgroundColor: Colors.red),
+        const SnackBar(
+          content: Text('下载失败，请检查网络后重试'),
+          backgroundColor: Colors.red,
+        ),
       );
     } finally {
       if (mounted) setState(() => _isDownloading = false);
     }
   }
 
-  
   Widget _buildLiveButton() {
     // 选图预览且允许切换实况模式：微信同款，勾选实况播放一遍，取消实况不播放
     if (widget.entries != null &&
@@ -482,8 +495,9 @@ class _FullScreenImageState extends State<FullScreenImage> {
         behavior: HitTestBehavior.opaque,
         onTap: () async {
           final newLive = !isLiveSelected;
-          widget.entries![_currentIndex] =
-              currentEntry.copyWith(uploadLive: newLive);
+          widget.entries![_currentIndex] = currentEntry.copyWith(
+            uploadLive: newLive,
+          );
           widget.onToggleLive?.call(_currentIndex, newLive);
           setState(() {});
 
@@ -506,13 +520,10 @@ class _FullScreenImageState extends State<FullScreenImage> {
           }
         },
         child: Container(
-          padding: const EdgeInsets.symmetric(
-            horizontal: 10,
-            vertical: 5,
-          ),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
           decoration: BoxDecoration(
             color: isLiveSelected
-                ? const Color(0xFF07C160).withAlpha(230)
+                ? AppTheme.primaryColor.withAlpha(230)
                 : Colors.black54,
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
@@ -558,14 +569,9 @@ class _FullScreenImageState extends State<FullScreenImage> {
       behavior: HitTestBehavior.opaque,
       onTap: _toggleLivePlayback,
       child: Container(
-        padding: const EdgeInsets.symmetric(
-          horizontal: 10,
-          vertical: 5,
-        ),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
-          color: _isPlaying
-              ? Colors.white.withAlpha(220)
-              : Colors.black54,
+          color: _isPlaying ? Colors.white.withAlpha(220) : Colors.black54,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color: _isPlaying ? Colors.white : Colors.white30,
@@ -598,124 +604,142 @@ class _FullScreenImageState extends State<FullScreenImage> {
   }
 
   @override
-
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        iconTheme: const IconThemeData(color: Colors.white),
-        title: _totalCount > 1
-            ? Text(
-                '${_currentIndex + 1} / $_totalCount',
-                style: const TextStyle(color: Colors.white, fontSize: 16),
-              )
-            : null,
-        actions: [
-          if (_canDownload)
-            IconButton(
-              icon: _isDownloading
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : const Icon(Icons.download),
-              tooltip: '下载',
-              onPressed: _isDownloading ? null : _download,
-            ),
-        ],
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.light,
+        systemNavigationBarColor: Colors.transparent,
+        systemNavigationBarIconBrightness: Brightness.light,
       ),
-      body: Stack(
-        children: [
-          // 1. 底层：完整的 PhotoViewGallery（包含双指缩放、放大后拖动、边缘翻页手势，完全不破坏原有体验）
-          PhotoViewGallery.builder(
-            itemCount: _totalCount,
-            builder: (context, index) => PhotoViewGalleryPageOptions(
-              imageProvider: _getImageProvider(index),
-              initialScale: PhotoViewComputedScale.contained,
-              minScale: PhotoViewComputedScale.contained,
-              maxScale: PhotoViewComputedScale.covered * 4.0,
-              errorBuilder: (_, error, _) => Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(
-                      Icons.broken_image,
-                      size: 48,
-                      color: Colors.white54,
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      '图片加载失败',
-                      style: TextStyle(color: Colors.white54),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            pageController: _pageController,
-            onPageChanged: _onPageChanged,
-            backgroundDecoration: const BoxDecoration(color: Colors.black),
-            gaplessPlayback: true,
-          ),
-
-          // 2. 视频层：仅在播放状态下贴合覆盖，通过 IgnorePointer 确保手势依然能透传，播完自动退出
-          if (_isMotionPhoto &&
-              _isPlaying &&
-              _videoController != null &&
-              _videoController!.value.isInitialized)
-            Positioned.fill(
-              child: IgnorePointer(
-                child: Center(
-                  child: AspectRatio(
-                    aspectRatio: _videoController!.value.aspectRatio,
-                    child: VideoPlayer(_videoController!),
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: Stack(
+          key: const ValueKey('image-preview-canvas'),
+          fit: StackFit.expand,
+          children: [
+            // 1. 底层：完整的 PhotoViewGallery（包含双指缩放、放大后拖动、边缘翻页手势，完全不破坏原有体验）
+            PhotoViewGallery.builder(
+              itemCount: _totalCount,
+              builder: (context, index) => PhotoViewGalleryPageOptions(
+                imageProvider: _getImageProvider(index),
+                initialScale: PhotoViewComputedScale.contained,
+                minScale: PhotoViewComputedScale.contained,
+                maxScale: PhotoViewComputedScale.covered * 4.0,
+                onTapUp: (_, _, _) =>
+                    setState(() => _controlsVisible = !_controlsVisible),
+                gestureDetectorBehavior: HitTestBehavior.opaque,
+                errorBuilder: (_, error, _) => Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.broken_image,
+                        size: 48,
+                        color: Colors.white54,
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        '图片加载失败',
+                        style: TextStyle(color: Colors.white54),
+                      ),
+                    ],
                   ),
                 ),
               ),
+              pageController: _pageController,
+              onPageChanged: _onPageChanged,
+              backgroundDecoration: const BoxDecoration(color: Colors.black),
+              gaplessPlayback: true,
             ),
 
-          // 3. 微信同款左下角「实况」无感轻触播放胶囊按钮（播完自动恢复静态图）
-          if (_showLiveButton)
-            Positioned(
-              left: 16,
-              bottom: 24,
-              child: _buildLiveButton(),
-            ),
+            // 2. 视频层：仅在播放状态下贴合覆盖，通过 IgnorePointer 确保手势依然能透传，播完自动退出
+            if (_isMotionPhoto &&
+                _isPlaying &&
+                _videoController != null &&
+                _videoController!.value.isInitialized)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: Center(
+                    child: AspectRatio(
+                      aspectRatio: _videoController!.value.aspectRatio,
+                      child: VideoPlayer(_videoController!),
+                    ),
+                  ),
+                ),
+              ),
 
-          // 4. 底部页码指示器
-          if (_totalCount > 1)
             Positioned(
-              bottom: 24,
+              top: 0,
               left: 0,
               right: 0,
-              child: IgnorePointer(
-                child: Center(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.black45,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      '${_currentIndex + 1} / $_totalCount',
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 13,
+              child: ImagePreviewChrome(
+                visible: _controlsVisible,
+                child: ImagePreviewGlass(
+                  key: const ValueKey('image-preview-toolbar'),
+                  child: SafeArea(
+                    bottom: false,
+                    child: SizedBox(
+                      height: 56,
+                      child: Row(
+                        children: [
+                          BackButton(color: Colors.white),
+                          Expanded(
+                            child: Text(
+                              _totalCount > 1
+                                  ? '${_currentIndex + 1} / $_totalCount'
+                                  : '',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                              ),
+                            ),
+                          ),
+                          SizedBox(
+                            width: 48,
+                            child: _canDownload
+                                ? IconButton(
+                                    icon: _isDownloading
+                                        ? const SizedBox(
+                                            width: 20,
+                                            height: 20,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              color: Colors.white,
+                                            ),
+                                          )
+                                        : const Icon(
+                                            Icons.download_rounded,
+                                            color: Colors.white,
+                                          ),
+                                    tooltip: '下载',
+                                    onPressed: _isDownloading
+                                        ? null
+                                        : _download,
+                                  )
+                                : null,
+                          ),
+                          const SizedBox(width: 4),
+                        ],
                       ),
                     ),
                   ),
                 ),
               ),
             ),
-        ],
+            // 实况开关与顶栏一起隐藏，照片手势仍然由 PhotoView 处理。
+            if (_showLiveButton)
+              Positioned(
+                left: 16,
+                bottom: MediaQuery.paddingOf(context).bottom + 24,
+                child: ImagePreviewChrome(
+                  visible: _controlsVisible,
+                  child: _buildLiveButton(),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }

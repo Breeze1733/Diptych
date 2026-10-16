@@ -1,339 +1,526 @@
-import "../utils/motion_photo_helper.dart";
-import "package:flutter/material.dart";
+import '../utils/motion_photo_helper.dart';
 
-import "package:cached_network_image/cached_network_image.dart";
-import "../constants/app_theme.dart";
-import "../constants/strings.dart";
-import "../models/moment.dart";
-import "../utils/date_helper.dart";
-import "avatar_widget.dart";
-import "image_gallery.dart";
+import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 
-/// 朋友圈风格动态卡片
-/// 展示：头像 + 昵称 + 心情分 + 封面图（点击展开图片列表）+ 感受文字 + 时间 + 编辑/评论按钮 + 评论列表
-class MomentCard extends StatelessWidget {
+import '../constants/app_theme.dart';
+import '../constants/strings.dart';
+import '../models/moment.dart';
+import '../utils/date_helper.dart';
+import 'avatar_widget.dart';
+import 'image_gallery.dart';
+
+/// 双联纸页中的一天；长文可以进入完整阅读页。
+class MomentCard extends StatefulWidget {
   final Moment moment;
   final String nickname;
   final String? avatarUrl;
   final String partnerNickname;
-  final bool isSelf; // 是否是自己（决定显示"编辑"还是"评论"）
+  final bool isSelf;
   final VoidCallback? onEdit;
   final VoidCallback? onComment;
+  final VoidCallback? onOpenReading;
   final void Function(Comment comment)? onDeleteComment;
   final void Function(Comment? parentComment)? onReplyComment;
   final double scale;
+  final bool expandedReading;
 
   const MomentCard({
     super.key,
     required this.moment,
-    this.nickname = "",
+    this.nickname = '',
     this.avatarUrl,
-    this.partnerNickname = "",
+    this.partnerNickname = '',
     this.isSelf = true,
     this.onEdit,
     this.onComment,
+    this.onOpenReading,
     this.onDeleteComment,
     this.onReplyComment,
     this.scale = 1.0,
+    this.expandedReading = false,
   });
 
-  /// 根据 authorId 获取显示昵称
-  String _nickFor(String authorId) {
-    return authorId == moment.authorId ? nickname : partnerNickname;
+  @override
+  State<MomentCard> createState() => _MomentCardState();
+}
+
+class _MomentCardState extends State<MomentCard> {
+  late bool _commentsExpanded;
+
+  Moment get moment => widget.moment;
+  String get _displayName =>
+      widget.nickname.isEmpty ? (widget.isSelf ? '我' : 'TA') : widget.nickname;
+
+  @override
+  void initState() {
+    super.initState();
+    _commentsExpanded = widget.expandedReading;
   }
+
+  String _nickFor(String authorId) => authorId == moment.authorId
+      ? _displayName
+      : (widget.partnerNickname.isEmpty ? 'TA' : widget.partnerNickname);
 
   @override
   Widget build(BuildContext context) {
-    final double cardPadding = (12 * scale).clamp(6.0, 12.0);
-    final double avatarSize = (32 * scale).clamp(22.0, 32.0);
-    final double gapH = (8 * scale).clamp(4.0, 8.0);
-    final double gapV = (10 * scale).clamp(4.0, 10.0);
-
-    return Container(
-      padding: EdgeInsets.all(cardPadding),
-      decoration: const BoxDecoration(
-        // 半透明白卡片：让壁纸能透过卡片显示（85% 不透明白）
-        color: Color(0xD9FFFFFF),
-        border: Border(
-          bottom: BorderSide(color: AppTheme.dividerColor, width: 0.5),
-        ),
+    if (widget.expandedReading) return _buildReadingContent(context);
+    return LayoutBuilder(
+      builder: (context, constraints) => SizedBox(
+        height: constraints.hasBoundedHeight ? constraints.maxHeight : 460,
+        child: _buildOverview(context, constraints.maxHeight),
       ),
+    );
+  }
+
+  /// 概览只使用双联页实际分配的高度；正文、照片与操作不会推高页面。
+  Widget _buildOverview(BuildContext context, double availableHeight) {
+    final height = availableHeight.isFinite ? availableHeight : 460.0;
+    final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
+    final compact = height < 260 * textScale;
+    final padding = compact ? 8.0 : 12.0;
+    final showMetadata = height >= 200 * textScale;
+    final pageColor = widget.isSelf
+        ? AppTheme.selfColor
+        : AppTheme.partnerColor;
+    final metadata = moment.mood == null
+        ? (widget.isSelf ? '我的这一页' : 'TA 的这一页')
+        : '心情 ${moment.mood}分';
+    return Padding(
+      padding: EdgeInsets.all(padding),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 头像 + 昵称 + 心情分
           Row(
             children: [
-              AvatarWidget(avatarUrl: avatarUrl, size: avatarSize),
-              SizedBox(width: gapH),
+              AvatarWidget(
+                avatarUrl: widget.avatarUrl,
+                size: compact ? 26 : 30,
+              ),
+              const SizedBox(width: 6),
               Expanded(
-                child: SelectableText(
-                  nickname,
-                  style: AppTheme.momentNickname.copyWith(
-                    fontSize: (15 * scale).clamp(11.0, 15.0),
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _displayName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTheme.momentNickname.copyWith(fontSize: 14),
+                    ),
+                    if (showMetadata) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        metadata,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 11, color: pageColor),
+                      ),
+                    ],
+                  ],
                 ),
               ),
-              // 心情分数
-              if (moment.mood != null) _buildMoodBadge(),
+              if (!showMetadata && moment.mood != null) ...[
+                const SizedBox(width: 4),
+                Text(
+                  '${moment.mood}分',
+                  style: TextStyle(fontSize: 11, color: pageColor),
+                ),
+              ],
             ],
           ),
-          SizedBox(height: gapV),
+          SizedBox(height: compact ? 8 : 12),
+          Expanded(child: _buildOverviewSummary(context)),
+          SizedBox(height: compact ? 4 : 8),
+          _buildOverviewActions(context),
+        ],
+      ),
+    );
+  }
 
-          // 封面图（第一张），点击展开全部图片
-          _buildCoverBox(context),
-          SizedBox(height: gapV),
-
-          // 感受文字（可长按复制）
-          if (moment.feeling.isNotEmpty)
-            SelectableText(
-              moment.feeling,
-              style: AppTheme.momentContent.copyWith(
-                fontSize: (15 * scale).clamp(11.0, 15.0),
-              ),
+  Widget _buildOverviewSummary(BuildContext context) {
+    final hasPhotos = moment.imageUrls.isNotEmpty;
+    return SingleChildScrollView(
+      key: PageStorageKey('overview-content-${moment.id}'),
+      primary: false,
+      physics: const ClampingScrollPhysics(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (hasPhotos) ...[
+            _buildCoverBox(context),
+            const SizedBox(height: 10),
+          ],
+          Text(
+            moment.feeling.isEmpty
+                ? (hasPhotos ? '今天的片刻，留在照片里。' : '记录了今天的心情。')
+                : moment.feeling,
+            style: const TextStyle(
+              fontSize: 15,
+              height: 1.6,
+              color: AppTheme.textPrimary,
             ),
+          ),
+        ],
+      ),
+    );
+  }
 
-          SizedBox(height: (8 * scale).clamp(4.0, 8.0)),
+  Widget _buildOverviewActions(BuildContext context) {
+    return Container(
+      height: 44,
+      decoration: const BoxDecoration(
+        border: Border(top: BorderSide(color: AppTheme.dividerColor)),
+      ),
+      width: double.infinity,
+      child: TextButton(
+        onPressed: widget.onOpenReading ?? () => _openReading(context),
+        style: TextButton.styleFrom(
+          minimumSize: const Size(0, 44),
+          padding: const EdgeInsets.symmetric(horizontal: 2),
+        ),
+        child: const FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            '展开日记与留言',
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+          ),
+        ),
+      ),
+    );
+  }
 
-          // 最新编辑时间 + 操作按钮
+  Widget _buildReadingContent(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.all(widget.expandedReading ? 20 : 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
           Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              AvatarWidget(avatarUrl: widget.avatarUrl, size: 30),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _displayName,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTheme.momentNickname.copyWith(fontSize: 15),
+                ),
+              ),
+              if (moment.mood != null) ...[
+                const SizedBox(width: 12),
+                _buildMoodBadge(),
+              ],
+            ],
+          ),
+          if (moment.imageUrls.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            _buildCoverBox(context),
+          ],
+          if (moment.feeling.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            _buildFeeling(),
+          ],
+          const SizedBox(height: 16),
+          Row(
             children: [
               Expanded(
                 child: Text(
                   DateHelper.toEditTime(moment.updatedAt),
                   style: AppTheme.momentTime.copyWith(
-                    fontSize: (12 * scale).clamp(9.0, 12.0),
+                    fontSize: 11,
+                    height: 1.5,
                   ),
                 ),
               ),
-              // 编辑按钮（自己）或评论按钮（对方）
+              const SizedBox(width: 12),
               _buildActionButton(),
             ],
           ),
-
-          // 评论列表（朋友圈风格）
           if (moment.comments.isNotEmpty) ...[
-            SizedBox(height: (8 * scale).clamp(4.0, 8.0)),
-            _buildComments(context),
+            const Divider(height: 16, color: AppTheme.dividerColor),
+            TextButton(
+              onPressed: () =>
+                  setState(() => _commentsExpanded = !_commentsExpanded),
+              style: TextButton.styleFrom(
+                minimumSize: const Size(0, 44),
+                padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
+                alignment: Alignment.centerLeft,
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.chat_bubble_outline_rounded, size: 15),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      '${moment.comments.length} 条留言',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ),
+                  Icon(
+                    _commentsExpanded ? Icons.expand_less : Icons.expand_more,
+                    size: 18,
+                  ),
+                ],
+              ),
+            ),
+            if (_commentsExpanded) _buildComments(context),
           ],
         ],
       ),
     );
   }
 
-  /// 心情分数徽章
-  Widget _buildMoodBadge() {
-    final mood = moment.mood!;
-    final moodColor = AppTheme.moodColor(mood);
-
-    return Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: (8 * scale).clamp(4.0, 8.0),
-        vertical: (2 * scale).clamp(1.0, 2.0),
+  Widget _buildFeeling() => SelectableText(
+    moment.feeling,
+    style: const TextStyle(
+      fontSize: 15,
+      color: AppTheme.textPrimary,
+      height: 1.75,
+    ),
+  );
+  void _openReading(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (readingContext) {
+          return Scaffold(
+            appBar: AppBar(title: Text('$_displayName 的日记')),
+            body: SafeArea(
+              top: false,
+              child: SingleChildScrollView(
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 680),
+                    child: MomentCard(
+                      moment: moment,
+                      nickname: widget.nickname,
+                      avatarUrl: widget.avatarUrl,
+                      partnerNickname: widget.partnerNickname,
+                      isSelf: widget.isSelf,
+                      expandedReading: true,
+                      onEdit: widget.onEdit,
+                      onComment: widget.onComment,
+                      onDeleteComment: widget.onDeleteComment,
+                      onReplyComment: widget.onReplyComment,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
       ),
+    );
+  }
+
+  Widget _buildMoodBadge() {
+    final moodColor = AppTheme.moodColor(moment.mood!);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       decoration: BoxDecoration(
-        color: moodColor.withAlpha(20),
-        borderRadius: BorderRadius.circular((10 * scale).clamp(6.0, 10.0)),
-        border: Border.all(color: moodColor.withAlpha(80), width: 0.5),
+        color: moodColor.withAlpha(18),
+        borderRadius: BorderRadius.circular(8),
       ),
       child: Text(
-        "$mood 分",
+        '${moment.mood}分',
         style: TextStyle(
-          fontSize: (12 * scale).clamp(9.0, 12.0),
-          fontWeight: FontWeight.w600,
+          fontSize: 11,
           color: moodColor,
+          fontWeight: FontWeight.w600,
         ),
       ),
     );
   }
 
-  /// 编辑 / 评论按钮
-  Widget _buildActionButton() {
-    final double btnPadH = (8 * scale).clamp(4.0, 8.0);
-    final double btnPadV = (3 * scale).clamp(2.0, 3.0);
-    final double btnFontSize = (11 * scale).clamp(9.0, 11.0);
+  Widget _buildActionButton() => TextButton.icon(
+    onPressed: widget.isSelf ? widget.onEdit : widget.onComment,
+    style: TextButton.styleFrom(
+      minimumSize: const Size(0, 44),
+      padding: const EdgeInsets.symmetric(horizontal: 9),
+      backgroundColor: AppTheme.softSurface,
+      foregroundColor: AppTheme.primaryColor,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    ),
+    icon: Icon(
+      widget.isSelf ? Icons.edit_outlined : Icons.chat_bubble_outline_rounded,
+      size: 15,
+    ),
+    label: Text(
+      widget.isSelf ? AppStrings.editButton : '留言',
+      style: const TextStyle(fontSize: 12),
+    ),
+  );
 
-    if (isSelf) {
-      return GestureDetector(
-        onTap: onEdit,
-        child: Container(
-          padding: EdgeInsets.symmetric(horizontal: btnPadH, vertical: btnPadV),
-          decoration: BoxDecoration(
-            color: const Color(0xFF2196F3).withAlpha(15),
-            borderRadius: BorderRadius.circular(4),
-            border: Border.all(
-              color: const Color(0xFF2196F3).withAlpha(60),
-              width: 0.5,
-            ),
-          ),
-          child: Text(
-            AppStrings.editButton,
-            style: TextStyle(
-              fontSize: btnFontSize,
-              color: const Color(0xFF2196F3),
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ),
-      );
-    } else {
-      return GestureDetector(
-        onTap: onComment,
-        child: Container(
-          padding: EdgeInsets.symmetric(horizontal: btnPadH, vertical: btnPadV),
-          decoration: BoxDecoration(
-            color: AppTheme.primaryColor.withAlpha(15),
-            borderRadius: BorderRadius.circular(4),
-            border: Border.all(
-              color: AppTheme.primaryColor.withAlpha(60),
-              width: 0.5,
-            ),
-          ),
-          child: Text(
-            AppStrings.commentButton,
-            style: TextStyle(
-              fontSize: btnFontSize,
-              color: AppTheme.primaryColor,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ),
-      );
-    }
-  }
-
-  /// 评论区：每个一级评论 + 其回复为一个灰色块，块之间白底分隔
   Widget _buildComments(BuildContext context) {
     final replies = <String, List<Comment>>{};
-    for (final c in moment.comments) {
-      if (c.replyTo != null) {
-        replies.putIfAbsent(c.replyTo!, () => []).add(c);
+    for (final comment in moment.comments) {
+      if (comment.replyTo != null) {
+        replies.putIfAbsent(comment.replyTo!, () => []).add(comment);
       }
     }
-
-    final topLevel = moment.comments.where((c) => c.replyTo == null).toList();
-    if (topLevel.isEmpty) return const SizedBox.shrink();
-
+    final topLevel = moment.comments
+        .where((comment) => comment.replyTo == null)
+        .toList();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        for (int i = 0; i < topLevel.length; i++) ...[
-          if (i > 0) SizedBox(height: (4 * scale).clamp(2.0, 4.0)),
+        for (final comment in topLevel)
           Container(
             width: double.infinity,
-            padding: EdgeInsets.all((8 * scale).clamp(4.0, 8.0)),
+            margin: const EdgeInsets.only(bottom: 6),
+            padding: const EdgeInsets.all(9),
             decoration: BoxDecoration(
-              // 半透明评论气泡：让壁纸透出
-              color: const Color(0xE6FFFFFF),
-              borderRadius: BorderRadius.circular(6),
+              color: AppTheme.softSurface,
+              borderRadius: BorderRadius.circular(10),
             ),
-            child: _buildCommentTree(context, topLevel[i], replies),
+            child: _buildCommentTree(context, comment, replies),
           ),
-        ],
       ],
     );
   }
 
-  /// 递归渲染评论树：当前评论 + 所有子回复
   Widget _buildCommentTree(
     BuildContext context,
     Comment comment,
     Map<String, List<Comment>> replies,
   ) {
-    final children = replies[comment.id];
-    final double commentFontSize = (13 * scale).clamp(10.0, 13.0);
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // 短按弹操作菜单、长按框选复制，用 SelectableText 自带的 onTap，
-        // 与外层 GestureDetector 叠放会让 tap 被选择手势抢走（竞技场冲突）
         Padding(
-          padding: const EdgeInsets.symmetric(vertical: 2),
+          padding: const EdgeInsets.symmetric(vertical: 4),
           child: SelectableText.rich(
             TextSpan(
+              style: const TextStyle(
+                fontSize: 13,
+                height: 1.6,
+                color: AppTheme.textPrimary,
+              ),
               children: [
                 TextSpan(
-                  text: "${_nickFor(comment.authorId)}：",
-                  style: TextStyle(
-                    fontSize: commentFontSize,
+                  text: '${_nickFor(comment.authorId)}：',
+                  style: const TextStyle(
                     fontWeight: FontWeight.w600,
                     color: AppTheme.primaryColor,
-                    height: 1.4,
                   ),
                 ),
-                TextSpan(
-                  text: comment.content,
-                  style: TextStyle(
-                    fontSize: commentFontSize,
-                    color: AppTheme.textPrimary,
-                    height: 1.4,
-                  ),
-                ),
+                TextSpan(text: comment.content),
               ],
             ),
             onTap: () => _showCommentActions(context, comment),
           ),
         ),
-
-        // 子回复列表（递归）
-        if (children != null)
-          for (final child in children)
-            _buildCommentTree(context, child, replies),
+        for (final child in replies[comment.id] ?? <Comment>[])
+          _buildCommentTree(context, child, replies),
       ],
     );
   }
 
-  /// 弹出评论操作底栏（回复 / 删除）
   void _showCommentActions(BuildContext context, Comment comment) {
-    final isMyComment = comment.authorId == moment.authorId ? isSelf : !isSelf;
-
-    showModalBottomSheet(
+    final isMyComment = comment.authorId == moment.authorId
+        ? widget.isSelf
+        : !widget.isSelf;
+    showModalBottomSheet<void>(
       context: context,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => SafeArea(
-        child: Container(
-          margin: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // 提示当前操作的评论内容摘要
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                child: Text(
-                  "评论：${comment.content}",
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
+              child: Text(
+                '留言：${comment.content}',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: AppTheme.textSecondary,
                 ),
               ),
-              const Divider(height: 1),
-              // 回复
+            ),
+            if (widget.onReplyComment != null)
               ListTile(
-                leading: const Icon(Icons.reply, size: 20),
-                title: const Text("回复", style: TextStyle(fontSize: 15)),
+                leading: const Icon(Icons.reply_rounded),
+                title: const Text('回复'),
                 onTap: () {
-                  Navigator.pop(ctx);
-                  onReplyComment?.call(comment);
+                  Navigator.pop(sheetContext);
+                  widget.onReplyComment?.call(comment);
                 },
               ),
-              // 仅自己发布的评论可以删除
-              if (isMyComment) ...[
-                const Divider(height: 1),
-                ListTile(
-                  leading: const Icon(Icons.delete_outline, size: 20, color: Colors.red),
-                  title: const Text("删除", style: TextStyle(fontSize: 15, color: Colors.red)),
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    onDeleteComment?.call(comment);
-                  },
+            if (isMyComment && widget.onDeleteComment != null)
+              ListTile(
+                leading: const Icon(
+                  Icons.delete_outline_rounded,
+                  color: AppTheme.dangerColor,
                 ),
-              ],
+                title: const Text(
+                  '删除',
+                  style: TextStyle(color: AppTheme.dangerColor),
+                ),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  widget.onDeleteComment?.call(comment);
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCoverBox(BuildContext context) {
+    final urls = moment.imageUrls;
+    return GestureDetector(
+      onTap: () => showImageGallery(context, urls),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: AspectRatio(
+          aspectRatio: 4 / 3,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              CachedNetworkImage(
+                imageUrl: urls.first,
+                fit: BoxFit.cover,
+                placeholder: (_, _) => _imagePlaceholder(),
+                errorWidget: (_, _, _) => _imagePlaceholder(),
+              ),
+              _MomentCoverLiveBadge(url: urls.first),
+              if (urls.length > 1)
+                Positioned(
+                  right: 6,
+                  top: 6,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 7,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.black54,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.photo_library_outlined,
+                          size: 12,
+                          color: Colors.white,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          '${urls.length}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
@@ -341,94 +528,12 @@ class MomentCard extends StatelessWidget {
     );
   }
 
-  /// 封面图：第一张图片，右下角显示总张数，点击弹出图片列表
-  Widget _buildCoverBox(BuildContext context) {
-    final urls = moment.imageUrls;
-
-    final content = urls.isNotEmpty
-        ? GestureDetector(
-            onTap: () => showImageGallery(context, urls),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                CachedNetworkImage(
-                  imageUrl: urls.first,
-                  fit: BoxFit.cover,
-                  placeholder: (_, _) => _placeholder(""),
-                  errorWidget: (_, _, _) => _placeholder(""),
-                ),
-                // 实况角标
-                _MomentCoverLiveBadge(url: urls.first),
-                // 张数角标
-                if (urls.length > 1)
-                  Positioned(
-                    right: (6 * scale).clamp(4.0, 6.0),
-                    bottom: (6 * scale).clamp(4.0, 6.0),
-                    child: Container(
-                      padding: EdgeInsets.symmetric(
-                        horizontal: (6 * scale).clamp(4.0, 6.0),
-                        vertical: (2 * scale).clamp(1.0, 2.0),
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.black54,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.photo_library,
-                            size: (12 * scale).clamp(10.0, 12.0),
-                            color: Colors.white,
-                          ),
-                          const SizedBox(width: 3),
-                          Text(
-                            "${urls.length}",
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: (11 * scale).clamp(9.0, 11.0),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          )
-        : _placeholder("");
-
-    final double coverHeight = (140 * scale).clamp(70.0, 140.0);
-
-    return Container(
-      height: coverHeight,
-      decoration: BoxDecoration(
-        // 半透明白封面底：让壁纸透出
-        color: const Color(0xE6FFFFFF),
-        borderRadius: BorderRadius.circular((6 * scale).clamp(4.0, 6.0)),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: content,
-    );
-  }
-
-  Widget _placeholder(String label) {
-    return Container(
-      color: const Color(0xE6FFFFFF),
-      alignment: Alignment.center,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.image_outlined, size: (28 * scale).clamp(18.0, 28.0), color: Colors.grey[300]),
-          if (label.isNotEmpty)
-            Text(
-              label,
-              style: TextStyle(fontSize: (10 * scale).clamp(8.0, 10.0), color: Colors.grey[400]),
-            ),
-        ],
-      ),
-    );
-  }
+  Widget _imagePlaceholder() => const ColoredBox(
+    color: AppTheme.softSurface,
+    child: Center(
+      child: Icon(Icons.image_outlined, color: AppTheme.textSecondary),
+    ),
+  );
 }
 
 /// 动态卡片封面图上的实况角标

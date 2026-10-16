@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../constants/app_theme.dart';
 import '../models/app_notification.dart';
 import '../providers/notification_provider.dart';
@@ -54,11 +55,16 @@ class _NotificationScreenState extends ConsumerState<NotificationScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text('取消', style: TextStyle(color: Colors.grey[600])),
+            child: const Text(
+              '取消',
+              style: TextStyle(color: AppTheme.textSecondary),
+            ),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppTheme.dangerColor,
+            ),
             child: const Text('清空'),
           ),
         ],
@@ -116,12 +122,17 @@ class _NotificationScreenState extends ConsumerState<NotificationScreen> {
     return Stack(
       fit: StackFit.expand,
       children: [
-        WallpaperLayer(url: wallpaper.diaryUrl, opacity: wallpaper.diaryOpacity),
+        WallpaperLayer(
+          url: wallpaper.diaryUrl,
+          opacity: wallpaper.diaryOpacity,
+        ),
         Scaffold(
           backgroundColor: Colors.transparent,
           appBar: AppBar(
             backgroundColor: Colors.transparent,
             elevation: 0,
+            scrolledUnderElevation: 0,
+            surfaceTintColor: Colors.transparent,
             title: const Text('信箱'),
             actions: [
               // 全部已读按钮
@@ -136,7 +147,9 @@ class _NotificationScreenState extends ConsumerState<NotificationScreen> {
               IconButton(
                 icon: const Icon(Icons.delete_outline, size: 22),
                 tooltip: '清空信箱',
-                onPressed: list.isEmpty ? null : () => _handleClearAll(list.length),
+                onPressed: list.isEmpty
+                    ? null
+                    : () => _handleClearAll(list.length),
               ),
             ],
           ),
@@ -145,9 +158,10 @@ class _NotificationScreenState extends ConsumerState<NotificationScreen> {
             child: list.isEmpty
                 ? _buildEmptyState()
                 : ListView.separated(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
                     itemCount: list.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 10),
+                    separatorBuilder: (_, _) => const SizedBox(height: 12),
                     itemBuilder: (context, index) {
                       final item = list[index];
                       return _buildNotificationCard(item);
@@ -169,19 +183,24 @@ class _NotificationScreenState extends ConsumerState<NotificationScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
+              const Icon(
                 Icons.mark_email_read_outlined,
                 size: 64,
-                color: Colors.grey.withAlpha(120),
+                color: AppTheme.selfColor,
               ),
               const SizedBox(height: 16),
               const Text(
                 '信箱空空如也',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.textSecondary),
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.textSecondary,
+                ),
               ),
               const SizedBox(height: 8),
               const Text(
-                '对方发布日记、评论或发帖时会在这里显示',
+                '对方发布日记、评论或发帖时\n会在这里显示',
+                textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
               ),
             ],
@@ -194,55 +213,30 @@ class _NotificationScreenState extends ConsumerState<NotificationScreen> {
   /// 单条通知卡片
   Widget _buildNotificationCard(AppNotification notif) {
     // 视觉色彩配置
-    Color iconColor;
-    Color iconBgColor;
     IconData iconData;
 
     switch (notif.type) {
       case AppNotificationType.moment:
         iconData = Icons.calendar_today_outlined;
-        iconColor = AppTheme.primaryColor;
-        iconBgColor = AppTheme.primaryColor.withAlpha(25);
         break;
       case AppNotificationType.momentComment:
         iconData = Icons.chat_bubble_outline;
-        iconColor = Colors.orange;
-        iconBgColor = Colors.orange.withAlpha(25);
         break;
       case AppNotificationType.topicPost:
       case AppNotificationType.topicCreated:
         iconData = Icons.forum_outlined;
-        iconColor = Colors.blue;
-        iconBgColor = Colors.blue.withAlpha(25);
         break;
     }
 
     return Material(
-      color: Colors.transparent,
+      color: AppTheme.surfaceColor.withAlpha(235),
+      borderRadius: BorderRadius.circular(20),
+      clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: () => _handleItemTap(notif),
-        borderRadius: BorderRadius.circular(14),
-        child: Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: notif.isRead
-                ? const Color(0xE6FFFFFF) // 已读：半透明白
-                : Colors.white,           // 未读：纯白高亮
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: notif.isRead
-                  ? AppTheme.dividerColor.withAlpha(100)
-                  : AppTheme.primaryColor.withAlpha(80),
-              width: notif.isRead ? 0.5 : 1.2,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withAlpha(notif.isRead ? 8 : 18),
-                blurRadius: notif.isRead ? 6 : 10,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
+        borderRadius: BorderRadius.circular(20),
+        child: Padding(
+          padding: const EdgeInsets.all(18),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -251,10 +245,10 @@ class _NotificationScreenState extends ConsumerState<NotificationScreen> {
                 width: 38,
                 height: 38,
                 decoration: BoxDecoration(
-                  color: iconBgColor,
-                  borderRadius: BorderRadius.circular(10),
+                  color: AppTheme.softSurface,
+                  borderRadius: BorderRadius.circular(13),
                 ),
-                child: Icon(iconData, size: 20, color: iconColor),
+                child: Icon(iconData, size: 20, color: AppTheme.selfColor),
               ),
               const SizedBox(width: 12),
               // 正文内容
@@ -269,19 +263,21 @@ class _NotificationScreenState extends ConsumerState<NotificationScreen> {
                             notif.title,
                             style: TextStyle(
                               fontSize: 14,
-                              fontWeight: notif.isRead ? FontWeight.w500 : FontWeight.w700,
+                              fontWeight: notif.isRead
+                                  ? FontWeight.w500
+                                  : FontWeight.w700,
                               color: AppTheme.textPrimary,
                             ),
                           ),
                         ),
-                        // 未读小红点
+                        // 陶土色圆点是唯一的未读强调
                         if (!notif.isRead) ...[
                           const SizedBox(width: 6),
                           Container(
                             width: 8,
                             height: 8,
                             decoration: const BoxDecoration(
-                              color: Colors.redAccent,
+                              color: AppTheme.accentColor,
                               shape: BoxShape.circle,
                             ),
                           ),
@@ -297,7 +293,7 @@ class _NotificationScreenState extends ConsumerState<NotificationScreen> {
                         style: const TextStyle(
                           fontSize: 13,
                           color: AppTheme.textSecondary,
-                          height: 1.3,
+                          height: 1.5,
                         ),
                       ),
                     ],

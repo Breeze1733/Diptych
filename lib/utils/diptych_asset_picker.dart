@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
+
+import '../constants/app_theme.dart';
+
 import 'package:wechat_assets_picker/wechat_assets_picker.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:photo_view/photo_view_gallery.dart';
 import 'package:video_player/video_player.dart';
+
 import '../widgets/photo_grid_picker.dart';
 import '../widgets/live_photo_badge.dart';
+import '../widgets/image_preview_chrome.dart';
 import 'motion_photo_helper.dart';
 
 /// 安全的 AssetPickerProvider，防止当相册为空时出现空指针崩溃导致灰色死锁
@@ -163,7 +168,11 @@ class DiptychAssetPickerBuilderDelegate
   }
 
   Widget _buildGridItemLiveBadge(BuildContext context, AssetEntity asset) {
-    return _AssetPickerLiveBadge(asset: asset, liveAssetIds: liveAssetIds, liveNotifier: liveNotifier);
+    return _AssetPickerLiveBadge(
+      asset: asset,
+      liveAssetIds: liveAssetIds,
+      liveNotifier: liveNotifier,
+    );
   }
 
   @override
@@ -201,7 +210,7 @@ class DiptychAssetPickerBuilderDelegate
             const SizedBox(height: 12),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF07C160),
+                backgroundColor: AppTheme.primaryColor,
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(6),
@@ -263,9 +272,8 @@ class DiptychAssetPickerBuilderDelegate
       if (hasBottomActions)
         Container(
           height: bottomActionBarHeight + bottomPadding,
-          padding: const EdgeInsets.symmetric(
-            horizontal: 12,
-          ).copyWith(bottom: bottomPadding),
+          padding: const EdgeInsets.symmetric(horizontal: 12)
+              .copyWith(bottom: bottomPadding),
           color: appBarColor.withValues(
             alpha: appBarColor.a * (isAppleOS(context) ? .9 : 1),
           ),
@@ -279,9 +287,11 @@ class DiptychAssetPickerBuilderDelegate
                 builder: (context, _) {
                   final selectedAssets = provider.selectedAssets;
                   final liveAssets = selectedAssets
-                      .where((a) =>
-                          MotionPhotoHelper.isLiveOrCachedMotion(a) ||
-                          liveAssetIds.contains(a.id))
+                      .where(
+                        (a) =>
+                            MotionPhotoHelper.isLiveOrCachedMotion(a) ||
+                            liveAssetIds.contains(a.id),
+                      )
                       .toList();
 
                   // 若选中的图片中没有任何实况照片，不展示实况按钮
@@ -335,7 +345,7 @@ class DiptychAssetPickerBuilderDelegate
                       ),
                       decoration: BoxDecoration(
                         color: isHighlight
-                            ? const Color(0xFF07C160).withAlpha(230)
+                            ? AppTheme.primaryColor.withAlpha(230)
                             : Colors.black54,
                         borderRadius: BorderRadius.circular(14),
                         border: Border.all(
@@ -457,7 +467,7 @@ class DiptychAssetPickerBuilderDelegate
                           },
                           child: const Text(
                             '全开',
-                            style: TextStyle(color: Color(0xFF07C160)),
+                            style: TextStyle(color: AppTheme.primaryColor),
                           ),
                         ),
                         TextButton(
@@ -528,7 +538,7 @@ class DiptychAssetPickerBuilderDelegate
                                         isLive ? '作为实况照片上传' : '仅上传普通静态照片',
                                         style: TextStyle(
                                           color: isLive
-                                              ? const Color(0xFF07C160)
+                                              ? AppTheme.primaryColor
                                               : Colors.white38,
                                           fontSize: 12,
                                         ),
@@ -555,7 +565,7 @@ class DiptychAssetPickerBuilderDelegate
                                     ),
                                     decoration: BoxDecoration(
                                       color: isLive
-                                          ? const Color(0xFF07C160).withAlpha(230)
+                                          ? AppTheme.primaryColor.withAlpha(230)
                                           : Colors.black54,
                                       borderRadius: BorderRadius.circular(14),
                                       border: Border.all(
@@ -578,7 +588,8 @@ class DiptychAssetPickerBuilderDelegate
                                           Icon(
                                             isLive
                                                 ? Icons.motion_photos_on
-                                                : Icons.motion_photos_off_outlined,
+                                                : Icons
+                                                      .motion_photos_off_outlined,
                                             size: 14,
                                             color: Colors.white,
                                           ),
@@ -610,7 +621,7 @@ class DiptychAssetPickerBuilderDelegate
                       height: 42,
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF07C160),
+                          backgroundColor: AppTheme.primaryColor,
                           foregroundColor: Colors.white,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(8),
@@ -690,7 +701,7 @@ class DiptychAssetPicker {
     final delegate = DiptychAssetPickerBuilderDelegate(
       provider: provider,
       initialPermission: ps,
-      themeColor: const Color(0xFF07C160),
+      themeColor: AppTheme.primaryColor,
       textDelegate: const AssetPickerTextDelegate(),
       enableLivePhoto: true,
       gridThumbnailSize: const ThumbnailSize.square(400),
@@ -839,14 +850,14 @@ class _DiptychAssetViewerScreen extends StatefulWidget {
       _DiptychAssetViewerScreenState();
 }
 
-class _DiptychAssetViewerScreenState
-    extends State<_DiptychAssetViewerScreen> {
+class _DiptychAssetViewerScreenState extends State<_DiptychAssetViewerScreen> {
   late int _currentIndex;
   late PageController _pageController;
 
   VideoPlayerController? _videoController;
   bool _isMotionPhoto = false;
   bool _isPlaying = false;
+  bool _controlsVisible = true;
   int _checkingIndex = -1;
 
   @override
@@ -953,12 +964,17 @@ class _DiptychAssetViewerScreenState
               initialScale: PhotoViewComputedScale.contained,
               minScale: PhotoViewComputedScale.contained,
               maxScale: PhotoViewComputedScale.covered * 4.0,
+              onTapUp: (_, _, _) =>
+                  setState(() => _controlsVisible = !_controlsVisible),
+              gestureDetectorBehavior: HitTestBehavior.opaque,
             ),
             loadingBuilder: (context, event) => Center(
               child: Image(
                 image: AssetEntityImageProvider(
-                  widget.previewAssets[
-                      _currentIndex.clamp(0, widget.previewAssets.length - 1)],
+                  widget.previewAssets[_currentIndex.clamp(
+                    0,
+                    widget.previewAssets.length - 1,
+                  )],
                   isOriginal: false,
                   thumbnailSize: const ThumbnailSize.square(400),
                 ),
@@ -992,57 +1008,73 @@ class _DiptychAssetViewerScreenState
             top: 0,
             left: 0,
             right: 0,
-            child: Container(
-              padding: EdgeInsets.only(
-                top: MediaQuery.paddingOf(context).top + 4,
-                left: 8,
-                right: 16,
-                bottom: 8,
-              ),
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Colors.black54, Colors.transparent],
-                ),
-              ),
-              child: Row(
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 20),
-                    onPressed: () => Navigator.pop(context),
+            child: ImagePreviewChrome(
+              visible: _controlsVisible,
+              child: ImagePreviewGlass(
+                child: Padding(
+                  padding: EdgeInsets.only(
+                    top: MediaQuery.paddingOf(context).top + 4,
+                    left: 8,
+                    right: 16,
+                    bottom: 8,
                   ),
-                  const Spacer(),
-                  Text(
-                    '${_currentIndex + 1} / ${widget.previewAssets.length}',
-                    style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w500),
-                  ),
-                  const Spacer(),
-                  ListenableBuilder(
-                    listenable: widget.provider,
-                    builder: (context, _) {
-                      final isSelected = widget.provider.selectedAssets.contains(currentAsset);
-                      return GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: () {
-                          widget.provider.selectAsset(currentAsset);
-                        },
-                        child: Container(
-                          width: 26,
-                          height: 26,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: isSelected ? const Color(0xFF07C160) : Colors.black38,
-                            border: Border.all(color: Colors.white, width: 1.5),
-                          ),
-                          child: isSelected
-                              ? const Icon(Icons.check, size: 16, color: Colors.white)
-                              : null,
+                  child: Row(
+                    children: [
+                      IconButton(
+                        icon: const Icon(
+                          Icons.arrow_back_ios_new,
+                          color: Colors.white,
+                          size: 20,
                         ),
-                      );
-                    },
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                      const Spacer(),
+                      Text(
+                        '${_currentIndex + 1} / ${widget.previewAssets.length}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const Spacer(),
+                      ListenableBuilder(
+                        listenable: widget.provider,
+                        builder: (context, _) {
+                          final isSelected = widget.provider.selectedAssets
+                              .contains(currentAsset);
+                          return GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () {
+                              widget.provider.selectAsset(currentAsset);
+                            },
+                            child: Container(
+                              width: 26,
+                              height: 26,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: isSelected
+                                    ? AppTheme.primaryColor
+                                    : Colors.black38,
+                                border: Border.all(
+                                  color: Colors.white,
+                                  width: 1.5,
+                                ),
+                              ),
+                              child: isSelected
+                                  ? const Icon(
+                                      Icons.check,
+                                      size: 16,
+                                      color: Colors.white,
+                                    )
+                                  : null,
+                            ),
+                          );
+                        },
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
             ),
           ),
@@ -1052,128 +1084,155 @@ class _DiptychAssetViewerScreenState
             left: 0,
             right: 0,
             bottom: 0,
-            child: Container(
-              padding: EdgeInsets.only(
-                left: 16,
-                right: 16,
-                top: 12,
-                bottom: MediaQuery.paddingOf(context).bottom + 12,
-              ),
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.bottomCenter,
-                  end: Alignment.topCenter,
-                  colors: [Colors.black87, Colors.transparent],
-                ),
-              ),
-              child: Row(
-                children: [
-                  // 实况开关（仅当当前图片为实况时显示，非实况图绝不显示做选择）
-                  if (_isMotionPhoto)
-                    ListenableBuilder(
-                      listenable: widget.liveNotifier,
-                      builder: (context, _) {
-                        final isLiveSelected = widget.liveAssetIds.contains(currentAsset.id);
-
-                        return GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTap: () async {
-                            final newLive = !isLiveSelected;
-                            if (newLive) {
-                              widget.liveAssetIds.add(currentAsset.id);
-                            } else {
-                              widget.liveAssetIds.remove(currentAsset.id);
-                            }
-                            widget.liveNotifier.value++;
-
-                            if (newLive) {
-                              // 勾选实况：播放一遍实况
-                              if (_videoController != null &&
-                                  _videoController!.value.isInitialized) {
-                                await _videoController!.seekTo(Duration.zero);
-                                await _videoController!.play();
-                                if (mounted) setState(() => _isPlaying = true);
-                              }
-                            } else {
-                              // 取消实况：不播放
-                              if (_videoController != null &&
-                                  _videoController!.value.isInitialized) {
-                                await _videoController!.pause();
-                                await _videoController!.seekTo(Duration.zero);
-                              }
-                              if (mounted) setState(() => _isPlaying = false);
-                            }
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                            decoration: BoxDecoration(
-                              color: isLiveSelected
-                                  ? const Color(0xFF07C160).withAlpha(230)
-                                  : Colors.black54,
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(
-                                color: isLiveSelected ? Colors.white70 : Colors.white30,
-                                width: 0.8,
-                              ),
-                            ),
-                            child: CustomPaint(
-                              foregroundPainter: isLiveSelected
-                                  ? null
-                                  : const DiagonalSlashPainter(color: Colors.white, strokeWidth: 1.6),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    isLiveSelected
-                                        ? Icons.motion_photos_on
-                                        : Icons.motion_photos_off_outlined,
-                                    size: 15,
-                                    color: Colors.white,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  const Text(
-                                    '实况',
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  const Spacer(),
-                  // 完成按钮
-                  ListenableBuilder(
-                    listenable: widget.provider,
-                    builder: (context, _) {
-                      final count = widget.provider.selectedAssets.length;
-                      final label = count > 0 ? '完成 ($count)' : '完成';
-                      return ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF07C160),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                        ),
-                        onPressed: () {
-                          if (widget.provider.selectedAssets.isEmpty) {
-                            widget.provider.selectAsset(currentAsset);
-                          }
-                          Navigator.pop(context, widget.provider.selectedAssets);
-                        },
-                        child: Text(
-                          label,
-                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-                        ),
-                      );
-                    },
+            child: ImagePreviewChrome(
+              visible: _controlsVisible,
+              child: ImagePreviewGlass(
+                child: Padding(
+                  padding: EdgeInsets.only(
+                    left: 16,
+                    right: 16,
+                    top: 12,
+                    bottom: MediaQuery.paddingOf(context).bottom + 12,
                   ),
-                ],
+                  child: Row(
+                    children: [
+                      // 实况开关（仅当当前图片为实况时显示，非实况图绝不显示做选择）
+                      if (_isMotionPhoto)
+                        ListenableBuilder(
+                          listenable: widget.liveNotifier,
+                          builder: (context, _) {
+                            final isLiveSelected = widget.liveAssetIds.contains(
+                              currentAsset.id,
+                            );
+
+                            return GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: () async {
+                                final newLive = !isLiveSelected;
+                                if (newLive) {
+                                  widget.liveAssetIds.add(currentAsset.id);
+                                } else {
+                                  widget.liveAssetIds.remove(currentAsset.id);
+                                }
+                                widget.liveNotifier.value++;
+
+                                if (newLive) {
+                                  // 勾选实况：播放一遍实况
+                                  if (_videoController != null &&
+                                      _videoController!.value.isInitialized) {
+                                    await _videoController!.seekTo(
+                                      Duration.zero,
+                                    );
+                                    await _videoController!.play();
+                                    if (mounted) {
+                                      setState(() => _isPlaying = true);
+                                    }
+                                  }
+                                } else {
+                                  // 取消实况：不播放
+                                  if (_videoController != null &&
+                                      _videoController!.value.isInitialized) {
+                                    await _videoController!.pause();
+                                    await _videoController!.seekTo(
+                                      Duration.zero,
+                                    );
+                                  }
+                                  if (mounted) {
+                                    setState(() => _isPlaying = false);
+                                  }
+                                }
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 5,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: isLiveSelected
+                                      ? AppTheme.primaryColor.withAlpha(230)
+                                      : Colors.black54,
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(
+                                    color: isLiveSelected
+                                        ? Colors.white70
+                                        : Colors.white30,
+                                    width: 0.8,
+                                  ),
+                                ),
+                                child: CustomPaint(
+                                  foregroundPainter: isLiveSelected
+                                      ? null
+                                      : const DiagonalSlashPainter(
+                                          color: Colors.white,
+                                          strokeWidth: 1.6,
+                                        ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        isLiveSelected
+                                            ? Icons.motion_photos_on
+                                            : Icons.motion_photos_off_outlined,
+                                        size: 15,
+                                        color: Colors.white,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      const Text(
+                                        '实况',
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      const Spacer(),
+                      // 完成按钮
+                      ListenableBuilder(
+                        listenable: widget.provider,
+                        builder: (context, _) {
+                          final count = widget.provider.selectedAssets.length;
+                          final label = count > 0 ? '完成 ($count)' : '完成';
+                          return ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppTheme.primaryColor,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 8,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                            ),
+                            onPressed: () {
+                              if (widget.provider.selectedAssets.isEmpty) {
+                                widget.provider.selectAsset(currentAsset);
+                              }
+                              Navigator.pop(
+                                context,
+                                widget.provider.selectedAssets,
+                              );
+                            },
+                            child: Text(
+                              label,
+                              style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
           ),

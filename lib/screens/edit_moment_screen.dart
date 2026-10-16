@@ -1,6 +1,9 @@
 import 'dart:io';
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../constants/app_theme.dart';
 import '../constants/strings.dart';
 import '../models/moment.dart';
@@ -13,7 +16,9 @@ import '../utils/foreground_service_helper.dart';
 import '../utils/motion_photo_helper.dart';
 import '../utils/wakelock_helper.dart';
 import '../widgets/image_gallery.dart';
+
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
+
 import '../widgets/photo_grid_picker.dart';
 
 /// 发布/编辑动态页
@@ -272,8 +277,6 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
     }
   }
 
-
-
   @override
   void dispose() {
     _feelingController.dispose();
@@ -489,9 +492,7 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
       _updateKeepAliveState();
 
       // 当所有图片传输任务全部完成（队列与进行中均为空），自动触发一次完整草稿保存
-      if (_inFlightUploads.isEmpty &&
-          _pendingUploadQueue.isEmpty &&
-          mounted) {
+      if (_inFlightUploads.isEmpty && _pendingUploadQueue.isEmpty && mounted) {
         try {
           await _saveDraftInternal();
         } catch (e) {
@@ -552,11 +553,7 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
             entry.file!,
           );
           processedEntries.add(
-            PhotoEntry.file(
-              stillFile,
-              isMotion: false,
-              uploadLive: false,
-            ),
+            PhotoEntry.file(stillFile, isMotion: false, uploadLive: false),
           );
         } else {
           // 动态图选择实况，或者原本就是静态图：保留原图
@@ -603,7 +600,6 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
       _updateKeepAliveState();
     }
   }
-
 
   /// 重试单张上传
   void _handleRetryUpload(int index) {
@@ -898,7 +894,7 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('保存失败，已自动为您保存为草稿，请稍后重试'),
-          backgroundColor: Colors.red,
+          backgroundColor: AppTheme.dangerColor,
         ),
       );
     } finally {
@@ -952,13 +948,13 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
 
   /// 存草稿
   Future<void> _handleSaveDraft() async {
-    final hasContent = _feelingController.text.trim().isNotEmpty ||
+    final hasContent =
+        _feelingController.text.trim().isNotEmpty ||
         _mood != null ||
         _photos.isNotEmpty;
     if (!hasContent) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先输入感受或添加照片后再存草稿')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('请先输入感受或添加照片后再存草稿')));
       return;
     }
 
@@ -976,7 +972,10 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
       debugPrint('保存草稿失败: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('保存草稿失败，请重试'), backgroundColor: Colors.red),
+        const SnackBar(
+          content: Text('保存草稿失败，请重试'),
+          backgroundColor: AppTheme.dangerColor,
+        ),
       );
     } finally {
       if (mounted) setState(() => _isSavingDraft = false);
@@ -1013,14 +1012,12 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
             child: const Text('取消'),
           ),
           TextButton(
-            style: TextButton.styleFrom(foregroundColor: Colors.red[600]),
+            style: TextButton.styleFrom(foregroundColor: AppTheme.dangerColor),
             onPressed: () => Navigator.pop(ctx, false),
             child: const Text('放弃修改'),
           ),
           TextButton(
-            style: TextButton.styleFrom(
-              foregroundColor: AppTheme.primaryColor,
-            ),
+            style: TextButton.styleFrom(foregroundColor: AppTheme.primaryColor),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text(
               '保留草稿',
@@ -1074,196 +1071,309 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
       },
       child: Scaffold(
         appBar: AppBar(
-          leading: BackButton(
-            onPressed: _handleBackPress,
+          toolbarHeight: 52,
+          leadingWidth: 40,
+          titleSpacing: 4,
+          leading: BackButton(onPressed: _handleBackPress),
+          title: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              DateHelper.toDateStr(widget.date).replaceAll('-', '.'),
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+            ),
           ),
-          title: Text(_isEdit ? AppStrings.editTitle : AppStrings.createTitle),
           actions: [
             SizedBox(
-              width: 72,
+              width: 56,
               child: TextButton(
                 onPressed: _isSavingDraft || _isSaving
                     ? null
                     : _handleSaveDraft,
+                style: TextButton.styleFrom(
+                  minimumSize: const Size(0, 44),
+                  padding: EdgeInsets.zero,
+                  foregroundColor: AppTheme.textSecondary,
+                ),
                 child: _isSavingDraft
                     ? const SizedBox(
                         width: 16,
                         height: 16,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Text('存草稿'),
+                    : const Text('存草稿', style: TextStyle(fontSize: 13)),
               ),
             ),
-            SizedBox(
-              width: 84,
-              child: TextButton(
-                style: TextButton.styleFrom(padding: EdgeInsets.zero),
-                onPressed: _isSaving || _isSavingDraft ? null : _handleSave,
-                child: _isSaving
-                    ? (_inFlightUploads.isNotEmpty ||
-                              _pendingUploadQueue.isNotEmpty
-                          ? FittedBox(
-                              fit: BoxFit.scaleDown,
-                              child: Text(
-                                '上传中 $doneCount/$localCount',
-                                style: const TextStyle(fontSize: 12),
-                              ),
-                            )
-                          : const Text('发布中…', style: TextStyle(fontSize: 12)))
-                    : const Text(
-                        AppStrings.saveButton,
-                        style: TextStyle(fontWeight: FontWeight.w600),
-                      ),
+            Padding(
+              padding: const EdgeInsets.only(left: 4, right: 8),
+              child: SizedBox(
+                width: 76,
+                height: 44,
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppTheme.primaryColor,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  onPressed: _isSaving || _isSavingDraft ? null : _handleSave,
+                  child: _isSaving
+                      ? FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            _inFlightUploads.isNotEmpty ||
+                                    _pendingUploadQueue.isNotEmpty
+                                ? '上传中 $doneCount/$localCount'
+                                : '发布中…',
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                        )
+                      : const Text(
+                          AppStrings.saveButton,
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                ),
               ),
             ),
-            const SizedBox(width: 4),
           ],
         ),
-        body: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Text(
-                  DateHelper.toChineseDate(widget.date),
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
+        body: SafeArea(
+          top: false,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final outerPadding = constraints.maxHeight < 360 ? 8.0 : 12.0;
+              final height = math.max(
+                0.0,
+                constraints.maxHeight - outerPadding * 2,
+              );
+              final gap = math.min(height / 12, height < 360 ? 6.0 : 8.0);
+              final padding = math.min(height / 18, height < 240 ? 6.0 : 10.0);
+              final showTitles = height >= 180;
+              final titleHeight =
+                  MediaQuery.textScalerOf(context).scale(14) * 1.2;
+              final sectionFrame =
+                  padding * 2 + (showTitles ? titleHeight + 6 : 0);
+              final contentBudget = math.max(
+                0.0,
+                height - sectionFrame * 3 - gap * 2,
+              );
+              final moodHeight = math.min(36.0, contentBudget * .35);
+              final remaining = math.max(0.0, contentBudget - moodHeight);
+              final gridWidth = math.max(
+                0.0,
+                math.min(constraints.maxWidth, 680) -
+                    outerPadding * 2 -
+                    padding * 2,
+              );
+              final photoHeight = math.min(
+                math.max(0.0, (gridWidth * 2 - 8) / 3),
+                remaining * .5,
+              );
+
+              Widget section(String title, String id, Widget content) =>
+                  _buildEditorSection(
+                    key: ValueKey(id),
+                    title: title,
+                    padding: padding,
+                    showTitle: showTitles,
+                    titleHeight: titleHeight,
+                    child: content,
+                  );
+              return Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 680),
+                  child: Padding(
+                    padding: EdgeInsets.all(outerPadding),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        SizedBox(
+                          height: sectionFrame + moodHeight,
+                          child: section(
+                            AppStrings.feelingLabel,
+                            'diary-mood-card',
+                            _buildMoodSelector(),
+                          ),
+                        ),
+                        SizedBox(height: gap),
+                        SizedBox(
+                          height: sectionFrame + photoHeight,
+                          child: section(
+                            AppStrings.photosLabel,
+                            'diary-photos-card',
+                            _buildPhotoGrid(),
+                          ),
+                        ),
+                        SizedBox(height: gap),
+                        Expanded(
+                          child: section(
+                            '今日感受',
+                            'diary-feeling-card',
+                            SelectionContainer.disabled(
+                              child: TextField(
+                                key: const ValueKey('diary-feeling-input'),
+                                controller: _feelingController,
+                                expands: true,
+                                minLines: null,
+                                maxLines: null,
+                                textAlignVertical: TextAlignVertical.top,
+                                scrollPhysics: const ClampingScrollPhysics(),
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  height: 1.6,
+                                  color: AppTheme.textPrimary,
+                                ),
+                                contextMenuBuilder:
+                                    (context, editableTextState) =>
+                                        AdaptiveTextSelectionToolbar.buttonItems(
+                                          anchors: editableTextState
+                                              .contextMenuAnchors,
+                                          buttonItems: editableTextState
+                                              .contextMenuButtonItems,
+                                        ),
+                                decoration: const InputDecoration(
+                                  hintText: AppStrings.feelingHint,
+                                  border: InputBorder.none,
+                                  enabledBorder: InputBorder.none,
+                                  focusedBorder: InputBorder.none,
+                                  filled: false,
+                                  contentPadding: EdgeInsets.zero,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 20),
-
-              // 心情打分
-              Text(
-                AppStrings.feelingLabel,
-                style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              const SizedBox(height: 8),
-              _buildMoodSelector(),
-              const SizedBox(height: 16),
-
-              // 图片九宫格（第一张为封面）
-              Text(
-                AppStrings.photosLabel,
-                style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              const SizedBox(height: 8),
-              PhotoGridPicker(
-                entries: _photos,
-                statusProvider: (entry) {
-                  if (!entry.isLocal) return PhotoUploadStatus.success;
-                  return _uploadStatuses[entry.file!.path] ??
-                      (_uploadedUrls.containsKey(entry.file!.path)
-                          ? PhotoUploadStatus.success
-                          : PhotoUploadStatus.idle);
-                },
-                progressProvider: (entry) {
-                  if (!entry.isLocal) return null;
-                  return _uploadProgress[entry.file!.path];
-                },
-                onRetry: _handleRetryUpload,
-                onTap: (index) {
-                  showFullScreenPreview(
-                    context,
-                    entries: _photos,
-                    initialIndex: index,
-                  );
-                },
-                onAdded: _handlePhotosAdded,
-                onRemoved: (index) {
-                  _handleRemovePhoto(index);
-                },
-                onReordered: (oldIndex, newIndex) {
-                  setState(() {
-                    final photo = _photos.removeAt(oldIndex);
-                    _photos.insert(newIndex, photo);
-                  });
-                  _syncDraftImages();
-                },
-              ),
-              const SizedBox(height: 20),
-
-              // 感受输入
-              Text(
-                '今日感受',
-                style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              const SizedBox(height: 8),
-              // 排除全局选择容器：输入框用自己的原生选择（与输入法兼容）
-              SelectionContainer.disabled(
-                child: TextField(
-                  controller: _feelingController,
-                  minLines: 5,
-                  maxLines: null,
-                  scrollPhysics: const NeverScrollableScrollPhysics(),
-                  // 显式声明长按菜单：剪切/复制/粘贴/全选
-                  contextMenuBuilder: (context, editableTextState) =>
-                      AdaptiveTextSelectionToolbar.buttonItems(
-                        anchors: editableTextState.contextMenuAnchors,
-                        buttonItems: editableTextState.contextMenuButtonItems,
-                      ),
-                  decoration: InputDecoration(hintText: AppStrings.feelingHint),
-                ),
-              ),
-            ],
+              );
+            },
           ),
         ),
       ),
     );
   }
 
-  Widget _buildMoodSelector() {
-    return Row(
-      children: List.generate(10, (i) {
-        final score = i + 1;
-        final isSelected = _mood == score;
-        final moodColor = AppTheme.moodColor(score);
-        return Expanded(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 2),
-            child: AspectRatio(
-              aspectRatio: 1,
-              child: GestureDetector(
-                onTap: () => setState(() => _mood = isSelected ? null : score),
+  Widget _buildPhotoGrid() => PhotoGridPicker(
+    visibleRows: 2,
+    entries: _photos,
+    statusProvider: (entry) {
+      if (!entry.isLocal) return PhotoUploadStatus.success;
+      return _uploadStatuses[entry.file!.path] ??
+          (_uploadedUrls.containsKey(entry.file!.path)
+              ? PhotoUploadStatus.success
+              : PhotoUploadStatus.idle);
+    },
+    progressProvider: (entry) {
+      if (!entry.isLocal) return null;
+      return _uploadProgress[entry.file!.path];
+    },
+    onRetry: _handleRetryUpload,
+    onTap: (index) {
+      showFullScreenPreview(context, entries: _photos, initialIndex: index);
+    },
+    onAdded: _handlePhotosAdded,
+    onRemoved: _handleRemovePhoto,
+    onReordered: (oldIndex, newIndex) {
+      setState(() {
+        final photo = _photos.removeAt(oldIndex);
+        _photos.insert(newIndex, photo);
+      });
+      _syncDraftImages();
+    },
+  );
+
+  Widget _buildEditorSection({
+    required Key key,
+    required String title,
+    required double padding,
+    required bool showTitle,
+    required double titleHeight,
+    required Widget child,
+  }) => Semantics(
+    container: true,
+    label: title,
+    child: Container(
+      key: key,
+      padding: EdgeInsets.all(padding),
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.dividerColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (showTitle) ...[
+            SizedBox(
+              height: titleHeight,
+              child: Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 14,
+                  height: 1.2,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.textPrimary,
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+          ],
+          Expanded(child: child),
+        ],
+      ),
+    ),
+  );
+
+  Widget _buildMoodSelector() => Row(
+    children: List.generate(10, (i) {
+      final score = i + 1;
+      final selected = _mood == score;
+      final color = AppTheme.moodColor(score);
+      return Expanded(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 1),
+          child: Semantics(
+            selected: selected,
+            label: '心情 $score 分',
+            child: Material(
+              color: selected ? color : AppTheme.softSurface,
+              borderRadius: BorderRadius.circular(7),
+              child: InkWell(
+                onTap: () => setState(() => _mood = selected ? null : score),
+                borderRadius: BorderRadius.circular(7),
                 child: Container(
+                  alignment: Alignment.center,
                   decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: isSelected ? moodColor : Colors.grey[100],
+                    borderRadius: BorderRadius.circular(7),
                     border: Border.all(
-                      color: isSelected ? moodColor : Colors.grey[300]!,
-                      width: 1.5,
+                      color: selected ? color : AppTheme.dividerColor,
                     ),
                   ),
-                  alignment: Alignment.center,
-                  child: Text(
-                    '$score',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: isSelected ? Colors.white : Colors.grey[600],
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      '$score',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: selected ? Colors.white : AppTheme.textPrimary,
+                      ),
                     ),
                   ),
                 ),
               ),
             ),
           ),
-        );
-      }),
-    );
-  }
+        ),
+      );
+    }),
+  );
 }
-
 
 /// 编辑器状态快照：用于比对是否有未保存的草稿或更改
 class _EditorSnapshot {
