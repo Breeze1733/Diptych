@@ -13,7 +13,7 @@
 [![Flutter](https://img.shields.io/badge/Flutter-3.47%2B-02569B?style=flat-square&logo=flutter&logoColor=white)]()
 [![Dart](https://img.shields.io/badge/Dart-3.13%2B-0175C2?style=flat-square&logo=dart&logoColor=white)]()
 [![Platform](https://img.shields.io/badge/Platform-Android-3DDC84?style=flat-square&logo=android&logoColor=white)]()
-[![Version](https://img.shields.io/badge/Version-1.2.0%2B37-4B8BBE?style=flat-square)]()
+[![Version](https://img.shields.io/badge/Version-1.2.2%2B39-4B8BBE?style=flat-square)]()
 [![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)]()
 [![Repo Size](https://img.shields.io/github/repo-size/Breeze1733/Diptych?style=flat-square&label=repo%20size)]()
 [![Last Commit](https://img.shields.io/github/last-commit/Breeze1733/Diptych?style=flat-square&label=last%20commit)]()
@@ -69,7 +69,7 @@
 
 ## 功能特性
 
-- 🔐 **密钥登录** — 双方各持独立密钥，本地验证，无账号体系、无第三方登录
+- 🔐 **密钥登录** — 双方各持独立口令，由自托管后端验证并签发会话；私有 API 与照片请求携带会话凭据，口令不再编译进 APK
 - 🖼️ **每日双联** — 每人每天一条日记，支持多图照片、可选心情分（1–10）与文字感受；默认查看日期以本机时间早上 6:00 为界，凌晨 0:00–5:59 算前一天
 - ↔️ **左右分屏** — 主界面同时呈现两人当日内容，随时回看对方的记录
 - 💬 **互动评论** — 在对方（或自己）的日记下留言、回复，支持多级嵌套；按单条追加，重试复用评论 ID。发布页等待服务端确认和读回新评论后再关闭，保留阅读位置并展开定位新留言；详情右上角可单独刷新正文与评论
@@ -77,13 +77,13 @@
 - 📬 **信箱与通知中心** — 初始化通知列表、进入信箱及相关刷新操作时主动拉取日记、评论和话题通知；服务端取出后清空对应队列，客户端保存历史与已读状态。支持未读计数、单条/全部已读、清空信箱和跳转到对应日期或话题
 - 📅 **双人日历** — 区分己方、对方与双方都已记录的日期，支持蓝粉双色标记和纸页日历弹窗；优先读取本地日期缓存，加载日记时补充对应日期标记，手动刷新时联网全量同步
 - 🔎 **日记搜索** — 搜索双方日记正文与评论，按日期从新到旧返回；支持输入防抖、关键词摘要高亮、游标分页和点击回到对应日期
-- 🗂️ **话题广场** — 创建话题、查看讨论、发布纯文字帖子及删除自己的帖子；发帖支持保存和恢复文字草稿
+- 🗂️ **话题广场** — 创建话题、查看讨论、发布纯文字帖子及删除自己的帖子；发帖支持保存和恢复文字草稿；列表接口直接返回最近更新时间，避免逐条获取完整话题
 - 🪶 **纸页双联界面** — 暖白、墨蓝与陶土色统一全局风格；底部紧凑切换日记、话题与我的，日期栏紧凑单行；双联页固定一屏，4:3 封面与完整正文在各自纸页内部滚动，底部固定“展开日记与留言”入口。编辑、留言与回复在展开页内完成并更新，心情统一显示分数；双方未记录时左下角悬浮显示写日记入口。写日记以心情、照片、文字三张卡片填满一屏，心情单行排列，照片保留两行六格位置，多余照片与长文字分别在卡片内滚动；顶栏直接提供搜索、信箱和刷新，我的页面保留壁纸设置及检测连通性入口
 - 🎨 **壁纸定制** — 日记与话题分别设置壁纸；选图后按 9:16 裁剪，全屏预览提供壁纸与卡片不透明度两个滑动条，卡片不透明度在日记与话题间共用，点击“应用”后保存到本机并同步后端；可一键设为白色背景，该操作仅保存在本机并保留原壁纸，方便恢复
 - 📤 **串行预上传与画廊** — 选图即触发后台串行上传，单张图片按 1 MB 分片发送，失败分片和合并请求自动重试；支持上传进度、失败重试、移除和拖拽排序，以及全屏图片预览、缩放和保存；大图铺满预览区域，磨砂透明操作栏可点按图片隐藏或显示
-- 🛡️ **草稿与上传结果复用** — 日记草稿保存文字、心情、混合本地/远程图片顺序、实况状态与已上传 URL；恢复时复用已完成的图片上传，未完成的图片重新启动上传。提供手动存草稿、退出保留草稿和发布失败自动保存，评论与话题帖子也支持文字草稿
+- 🛡️ **草稿与上传结果复用** — 日记草稿按账号和日期隔离，照片使用稳定文件名，串行提交完整清单；保存文字、心情、混合本地/远程图片顺序、实况状态与已上传 URL。恢复时复用已完成的上传；无作者信息的旧草稿需手动确认后恢复。评论与话题帖子也支持文字草稿
 - 🪟 **小窗适配** — 在 Flutter 根组件中修正异常的 MediaQuery 顶部/底部 Insets，主页与日记布局根据窗口尺寸缩放
-- 🔋 **传输保活** — Android 前台服务展示上传、图片预缓存和更新下载进度，配合带超时的 CPU WakeLock 降低后台传输被休眠打断的概率
+- 🔋 **传输保活** — 上传、图片预缓存和更新下载分别持有保活租约；最后一个任务结束后才停止前台服务和释放 CPU WakeLock，仍运行的任务继续保留通知与进度
 - ⚡ **应用内更新** — 启动后静默检查版本，也可在设置中手动检查；通过 Dart HTTP 流下载 APK，网络中断后用 HTTP Range 重连续传，下载完成调起系统安装，下次启动清理旧安装包
 - 📡 **缓存优先与离线浏览** — 用户、日记、日历和通知保存到本地，图片使用磁盘缓存；已缓存内容可离线浏览，日记缓存命中后后台刷新。发布、搜索、话题加载和首次获取未缓存内容需要网络
 - 🖼️ **上传后直接缓存** — 日记发布成功后，将本地已上传图片写入 DefaultCacheManager，避免查看自己的日记时再次下载同一张图片
@@ -118,7 +118,6 @@ lib/
 │   ├── api_config.dart        # 后端 API 地址配置（git 忽略，创建方式见下文）
 │   ├── app_theme.dart         # 纸页双联全局主题（暖白 / 墨蓝 / 陶土色与统一组件）
 │   ├── settings_theme.dart    # 设置页兼容入口，复用全局主题
-│   ├── secrets.dart           # 双方密钥配置（git 忽略，创建方式见下文）
 │   └── strings.dart           # 中文字符串常量
 ├── models/
 │   ├── app_notification.dart  # 互动通知模型（日记/评论/话题通知、跳转元数据）
@@ -148,12 +147,18 @@ lib/
 │   └── wallpaper_preview_screen.dart # 壁纸全屏预览与透明度调整
 ├── services/
 │   ├── api_service.dart       # REST API（用户、日记、搜索、日历标记、通知）
-│   ├── auth_service.dart      # 密钥验证 + SharedPreferences 持久化
+│   ├── auth_service.dart      # 服务端登录 + 会话恢复与退出
+│   ├── auth_session.dart      # 当前会话与账号切换版本校验
+│   ├── api_http_client.dart   # 限定来源的 Bearer 请求与会话绑定
+│   ├── http_request.dart      # 完整请求超时与连接清理
+│   ├── private_image_cache.dart # 沿用磁盘缓存并为私有照片请求鉴权
+│   ├── transfer_keep_alive.dart # 多任务前台服务与 WakeLock 租约协调
+│   ├── moment_save_service.dart # 提交日记、更新缓存与确认旧资源清理顺序
 │   ├── cache_service.dart     # 日记、用户及双人日历状态缓存
-│   ├── draft_service.dart     # 日记/评论/帖子草稿，图片持久化与发布后缓存转移
+│   ├── draft_service.dart     # 按账号隔离的草稿清单、稳定图片及旧草稿恢复
 │   ├── notification_service.dart # 通知持久化缓存与服务端队列同步
 │   ├── network_diagnostics_service.dart # 轻量网络探测、响应校验、超时与取消
-│   ├── storage_service.dart   # 1 MB 分片上传、局部重试、合并、中止及删除图片
+│   ├── storage_service.dart   # 1 MB 分片上传、局部重试、会话校验、合并及删除图片
 │   ├── topic_service.dart     # 话题 REST API
 │   └── update_service.dart    # 版本检测、APK 流式下载重连续传、安装及清理
 ├── utils/
@@ -180,6 +185,8 @@ lib/
     └── wallpaper_layer.dart   # 全局/局部壁纸背景渲染层
 ```
 
+`backend/` 包含配套 Node.js 后端、服务端鉴权与现有统计接口；运行时数据、照片和私有配置不纳入 Git。`lib/controllers/` 管理编辑器的串行上传、取消和保活。
+
 `android/` 包含 Kotlin 原生通道、传输前台服务与启动图标资源；`assets/` 只保存 APK 使用的应用图片，目前为应用图标和双方未发布状态贴图，均在 `pubspec.yaml` 中声明。
 
 展示图片统一放在 `pic/`：README 引用的图标和截图放在该目录下，未引用的备选图片、历史截图及原始素材放在 `pic/ignore/`。后者已由 `.gitignore` 忽略，不提交到仓库。以后更新截图时直接替换 `pic/` 中对应的文件；新增图片如需展示，应同步更新 README 引用。
@@ -194,6 +201,7 @@ lib/
 
 | 用途 | 接口（相对于 API 基础地址） |
 |---|---|
+| 登录 | `POST /auth/login` |
 | 用户 | `POST /users/ensure`、`GET /users/:uid`、`PUT /users/:uid` |
 | 日记 | `GET /moments?date_str=…&author_ids=A,B`、`POST /moments`、`PUT /moments/:id` |
 | 日记详情与评论 | `GET /moments/:id`、`POST /moments/:id/comments`、`DELETE /moments/:id/comments/:commentId` |
@@ -227,32 +235,13 @@ cd Diptych
 
 ### 配置密钥
 
-在 `lib/constants/` 下创建 `secrets.dart`（该文件已在 `.gitignore` 中排除，不会提交到仓库）：
+客户端不再需要 `lib/constants/secrets.dart`。在后端为 A/B 配置各自口令的加盐哈希及会话签名密钥，配置文件只保存在服务器私有目录，部署方法见 [后端说明](backend/README.md)。
 
-```dart
-class Secrets {
-  Secrets._();
-
-  /// 用户 A 的密钥
-  static const String keyA = '<用户A的密钥>';
-
-  /// 用户 B 的密钥
-  static const String keyB = '<用户B的密钥>';
-
-  /// 验证密钥，返回用户角色，无效返回 null
-  static String? validateKey(String key) {
-    if (key == keyA) return 'A';
-    if (key == keyB) return 'B';
-    return null;
-  }
-}
-```
-
-> 登录时通过 `Secrets.validateKey()` 在本地校验密钥，只保存用户角色 A/B。密钥配置不纳入 Git；本地校验不等同于服务端接口鉴权。
+登录时通过 `POST /auth/login` 校验输入的口令，成功后保存服务器返回的会话。旧版只有角色的登录态需要重新登录一次；服务器启用鉴权后，旧客户端需要更新。口令不会保存在客户端，也不再打包进 APK。
 
 ### 配置后端地址
 
-App 对接自托管 REST API，本仓库提供客户端代码，后端需自行部署并实现上文接口。在 `lib/constants/` 下创建 `api_config.dart`（该文件已在 `.gitignore` 中排除，不会提交到仓库）：
+App 对接自托管 REST API，`backend/` 提供配套后端源码，部署与私有配置见 [后端说明](backend/README.md)。在 `lib/constants/` 下创建 `api_config.dart`（该文件已在 `.gitignore` 中排除，不会提交到仓库）：
 
 ```dart
 class ApiConfig {
@@ -293,8 +282,8 @@ flutter build apk --release
 ## 隐私与数据
 
 - 🔒 **自托管数据** — 日记、图片与话题数据发送至配置的后端；客户端没有集成第三方账号登录或云数据库 SDK
-- 🔑 **本地登录校验** — 登录密钥在本机校验；API 请求携带用户角色/ID，当前客户端未发送登录密钥或鉴权令牌
-- 📴 **本地缓存与草稿** — 用户、日记、日历、通知及草稿元数据保存在 SharedPreferences，草稿图片保存在应用文档目录；图片和提取的视频使用本地缓存。已缓存日记与通知可离线查看，通知已读状态也由本机保存
+- 🔑 **服务端鉴权** — 登录口令仅在登录时发往后端，后续私有 API 与照片请求携带 Bearer 会话；服务端校验会话和写操作作者，口令以加盐哈希保存
+- 📴 **本地缓存与草稿** — 用户、日记、日历、通知、会话和草稿清单保存在应用私有 SharedPreferences；日记草稿和壁纸设置按账号隔离，草稿图片保存在应用文档目录。有效会话期间可离线浏览已缓存内容，通知已读状态也由本机保存
 
 ## 贡献指南
 

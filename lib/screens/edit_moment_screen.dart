@@ -1,4 +1,5 @@
-import 'dart:io';
+import '../services/private_image_cache.dart';
+
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -8,16 +9,12 @@ import '../constants/app_theme.dart';
 import '../constants/strings.dart';
 import '../models/moment.dart';
 import '../providers/auth_provider.dart';
-import '../services/cache_service.dart';
 import '../services/draft_service.dart';
-import '../services/storage_service.dart';
+import '../services/moment_save_service.dart';
+import '../controllers/moment_upload_controller.dart';
 import '../utils/date_helper.dart';
-import '../utils/foreground_service_helper.dart';
 import '../utils/motion_photo_helper.dart';
-import '../utils/wakelock_helper.dart';
 import '../widgets/image_gallery.dart';
-
-import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 
 import '../widgets/photo_grid_picker.dart';
 
@@ -48,45 +45,19 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
   /// 防止多次快速点击返回弹出多个确认框
   bool _isExitDialogShowing = false;
 
-  /// 断点续传/预上传：本地图片路径 → 已成功上传的远端 URL
-  final Map<String, String> _uploadedUrls = {};
+  late final MomentDraftStore _draftStore;
+  late final MomentUploadController _uploads;
+  bool _isLoadingDraft = true;
+  bool _isImportingPhotos = false;
 
-  /// 本地图片路径 → 上传该远端 URL 时是否为实况图
-  final Map<String, bool> _uploadedIsLive = {};
-
-  /// 本地图片路径 → 当前上传状态 (uploading, success, failed, idle)
-  final Map<String, PhotoUploadStatus> _uploadStatuses = {};
-
-  /// 本地图片路径 → 当前上传进度 (0.0 ~ 1.0)
-  final Map<String, double> _uploadProgress = {};
-
-  /// 待上传队列（本地图片路径列表）
-  final List<String> _pendingUploadQueue = [];
-
-  /// 正在进行网络请求的本地图片路径集合
-  final Set<String> _inFlightUploads = {};
-
-  /// 已被用户删除/取消、但仍在网络上传中的图片路径集合
-  final Set<String> _cancelledUploads = {};
-
-  /// 正在上传中的图片路径及其在服务端的 uploadId 映射（用于取消时即时通知服务端 abort 清理分片）
-  final Map<String, String> _inFlightUploadIds = {};
-
-  /// 待异步删除的远端 URL 队列
-  final List<String> _pendingDeleteUrls = [];
-  bool _isDeleting = false;
-
-  /// 是否正在持有 CPU 唤醒锁与前台保活服务
-  bool _hasForegroundKeepAlive = false;
+  Map<String, String> get _uploadedUrls => _uploads.uploadedUrls;
+  Map<String, bool> get _uploadedIsLive => _uploads.uploadedIsLive;
+  Map<String, PhotoUploadStatus> get _uploadStatuses => _uploads.statuses;
+  Map<String, double> get _uploadProgress => _uploads.progress;
 
   bool get _isEdit => widget.existingMoment != null;
 
   String get _dateStr => DateHelper.toDateStr(widget.date);
-
-  /// 当前所有本地新选的图片文件（新建模式下全部都是本地文件）
-  List<File> get _localFiles => [
-    for (final p in _photos.where((p) => p.isLocal)) p.file!,
-  ];
 
   List<DraftPhotoItem> _buildDraftItems() {
     final items = <DraftPhotoItem>[];
@@ -166,6 +137,17 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
   @override
   void initState() {
     super.initState();
+    final userId =
+        ref.read(currentUserProvider)?.uid ?? ref.read(currentUserRoleProvider);
+    if (userId == null) throw StateError('未登录');
+    _draftStore = MomentDraftStore(userId: userId, dateStr: _dateStr);
+    _uploads = MomentUploadController(
+      storage: ref.read(storageServiceProvider),
+      folder: 'user_$userId',
+      photos: () => _photos,
+      onUploaded: _syncDraftImages,
+      committedUrls: widget.existingMoment?.imageUrls ?? const [],
+    )..addListener(_onUploadsChanged);
     if (_isEdit) {
       _feelingController.text = widget.existingMoment!.feeling;
       _mood = widget.existingMoment!.mood;
@@ -174,10 +156,49 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
     _loadDraft();
   }
 
+  void _onUploadsChanged() {
+    if (mounted) setState(() {});
+  }
+
   Future<void> _loadDraft() async {
-    final draft = await DraftService.load(_dateStr);
-    if (draft == null || !mounted) return;
-    await _applyDraft(draft);
+    try {
+      var draft = await _draftStore.load();
+      if (draft == null && mounted) {
+        final legacy = await _draftStore.loadLegacyForRecovery();
+        if (legacy != null && mounted) {
+          final recover = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('发现旧版本草稿'),
+              content: const Text('这份草稿没有作者信息。确认属于自己后，可恢复到当前账号；跳过会保留原草稿。'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('跳过'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('恢复到当前账号'),
+                ),
+              ],
+            ),
+          );
+          if (recover == true) {
+            await _draftStore.recoverLegacy(legacy);
+            draft = await _draftStore.load();
+          }
+        }
+      }
+      if (draft != null && mounted) await _applyDraft(draft);
+    } catch (error) {
+      debugPrint('加载草稿失败: $error');
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('恢复草稿失败，原草稿已保留，请稍后重试')));
+      }
+    } finally {
+      if (mounted) setState(() => _isLoadingDraft = false);
+    }
   }
 
   Future<void> _applyDraft(DraftData draft) async {
@@ -196,8 +217,9 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
         } else if (item.isLocal &&
             item.file != null &&
             await item.file!.exists()) {
-          final f = item.file!;
+          final f = await _draftStore.importImage(item.file!);
           final isMotion = await MotionPhotoHelper.isMotionPhoto(f);
+          if (!mounted) return;
           final uploadLive = isMotion && item.uploadLive;
           loadedPhotos.add(
             PhotoEntry.file(
@@ -210,50 +232,16 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
             final path = f.path;
             final wasLive = item.uploadedLive ?? false;
             if (wasLive == uploadLive) {
-              _uploadedUrls[path] = item.uploadedUrl!;
-              _uploadedIsLive[path] = wasLive;
-              _uploadStatuses[path] = PhotoUploadStatus.success;
+              _uploads.restore(path, item.uploadedUrl!, wasLive);
             } else {
-              _enqueueDelete(item.uploadedUrl!);
+              _uploads.deleteOrphan(item.uploadedUrl!);
             }
-          }
-        }
-      }
-    } else {
-      // 兼容旧版草稿（仅有 images）
-      for (var i = 0; i < draft.images.length; i++) {
-        final f = draft.images[i];
-        if (!await f.exists()) continue;
-        final isMotion = await MotionPhotoHelper.isMotionPhoto(f);
-        final uploadLive = isMotion && (draft.liveFlags[i] ?? false);
-        loadedPhotos.add(
-          PhotoEntry.file(
-            f,
-            isMotion: isMotion && uploadLive,
-            uploadLive: isMotion && uploadLive,
-          ),
-        );
-      }
-      for (final e in draft.uploaded.entries) {
-        if (e.key >= 0 && e.key < draft.images.length) {
-          final f = draft.images[e.key];
-          final path = f.path;
-          final wasLive = draft.uploadedLive[e.key] ?? false;
-          final shouldBeLive = e.key < loadedPhotos.length
-              ? loadedPhotos[e.key].uploadLive
-              : false;
-
-          if (wasLive == shouldBeLive) {
-            _uploadedUrls[path] = e.value;
-            _uploadedIsLive[path] = wasLive;
-            _uploadStatuses[path] = PhotoUploadStatus.success;
-          } else {
-            _enqueueDelete(e.value);
           }
         }
       }
     }
 
+    if (!mounted) return;
     setState(() {
       _feelingController.text = draft.feeling;
       _mood = draft.mood;
@@ -264,627 +252,131 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
     _lastSavedDraftSnapshot = _takeCurrentSnapshot();
 
     // 对草稿中尚未上传成功或需要重新上传的本地图片，自动加入预上传队列
-    final unUploaded = <File>[];
-    for (final p in _photos) {
-      if (p.isLocal &&
-          p.file != null &&
-          !_uploadedUrls.containsKey(p.file!.path)) {
-        unUploaded.add(p.file!);
-      }
-    }
-    if (unUploaded.isNotEmpty) {
-      _enqueueUploads(unUploaded);
-    }
+    _uploads.enqueue(_photos);
   }
 
   @override
   void dispose() {
+    _uploads.removeListener(_onUploadsChanged);
+    _uploads.dispose();
     _feelingController.dispose();
-    // 页面销毁时清理未完成的上传标记与保活通知
-    _cancelledUploads.addAll(_inFlightUploads);
-    for (final uploadId in _inFlightUploadIds.values) {
-      StorageService().abortUpload(uploadId);
-    }
-    _inFlightUploadIds.clear();
-    _pendingUploadQueue.clear();
-    if (_hasForegroundKeepAlive) {
-      ForegroundServiceHelper.stop();
-      WakelockHelper.release();
-    }
     super.dispose();
   }
 
-  /// 新建模式下图片变动后即时落地草稿目录，防临时文件被系统清理；
-  /// 同时持久化当前断点续传进度与实况开关设置，让进度与图片顺序保持一致。
   void _syncDraftImages() {
-    DraftService.saveImages(
-      _dateStr,
-      _localFiles,
-      feeling: _feelingController.text,
-      mood: _mood,
-      updateMood: true,
-      uploaded: _currentUploadProgress(),
-      liveFlags: _currentLiveFlags(),
-      uploadedLive: _currentUploadedLive(),
-      items: _buildDraftItems(),
-    );
+    if (_hasSavedSuccessfully || !mounted) return;
+    _saveDraftInternal().catchError((Object error) {
+      debugPrint('自动保存草稿失败: $error');
+    });
   }
 
-  /// 当前实况开关设置：序号 → 是否上传实况
-  Map<int, bool> _currentLiveFlags() {
-    final flags = <int, bool>{};
-    for (var i = 0; i < _photos.length; i++) {
-      final p = _photos[i];
-      if (p.isLocal && p.isMotion) {
-        flags[i] = p.uploadLive;
-      }
-    }
-    return flags;
-  }
-
-  /// 已上传版本的实况标识：序号 → 是否为实况
-  Map<int, bool> _currentUploadedLive() {
-    final liveMap = <int, bool>{};
-    for (var i = 0; i < _photos.length; i++) {
-      final p = _photos[i];
-      if (p.isLocal) {
-        final isLive = _uploadedIsLive[p.file!.path];
-        if (isLive != null) liveMap[i] = isLive;
-      }
-    }
-    return liveMap;
-  }
-
-  /// 当前断点续传进度：序号 → URL（序号对应草稿图片的序号）
-  Map<int, String> _currentUploadProgress() {
-    final uploaded = <int, String>{};
-    for (var i = 0; i < _photos.length; i++) {
-      final p = _photos[i];
-      if (p.isLocal) {
-        final url = _uploadedUrls[p.file!.path];
-        if (url != null) uploaded[i] = url;
-      }
-    }
-    return uploaded;
-  }
-
-  /// 将本地文件加入上传队列
-  void _enqueueUploads(List<File> files) {
-    for (final f in files) {
-      final path = f.path;
-      if (_uploadedUrls.containsKey(path)) {
-        _uploadStatuses[path] = PhotoUploadStatus.success;
-        continue;
-      }
-      _cancelledUploads.remove(path);
-      if (!_inFlightUploads.contains(path)) {
-        _uploadStatuses[path] = PhotoUploadStatus.queued;
-      }
-      if (!_pendingUploadQueue.contains(path) &&
-          !_inFlightUploads.contains(path)) {
-        _pendingUploadQueue.add(path);
-      }
-    }
-    if (mounted) setState(() {});
-    _processUploadQueue();
-  }
-
-  /// 调度上传队列——串行上传
-  static const int _maxConcurrentUploads = 1;
-
-  Future<void> _processUploadQueue() async {
-    if (!mounted) return;
-
-    final currentUser = ref.read(currentUserProvider);
-    if (currentUser == null) return;
-    final folder = 'user_${currentUser.uid}';
-    final storageService = ref.read(storageServiceProvider);
-
-    _updateKeepAliveState();
-
-    while (_inFlightUploads.length < _maxConcurrentUploads &&
-        _pendingUploadQueue.isNotEmpty) {
-      final path = _pendingUploadQueue.removeAt(0);
-      _inFlightUploads.add(path);
-      _uploadStatuses[path] = PhotoUploadStatus.uploading;
-      _uploadProgress[path] = 0.0;
-      if (mounted) setState(() {});
-      _updateKeepAliveState();
-
-      _uploadSingle(path, storageService, folder);
-    }
-  }
-
-  /// 单张上传
-  Future<void> _uploadSingle(
-    String path,
-    StorageService storageService,
-    String folder,
-  ) async {
-    try {
-      final entryIndex = _photos.indexWhere(
-        (p) => p.isLocal && p.file!.path == path,
-      );
-      if (entryIndex == -1) return;
-      final entry = _photos[entryIndex];
-
-      // 无论动态还是静态，直接完整上传对应文件（动态图整张完整上传，静态图上传草稿箱中的静态图），严禁上传时拆分
-      File fileToUpload = entry.file!;
-      final bool isUploadingLive = entry.isMotion && entry.uploadLive;
-
-      if (!await fileToUpload.exists()) {
-        final dir = fileToUpload.parent;
-        final fallback = File('${dir.path}/${_dateStr}_img_$entryIndex.jpg');
-        if (await fallback.exists()) {
-          fileToUpload = fallback;
-          _photos[entryIndex] = PhotoEntry.file(
-            fallback,
-            isMotion: entry.isMotion,
-            uploadLive: entry.uploadLive,
-          );
-        } else {
-          throw Exception('文件不存在: $path');
-        }
-      }
-
-      final url = await storageService.uploadImage(
-        fileToUpload,
-        folder,
-        onProgress: (progress) {
-          if (mounted && _uploadStatuses[path] == PhotoUploadStatus.uploading) {
-            setState(() {
-              _uploadProgress[path] = progress;
-            });
-          }
-        },
-        isCancelled: () => _cancelledUploads.contains(path) || !mounted,
-        onUploadIdCreated: (id) {
-          _inFlightUploadIds[path] = id;
-        },
-      );
-
-      if (_cancelledUploads.contains(path)) {
-        _cancelledUploads.remove(path);
-        _inFlightUploads.remove(path);
-        _inFlightUploadIds.remove(path);
-        _uploadStatuses.remove(path);
-        _uploadProgress.remove(path);
-        // 上传期间已被用户删除，立即清理云端孤儿文件
-        _enqueueDelete(url);
-      } else {
-        _inFlightUploads.remove(path);
-        _inFlightUploadIds.remove(path);
-        _uploadedUrls[path] = url;
-        _uploadedIsLive[path] = isUploadingLive;
-        _uploadStatuses[path] = PhotoUploadStatus.success;
-        _uploadProgress.remove(path);
-        DraftService.saveUploadProgress(
-          _dateStr,
-          _currentUploadProgress(),
-          feeling: _feelingController.text,
-          mood: _mood,
-          updateMood: true,
-          uploadedLive: _currentUploadedLive(),
-          items: _buildDraftItems(),
-        );
-      }
-    } on UploadCancelledException {
-      debugPrint('[UploadQueue] 上传已主动取消并清理分片: $path');
-      _inFlightUploads.remove(path);
-      _inFlightUploadIds.remove(path);
-      _cancelledUploads.remove(path);
-      _uploadStatuses.remove(path);
-      _uploadProgress.remove(path);
-    } catch (e) {
-      debugPrint('[UploadQueue] 上传失败: $path, $e');
-      _inFlightUploads.remove(path);
-      _inFlightUploadIds.remove(path);
-      _uploadProgress.remove(path);
-      if (_cancelledUploads.contains(path)) {
-        _cancelledUploads.remove(path);
-        _uploadStatuses.remove(path);
-      } else {
-        _uploadStatuses[path] = PhotoUploadStatus.failed;
-      }
-    } finally {
-      if (mounted) setState(() {});
-      _processUploadQueue();
-      _updateKeepAliveState();
-
-      // 当所有图片传输任务全部完成（队列与进行中均为空），自动触发一次完整草稿保存
-      if (_inFlightUploads.isEmpty && _pendingUploadQueue.isEmpty && mounted) {
-        try {
-          await _saveDraftInternal();
-        } catch (e) {
-          debugPrint('[UploadQueue] 传输完毕自动存草稿异常: $e');
-        }
-      }
-    }
-  }
-
-  /// 删图处理
   void _handleRemovePhoto(int index) {
     final photo = _photos.removeAt(index);
+    _uploads.remove(photo);
     setState(() {});
-
-    if (photo.isLocal) {
-      final path = photo.file!.path;
-      _pendingUploadQueue.remove(path);
-      _uploadProgress.remove(path);
-      if (_inFlightUploads.contains(path)) {
-        _cancelledUploads.add(path);
-        final uploadId = _inFlightUploadIds.remove(path);
-        if (uploadId != null) {
-          ref.read(storageServiceProvider).abortUpload(uploadId);
-        }
-      }
-      final existingUrl = _uploadedUrls.remove(path);
-      _uploadedIsLive.remove(path);
-      _uploadStatuses.remove(path);
-      if (existingUrl != null) {
-        _enqueueDelete(existingUrl);
-      }
-
-      // 如果移除的是草稿箱缓存的临时静态图，立即清理本地文件
-      if (path.contains('drafts') &&
-          (path.contains('_still_') || path.contains('_tmp_'))) {
-        try {
-          final f = File(path);
-          if (f.existsSync()) {
-            f.deleteSync();
-          }
-        } catch (_) {}
-      }
-    }
-
     _syncDraftImages();
-    _updateKeepAliveState();
   }
 
   /// 用户新选取照片处理：接收选图器已封装好的 PhotoEntry 列表
   Future<void> _handlePhotosAdded(List<PhotoEntry> newEntries) async {
-    final processedEntries = <PhotoEntry>[];
-    for (final entry in newEntries) {
-      if (entry.isLocal && entry.file != null) {
-        if (entry.isMotion && !entry.uploadLive) {
-          // 动态图选择静态图：提取静态图直接存入草稿箱沙盒缓存中，杜绝污染系统相册
-          final stillFile = await DraftService.createDraftStillImage(
-            _dateStr,
-            entry.file!,
-          );
-          processedEntries.add(
-            PhotoEntry.file(stillFile, isMotion: false, uploadLive: false),
-          );
-        } else {
-          // 动态图选择实况，或者原本就是静态图：保留原图
-          processedEntries.add(entry);
-        }
-      } else {
-        processedEntries.add(entry);
-      }
-    }
-
-    setState(() => _photos.addAll(processedEntries));
-    _syncDraftImages();
-    final files = [
-      for (final p in processedEntries)
-        if (p.isLocal) p.file!,
-    ];
-    _enqueueUploads(files);
-  }
-
-  /// 异步删除队列
-  void _enqueueDelete(String url) {
-    if (url.isEmpty) return;
-    _pendingDeleteUrls.add(url);
-    _processDeleteQueue();
-  }
-
-  Future<void> _processDeleteQueue() async {
-    if (_isDeleting || _pendingDeleteUrls.isEmpty) return;
-    _isDeleting = true;
-    _updateKeepAliveState();
-
+    if (_isImportingPhotos || _isSaving) return;
+    setState(() => _isImportingPhotos = true);
     try {
-      final storageService = ref.read(storageServiceProvider);
-      while (_pendingDeleteUrls.isNotEmpty) {
-        final url = _pendingDeleteUrls.removeAt(0);
-        try {
-          await storageService.deleteImage(url);
-        } catch (e) {
-          debugPrint('[DeleteQueue] 删除图片失败: $url, $e');
+      final processed = <PhotoEntry>[];
+      for (final entry in newEntries) {
+        if (!entry.isLocal || entry.file == null) {
+          processed.add(entry);
+          continue;
         }
+        final still = entry.isMotion && !entry.uploadLive;
+        final file = still
+            ? await _draftStore.createStillImage(entry.file!)
+            : await _draftStore.importImage(entry.file!);
+        processed.add(
+          PhotoEntry.file(
+            file,
+            isMotion: !still && entry.isMotion,
+            uploadLive: !still && entry.uploadLive,
+          ),
+        );
+      }
+      if (!mounted) return;
+      setState(() => _photos.addAll(processed));
+      _syncDraftImages();
+      _uploads.enqueue(processed);
+    } catch (error) {
+      debugPrint('导入照片失败: $error');
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('保存所选照片失败，请重试')));
       }
     } finally {
-      _isDeleting = false;
-      _updateKeepAliveState();
+      if (mounted) setState(() => _isImportingPhotos = false);
     }
   }
 
-  /// 重试单张上传
   void _handleRetryUpload(int index) {
     if (index < 0 || index >= _photos.length) return;
-    final photo = _photos[index];
-    if (photo.isLocal) {
-      File file = photo.file!;
-      if (!file.existsSync()) {
-        final fallback = File('${file.parent.path}/${_dateStr}_img_$index.jpg');
-        if (fallback.existsSync()) {
-          file = fallback;
-          _photos[index] = PhotoEntry.file(
-            file,
-            isMotion: photo.isMotion,
-            uploadLive: photo.uploadLive,
-          );
-        }
-      }
-      final path = file.path;
-      _uploadStatuses[path] = PhotoUploadStatus.queued;
-      if (!_pendingUploadQueue.contains(path) &&
-          !_inFlightUploads.contains(path)) {
-        _pendingUploadQueue.add(path);
-      }
-      setState(() {});
-      _processUploadQueue();
-    }
-  }
-
-  /// 保活通知与唤醒锁生命周期同步
-  Future<void> _updateKeepAliveState() async {
-    final isBusy =
-        _inFlightUploads.isNotEmpty ||
-        _pendingUploadQueue.isNotEmpty ||
-        _isDeleting ||
-        _isSaving;
-
-    final localCount = _photos.where((p) => p.isLocal).length;
-    final doneCount = _photos
-        .where((p) => p.isLocal && _uploadedUrls.containsKey(p.file!.path))
-        .length;
-
-    if (isBusy) {
-      if (!_hasForegroundKeepAlive) {
-        _hasForegroundKeepAlive = true;
-        await WakelockHelper.acquire(timeout: const Duration(minutes: 10));
-        await ForegroundServiceHelper.start(
-          title: 'Diptych 图片同步',
-          content: _isSaving
-              ? '正在发布日记...'
-              : (_isDeleting
-                    ? '正在清理图片...'
-                    : '正在上传照片 ($doneCount/$localCount)...'),
-          maxProgress: localCount > 0 ? localCount : 1,
-          progress: doneCount,
-        );
-      } else {
-        await ForegroundServiceHelper.update(
-          title: 'Diptych 图片同步',
-          content: _isSaving
-              ? '正在发布日记...'
-              : (_isDeleting
-                    ? '正在清理图片...'
-                    : '正在上传照片 ($doneCount/$localCount)...'),
-          maxProgress: localCount > 0 ? localCount : 1,
-          progress: doneCount,
-        );
-      }
-    } else {
-      if (_hasForegroundKeepAlive) {
-        _hasForegroundKeepAlive = false;
-        await ForegroundServiceHelper.stop();
-        await WakelockHelper.release();
-      }
-    }
-  }
-
-  /// API 保存成功后更新本地缓存
-  Future<void> _updateCacheAfterSave(
-    String authorId,
-    List<String> imageUrls, {
-    required String momentId,
-    Moment? previousMoment,
-  }) async {
-    final cached = await CacheService.loadDayMoments(_dateStr) ?? [];
-    final idx = cached.indexWhere(
-      (m) => m['date_str'] == _dateStr && m['author_id'] == authorId,
-    );
-    final previous = previousMoment ?? widget.existingMoment;
-    final feeling = _feelingController.text.trim();
-
-    final now = DateHelper.toIsoString(DateTime.now());
-
-    // 构建当前日记的 JSON
-    final momentJson = <String, dynamic>{
-      'id': momentId,
-      'date_str': _dateStr,
-      'author_id': authorId,
-      'image_urls': imageUrls,
-      'feeling': feeling,
-      'mood': _mood,
-      'updated_at': now,
-      'created_at': idx >= 0
-          ? cached[idx]['created_at']
-          : (previous == null
-                ? now
-                : DateHelper.toIsoString(previous.createdAt)),
-      'comments': idx >= 0
-          ? cached[idx]['comments'] ?? []
-          : previous?.comments.map((c) => c.toJson()).toList() ?? [],
-    };
-
-    // 替换或追加到缓存列表
-    if (idx >= 0) {
-      cached[idx] = momentJson;
-    } else {
-      cached.add(momentJson);
-    }
-
-    await CacheService.saveDayMoments(_dateStr, cached);
+    _uploads.enqueue([_photos[index]]);
   }
 
   Future<void> _handleSave() async {
     setState(() => _isSaving = true);
-
-    // 0. 点击发布立即执行一次存草稿，存好草稿再发，以免发布过程中被系统杀后台导致进度完全丢失
+    _uploads.setPublishing(true);
     try {
+      // 本地持久化失败时不继续发布，保留可恢复的完整快照。
       await _saveDraftInternal();
-    } catch (e) {
-      debugPrint('发布前自动存草稿异常: $e');
-    }
-
-    _updateKeepAliveState();
-
-    try {
+      if (!mounted) return;
       final currentUser = ref.read(currentUserProvider);
-      if (currentUser == null) throw Exception('未登录');
-
-      final apiService = ref.read(apiServiceProvider);
-      final storageService = ref.read(storageServiceProvider);
-
-      // 1. 将所有尚未成功上传或实况模式变更的本地图片（包括失败项）推入上传队列并调度
-      for (final p in _photos) {
-        if (p.isLocal) {
-          final path = p.file!.path;
-          final needsUpload = !_uploadedUrls.containsKey(path);
-          if (needsUpload &&
-              !_pendingUploadQueue.contains(path) &&
-              !_inFlightUploads.contains(path)) {
-            _pendingUploadQueue.add(path);
-            _uploadStatuses[path] = PhotoUploadStatus.queued;
-          }
-        }
+      if (currentUser == null || currentUser.uid != _draftStore.userId) {
+        throw StateError('登录账号已改变，请重新打开编辑页');
       }
-      _processUploadQueue();
-
-      // 2. 等待队列中所有图片上传完毕
-      while (_inFlightUploads.isNotEmpty || _pendingUploadQueue.isNotEmpty) {
-        await Future.delayed(const Duration(milliseconds: 100));
-        if (!mounted) return;
-      }
-
-      // 3. 检查是否有图片上传失败
-      final hasFailed = _photos.any(
+      _uploads.enqueue(_photos);
+      await _uploads.waitForUploads();
+      if (!mounted) return;
+      if (_photos.any(
         (p) => p.isLocal && !_uploadedUrls.containsKey(p.file!.path),
+      )) {
+        throw StateError('部分图片上传失败，请点击图片重试后发布');
+      }
+      final imageUrls = <String>[
+        for (final photo in _photos)
+          if (photo.isLocal)
+            _uploadedUrls[photo.file!.path]!
+          else if (photo.url != null)
+            photo.url!,
+      ];
+      final result = await MomentSaveService(ref.read(apiServiceProvider)).save(
+        dateStr: _dateStr,
+        authorId: currentUser.uid,
+        imageUrls: imageUrls,
+        feeling: _feelingController.text.trim(),
+        mood: _mood,
+        existingMoment: widget.existingMoment,
       );
-      if (hasFailed) {
-        throw Exception('部分图片上传失败，请点击图片重试后发布');
-      }
-
-      // 4. 按当前 UI 图片顺序组装 imageUrls
-      final imageUrls = <String>[];
-      for (final p in _photos) {
-        if (p.isLocal) {
-          final url = _uploadedUrls[p.file!.path];
-          if (url != null) imageUrls.add(url);
-        } else if (p.url != null) {
-          imageUrls.add(p.url!);
-        }
-      }
-
-      ForegroundServiceHelper.update(
-        title: 'Diptych 日记发布',
-        content: '图片已就绪，正在发布日记...',
-        maxProgress: 1,
-        progress: 1,
-      );
-
-      if (_isEdit) {
-        // 删除被移除的旧图
-        for (final old in widget.existingMoment!.imageUrls) {
-          if (!imageUrls.contains(old)) {
-            storageService.deleteImage(old);
-            try {
-              await DefaultCacheManager().removeFile(old);
-            } catch (_) {}
-          }
-        }
-
-        await apiService.updateMoment(widget.existingMoment!.id, {
-          'image_urls': imageUrls,
-          'feeling': _feelingController.text.trim(),
-          'mood': _mood,
-        });
-        await _updateCacheAfterSave(
-          currentUser.uid,
-          imageUrls,
-          momentId: widget.existingMoment!.id,
-        );
-      } else {
-        // 防并发：其他设备可能已创建当天日记
-        final existing = await apiService.getMomentByDate(
-          currentUser.uid,
-          _dateStr,
-        );
-        if (existing != null) {
-          final finalUrls = imageUrls.isNotEmpty
-              ? imageUrls
-              : existing.imageUrls;
-          for (final old in existing.imageUrls) {
-            if (!finalUrls.contains(old)) {
-              storageService.deleteImage(old);
-              try {
-                await DefaultCacheManager().removeFile(old);
-              } catch (_) {}
-            }
-          }
-          await apiService.updateMoment(existing.id, {
-            'image_urls': finalUrls,
-            'feeling': _feelingController.text.trim(),
-            'mood': _mood,
-          });
-          await _updateCacheAfterSave(
-            currentUser.uid,
-            finalUrls,
-            momentId: existing.id,
-            previousMoment: existing,
-          );
-        } else {
-          final createdId = await apiService.createMoment(
-            dateStr: _dateStr,
-            authorId: currentUser.uid,
-            imageUrls: imageUrls,
-            feeling: _feelingController.text.trim(),
-            mood: _mood,
-          );
-          await _updateCacheAfterSave(
-            currentUser.uid,
-            imageUrls,
-            momentId: createdId,
-          );
-        }
-      }
-
-      // 清理断点续传中已上传、但最终未使用的孤儿图片（如重试前被移除的图）
-      for (final url in _uploadedUrls.values) {
-        if (!imageUrls.contains(url)) {
-          storageService.deleteImage(url);
-          try {
-            await DefaultCacheManager().removeFile(url);
-          } catch (_) {}
-        }
-      }
-
-      // 发布成功 → 将已上传的草稿/本地图片转移至日记图片缓存 (DefaultCacheManager)
-      // 避免后续下载缓存时重新从云端拉取自己的图片
-      try {
-        final localFiles = [
-          for (final p in _photos)
-            if (p.isLocal && p.file != null) p.file!,
-        ];
-        await DraftService.transferToMomentCache(
-          _dateStr,
-          localFiles,
-          _uploadedUrls,
-          finalImageUrls: imageUrls,
-        );
-      } catch (e) {
-        debugPrint('转移草稿图片至日记缓存异常: $e');
-      }
-
-      // 转移完成后清除草稿
-      await DraftService.clear(_dateStr);
+      // 远端记录确认成功后，清理被替换的旧资源。
       _hasSavedSuccessfully = true;
-
+      _uploads.setCommittedUrls(result.imageUrls);
+      for (final url in {...result.removedUrls, ..._uploadedUrls.values}) {
+        if (result.imageUrls.contains(url)) continue;
+        _uploads.deleteOrphan(url);
+        try {
+          await PrivateImageCache().removeFile(url);
+        } catch (_) {}
+      }
+      try {
+        await MomentDraftStore.transferToMomentCache(
+          _buildDraftItems(),
+          result.imageUrls,
+        );
+      } catch (error) {
+        debugPrint('日记已保存，图片缓存写入失败: $error');
+      }
+      try {
+        await _draftStore.clear();
+      } catch (error) {
+        debugPrint('日记已保存，清除草稿失败: $error');
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -893,67 +385,47 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
         ),
       );
       Navigator.pop(context, true);
-    } catch (e) {
-      // 发布失败时再次保存草稿（包含最新断点续传进度），防止用户内容丢失
+    } catch (error) {
+      var draftSaved = false;
       try {
         await _saveDraftInternal();
+        draftSaved = true;
       } catch (_) {}
-
-      debugPrint('发布日记失败: $e');
+      debugPrint('发布日记失败: $error');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('保存失败，已自动为您保存为草稿，请稍后重试'),
+        SnackBar(
+          content: Text(
+            draftSaved ? '保存失败，已保存为草稿，请稍后重试' : '保存失败，草稿未能落盘，请保留页面后重试',
+          ),
           backgroundColor: AppTheme.dangerColor,
         ),
       );
     } finally {
+      _uploads.setPublishing(false);
       if (mounted) setState(() => _isSaving = false);
-      _updateKeepAliveState();
     }
   }
 
   Future<void> _saveDraftInternal() async {
-    final items = _buildDraftItems();
-    await DraftService.save(
-      _dateStr,
-      _feelingController.text,
-      _mood,
-      images: _localFiles,
-      uploaded: _currentUploadProgress(),
-      liveFlags: _currentLiveFlags(),
-      uploadedLive: _currentUploadedLive(),
-      items: items,
+    if (_hasSavedSuccessfully) return;
+    final snapshot = _takeCurrentSnapshot();
+    await _draftStore.save(
+      feeling: _feelingController.text,
+      mood: _mood,
+      items: _buildDraftItems(),
     );
-    _lastSavedDraftSnapshot = _takeCurrentSnapshot();
+    _lastSavedDraftSnapshot = snapshot;
   }
 
   Future<void> _discardDraftInternal() async {
-    await DraftService.clear(_dateStr);
+    // 先取消上传，防止 clear 后异步上传回调重新生成草稿。
+    _uploads.cancelUploads();
+    for (final url in _uploadedUrls.values.toSet()) {
+      _uploads.deleteOrphan(url);
+    }
+    await _draftStore.clear();
     _lastSavedDraftSnapshot = null;
-
-    // 取消正在进行的上传任务
-    _cancelledUploads.addAll(_inFlightUploads);
-    for (final uploadId in _inFlightUploadIds.values) {
-      ref.read(storageServiceProvider).abortUpload(uploadId);
-    }
-    _inFlightUploadIds.clear();
-    _pendingUploadQueue.clear();
-
-    // 清理本次新增且已预上传成功的孤儿云端文件
-    for (final p in _photos) {
-      if (p.isLocal && p.file != null) {
-        final uploadedUrl = _uploadedUrls[p.file!.path];
-        if (uploadedUrl != null && uploadedUrl.isNotEmpty) {
-          _enqueueDelete(uploadedUrl);
-        }
-      }
-    }
-
-    if (_hasForegroundKeepAlive) {
-      ForegroundServiceHelper.stop();
-      WakelockHelper.release();
-    }
   }
 
   /// 存草稿
@@ -993,7 +465,9 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
   }
 
   Future<void> _handleBackPress() async {
-    if (_isSaving || _isSavingDraft) return;
+    if (_isSaving || _isSavingDraft || _isLoadingDraft || _isImportingPhotos) {
+      return;
+    }
     if (!_hasChanges) {
       Navigator.of(context).pop();
       return;
@@ -1057,6 +531,11 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
         }
       } catch (e) {
         debugPrint('退出时保存草稿失败: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(const SnackBar(content: Text('草稿保存失败，请重试后再退出')));
+        }
+        return false;
       }
       return true;
     } else {
@@ -1096,7 +575,11 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
             SizedBox(
               width: 56,
               child: TextButton(
-                onPressed: _isSavingDraft || _isSaving
+                onPressed:
+                    _isSavingDraft ||
+                        _isSaving ||
+                        _isLoadingDraft ||
+                        _isImportingPhotos
                     ? null
                     : _handleSaveDraft,
                 style: TextButton.styleFrom(
@@ -1127,13 +610,18 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                   ),
-                  onPressed: _isSaving || _isSavingDraft ? null : _handleSave,
+                  onPressed:
+                      _isSaving ||
+                          _isSavingDraft ||
+                          _isLoadingDraft ||
+                          _isImportingPhotos
+                      ? null
+                      : _handleSave,
                   child: _isSaving
                       ? FittedBox(
                           fit: BoxFit.scaleDown,
                           child: Text(
-                            _inFlightUploads.isNotEmpty ||
-                                    _pendingUploadQueue.isNotEmpty
+                            _uploads.isUploading
                                 ? '上传中 $doneCount/$localCount'
                                 : '发布中…',
                             style: const TextStyle(fontSize: 12),
@@ -1148,118 +636,124 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
             ),
           ],
         ),
-        body: SafeArea(
-          top: false,
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final outerPadding = constraints.maxHeight < 360 ? 8.0 : 12.0;
-              final height = math.max(
-                0.0,
-                constraints.maxHeight - outerPadding * 2,
-              );
-              final gap = math.min(height / 12, height < 360 ? 6.0 : 8.0);
-              final padding = math.min(height / 18, height < 240 ? 6.0 : 10.0);
-              final showTitles = height >= 180;
-              final titleHeight =
-                  MediaQuery.textScalerOf(context).scale(14) * 1.2;
-              final sectionFrame =
-                  padding * 2 + (showTitles ? titleHeight + 6 : 0);
-              final contentBudget = math.max(
-                0.0,
-                height - sectionFrame * 3 - gap * 2,
-              );
-              final moodHeight = math.min(36.0, contentBudget * .35);
-              final remaining = math.max(0.0, contentBudget - moodHeight);
-              final gridWidth = math.max(
-                0.0,
-                math.min(constraints.maxWidth, 680) -
-                    outerPadding * 2 -
-                    padding * 2,
-              );
-              final photoHeight = math.min(
-                math.max(0.0, (gridWidth * 2 - 8) / 3),
-                remaining * .5,
-              );
+        body: AbsorbPointer(
+          absorbing: _isSaving || _isLoadingDraft || _isImportingPhotos,
+          child: SafeArea(
+            top: false,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final outerPadding = constraints.maxHeight < 360 ? 8.0 : 12.0;
+                final height = math.max(
+                  0.0,
+                  constraints.maxHeight - outerPadding * 2,
+                );
+                final gap = math.min(height / 12, height < 360 ? 6.0 : 8.0);
+                final padding = math.min(
+                  height / 18,
+                  height < 240 ? 6.0 : 10.0,
+                );
+                final showTitles = height >= 180;
+                final titleHeight =
+                    MediaQuery.textScalerOf(context).scale(14) * 1.2;
+                final sectionFrame =
+                    padding * 2 + (showTitles ? titleHeight + 6 : 0);
+                final contentBudget = math.max(
+                  0.0,
+                  height - sectionFrame * 3 - gap * 2,
+                );
+                final moodHeight = math.min(36.0, contentBudget * .35);
+                final remaining = math.max(0.0, contentBudget - moodHeight);
+                final gridWidth = math.max(
+                  0.0,
+                  math.min(constraints.maxWidth, 680) -
+                      outerPadding * 2 -
+                      padding * 2,
+                );
+                final photoHeight = math.min(
+                  math.max(0.0, (gridWidth * 2 - 8) / 3),
+                  remaining * .5,
+                );
 
-              Widget section(String title, String id, Widget content) =>
-                  _buildEditorSection(
-                    key: ValueKey(id),
-                    title: title,
-                    padding: padding,
-                    showTitle: showTitles,
-                    titleHeight: titleHeight,
-                    child: content,
-                  );
-              return Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 680),
-                  child: Padding(
-                    padding: EdgeInsets.all(outerPadding),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        SizedBox(
-                          height: sectionFrame + moodHeight,
-                          child: section(
-                            AppStrings.feelingLabel,
-                            'diary-mood-card',
-                            _buildMoodSelector(),
+                Widget section(String title, String id, Widget content) =>
+                    _buildEditorSection(
+                      key: ValueKey(id),
+                      title: title,
+                      padding: padding,
+                      showTitle: showTitles,
+                      titleHeight: titleHeight,
+                      child: content,
+                    );
+                return Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 680),
+                    child: Padding(
+                      padding: EdgeInsets.all(outerPadding),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          SizedBox(
+                            height: sectionFrame + moodHeight,
+                            child: section(
+                              AppStrings.feelingLabel,
+                              'diary-mood-card',
+                              _buildMoodSelector(),
+                            ),
                           ),
-                        ),
-                        SizedBox(height: gap),
-                        SizedBox(
-                          height: sectionFrame + photoHeight,
-                          child: section(
-                            AppStrings.photosLabel,
-                            'diary-photos-card',
-                            _buildPhotoGrid(),
+                          SizedBox(height: gap),
+                          SizedBox(
+                            height: sectionFrame + photoHeight,
+                            child: section(
+                              AppStrings.photosLabel,
+                              'diary-photos-card',
+                              _buildPhotoGrid(),
+                            ),
                           ),
-                        ),
-                        SizedBox(height: gap),
-                        Expanded(
-                          child: section(
-                            '今日感受',
-                            'diary-feeling-card',
-                            SelectionContainer.disabled(
-                              child: TextField(
-                                key: const ValueKey('diary-feeling-input'),
-                                controller: _feelingController,
-                                expands: true,
-                                minLines: null,
-                                maxLines: null,
-                                textAlignVertical: TextAlignVertical.top,
-                                scrollPhysics: const ClampingScrollPhysics(),
-                                style: const TextStyle(
-                                  fontSize: 16,
-                                  height: 1.6,
-                                  color: AppTheme.textPrimary,
-                                ),
-                                contextMenuBuilder:
-                                    (context, editableTextState) =>
-                                        AdaptiveTextSelectionToolbar.buttonItems(
-                                          anchors: editableTextState
-                                              .contextMenuAnchors,
-                                          buttonItems: editableTextState
-                                              .contextMenuButtonItems,
-                                        ),
-                                decoration: const InputDecoration(
-                                  hintText: AppStrings.feelingHint,
-                                  border: InputBorder.none,
-                                  enabledBorder: InputBorder.none,
-                                  focusedBorder: InputBorder.none,
-                                  filled: false,
-                                  contentPadding: EdgeInsets.zero,
+                          SizedBox(height: gap),
+                          Expanded(
+                            child: section(
+                              '今日感受',
+                              'diary-feeling-card',
+                              SelectionContainer.disabled(
+                                child: TextField(
+                                  key: const ValueKey('diary-feeling-input'),
+                                  controller: _feelingController,
+                                  expands: true,
+                                  minLines: null,
+                                  maxLines: null,
+                                  textAlignVertical: TextAlignVertical.top,
+                                  scrollPhysics: const ClampingScrollPhysics(),
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    height: 1.6,
+                                    color: AppTheme.textPrimary,
+                                  ),
+                                  contextMenuBuilder:
+                                      (context, editableTextState) =>
+                                          AdaptiveTextSelectionToolbar.buttonItems(
+                                            anchors: editableTextState
+                                                .contextMenuAnchors,
+                                            buttonItems: editableTextState
+                                                .contextMenuButtonItems,
+                                          ),
+                                  decoration: const InputDecoration(
+                                    hintText: AppStrings.feelingHint,
+                                    border: InputBorder.none,
+                                    enabledBorder: InputBorder.none,
+                                    focusedBorder: InputBorder.none,
+                                    filled: false,
+                                    contentPadding: EdgeInsets.zero,
+                                  ),
                                 ),
                               ),
                             ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              );
-            },
+                );
+              },
+            ),
           ),
         ),
       ),

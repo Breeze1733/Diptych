@@ -3,18 +3,15 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../constants/app_theme.dart';
-
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:photo_view/photo_view_gallery.dart';
 import 'package:video_player/video_player.dart';
 
+import '../services/private_image_cache.dart';
 import '../utils/file_helper.dart';
 import '../utils/motion_photo_helper.dart';
 import 'photo_grid_picker.dart';
-import 'live_photo_badge.dart';
 import 'image_preview_chrome.dart';
 
 /// 弹出半透明底色的图片列表（一行三张，可滑动），点击单张进入全屏查看
@@ -38,7 +35,6 @@ void showFullScreenPreview(
   List<String>? urls,
   List<PhotoEntry>? entries,
   int initialIndex = 0,
-  void Function(int index, bool isLive)? onToggleLive,
 }) {
   Navigator.push(
     context,
@@ -47,7 +43,6 @@ void showFullScreenPreview(
         urls: urls,
         entries: entries,
         initialIndex: initialIndex,
-        onToggleLive: onToggleLive,
       ),
     ),
   );
@@ -149,6 +144,7 @@ class _GalleryGridItemState extends State<_GalleryGridItem> {
         fit: StackFit.expand,
         children: [
           CachedNetworkImage(
+            cacheManager: PrivateImageCache(),
             imageUrl: widget.url,
             fit: BoxFit.cover,
             placeholder: (_, _) => const Center(
@@ -207,14 +203,12 @@ class FullScreenImage extends StatefulWidget {
   final List<String>? urls;
   final List<PhotoEntry>? entries;
   final int initialIndex;
-  final void Function(int index, bool isLive)? onToggleLive;
 
   const FullScreenImage({
     super.key,
     this.urls,
     this.entries,
     this.initialIndex = 0,
-    this.onToggleLive,
   }) : assert(urls != null || entries != null, 'urls 与 entries 至少提供一个');
 
   @override
@@ -282,10 +276,16 @@ class _FullScreenImageState extends State<FullScreenImage> {
       if (entry.isLocal) {
         return FileImage(entry.file!);
       } else {
-        return CachedNetworkImageProvider(entry.url!);
+        return CachedNetworkImageProvider(
+          entry.url!,
+          cacheManager: PrivateImageCache(),
+        );
       }
     }
-    return CachedNetworkImageProvider(widget.urls![index]);
+    return CachedNetworkImageProvider(
+      widget.urls![index],
+      cacheManager: PrivateImageCache(),
+    );
   }
 
   /// 获取当前索引对应的本地文件（本地新选的 File，或已下载到磁盘缓存的 File）
@@ -294,22 +294,20 @@ class _FullScreenImageState extends State<FullScreenImage> {
       final entry = widget.entries![index];
       if (entry.isLocal && entry.file != null) return entry.file;
       if (entry.url != null && entry.url!.isNotEmpty) {
-        final fileInfo = await DefaultCacheManager().getFileFromCache(
-          entry.url!,
-        );
+        final fileInfo = await PrivateImageCache().getFileFromCache(entry.url!);
         if (fileInfo != null) return fileInfo.file;
         try {
-          return await DefaultCacheManager().getSingleFile(entry.url!);
+          return await PrivateImageCache().getSingleFile(entry.url!);
         } catch (_) {
           return null;
         }
       }
     } else if (widget.urls != null && index < widget.urls!.length) {
       final url = widget.urls![index];
-      final fileInfo = await DefaultCacheManager().getFileFromCache(url);
+      final fileInfo = await PrivateImageCache().getFileFromCache(url);
       if (fileInfo != null) return fileInfo.file;
       try {
-        return await DefaultCacheManager().getSingleFile(url);
+        return await PrivateImageCache().getSingleFile(url);
       } catch (_) {
         return null;
       }
@@ -447,11 +445,11 @@ class _FullScreenImageState extends State<FullScreenImage> {
     setState(() => _isDownloading = true);
     try {
       File? sourceFile;
-      final fileInfo = await DefaultCacheManager().getFileFromCache(url);
+      final fileInfo = await PrivateImageCache().getFileFromCache(url);
       if (fileInfo != null) {
         sourceFile = fileInfo.file;
       } else {
-        sourceFile = await DefaultCacheManager().getSingleFile(url);
+        sourceFile = await PrivateImageCache().getSingleFile(url);
       }
 
       final dir = await FileHelper.getDownloadsDirectory();
@@ -484,86 +482,6 @@ class _FullScreenImageState extends State<FullScreenImage> {
   }
 
   Widget _buildLiveButton() {
-    // 选图预览且允许切换实况模式：微信同款，勾选实况播放一遍，取消实况不播放
-    if (widget.entries != null &&
-        _currentIndex < widget.entries!.length &&
-        widget.onToggleLive != null) {
-      final currentEntry = widget.entries![_currentIndex];
-      final bool isLiveSelected = currentEntry.uploadLive;
-
-      return GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: () async {
-          final newLive = !isLiveSelected;
-          widget.entries![_currentIndex] = currentEntry.copyWith(
-            uploadLive: newLive,
-          );
-          widget.onToggleLive?.call(_currentIndex, newLive);
-          setState(() {});
-
-          if (newLive) {
-            // 勾选实况：播放一遍实况
-            if (_videoController != null &&
-                _videoController!.value.isInitialized) {
-              await _videoController!.seekTo(Duration.zero);
-              await _videoController!.play();
-              if (mounted) setState(() => _isPlaying = true);
-            }
-          } else {
-            // 取消实况：不播放
-            if (_videoController != null &&
-                _videoController!.value.isInitialized) {
-              await _videoController!.pause();
-              await _videoController!.seekTo(Duration.zero);
-            }
-            if (mounted) setState(() => _isPlaying = false);
-          }
-        },
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-          decoration: BoxDecoration(
-            color: isLiveSelected
-                ? AppTheme.primaryColor.withAlpha(230)
-                : Colors.black54,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: isLiveSelected ? Colors.white70 : Colors.white30,
-              width: 0.8,
-            ),
-          ),
-          child: CustomPaint(
-            foregroundPainter: isLiveSelected
-                ? null
-                : const DiagonalSlashPainter(
-                    color: Colors.white,
-                    strokeWidth: 1.6,
-                  ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  isLiveSelected
-                      ? Icons.motion_photos_on
-                      : Icons.motion_photos_off_outlined,
-                  size: 15,
-                  color: Colors.white,
-                ),
-                const SizedBox(width: 4),
-                const Text(
-                  '实况',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-
     // 浏览已发布动态：原有轻点播放/暂停逻辑
     return GestureDetector(
       behavior: HitTestBehavior.opaque,

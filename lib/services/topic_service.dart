@@ -1,13 +1,15 @@
 import 'dart:convert';
-import 'package:http/http.dart' as http;
+
+import 'http_request.dart';
 import '../models/topic.dart';
 import '../constants/api_config.dart';
 
 class TopicService {
   static const String _baseUrl = ApiConfig.apiBaseUrl;
+  final _http = HttpRequests();
 
   Future<List<Topic>> getTopics() async {
-    final res = await http.get(Uri.parse('$_baseUrl/topics'));
+    final res = await _http.get(Uri.parse('$_baseUrl/topics'));
     final body = jsonDecode(res.body);
     if (body['ok'] != true || body['data'] == null) {
       throw Exception(body['error'] ?? '加载失败');
@@ -16,7 +18,7 @@ class TopicService {
   }
 
   Future<Topic> createTopic(String title, String authorId) async {
-    final res = await http.post(
+    final res = await _http.post(
       Uri.parse('$_baseUrl/topics'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'title': title, 'author_id': authorId}),
@@ -29,7 +31,7 @@ class TopicService {
   }
 
   Future<Topic> getTopic(String id) async {
-    final res = await http.get(Uri.parse('$_baseUrl/topics/$id'));
+    final res = await _http.get(Uri.parse('$_baseUrl/topics/$id'));
     final body = jsonDecode(res.body);
     if (body['ok'] != true || body['data'] == null) {
       throw Exception(body['error'] ?? '加载失败');
@@ -37,8 +39,12 @@ class TopicService {
     return Topic.fromJson(body['data']);
   }
 
-  Future<Post> createPost(String topicId, String authorId, String content) async {
-    final res = await http.post(
+  Future<Post> createPost(
+    String topicId,
+    String authorId,
+    String content,
+  ) async {
+    final res = await _http.post(
       Uri.parse('$_baseUrl/topics/$topicId/posts'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'author_id': authorId, 'content': content}),
@@ -51,6 +57,6 @@ class TopicService {
   }
 
   Future<void> deletePost(String topicId, String postId) async {
-    await http.delete(Uri.parse('$_baseUrl/topics/$topicId/posts/$postId'));
+    await _http.delete(Uri.parse('$_baseUrl/topics/$topicId/posts/$postId'));
   }
 }

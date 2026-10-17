@@ -76,9 +76,14 @@ class _WallpaperPreviewScreenState
         topicOpacity: isDiary ? null : _opacity,
         cardOpacity: _cardOpacity,
       );
+      try {
+        await saveWallpaperSettings(user.uid, newSettings);
+        await CacheService.saveUser(_withWallpaper(user, newSettings));
+      } catch (error) {
+        debugPrint('壁纸透明度已保存，本地缓存更新失败: $error');
+      }
+      if (!mounted || ref.read(currentUserProvider)?.uid != user.uid) return;
       ref.read(wallpaperSettingsProvider.notifier).setSettings(newSettings);
-      await saveWallpaperSettings(newSettings);
-      await CacheService.saveUser(_withWallpaper(user, newSettings));
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

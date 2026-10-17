@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 
 class TransferForegroundService : Service() {
@@ -19,7 +20,6 @@ class TransferForegroundService : Service() {
 
         const val ACTION_START = "ACTION_START"
         const val ACTION_UPDATE = "ACTION_UPDATE"
-        const val ACTION_STOP = "ACTION_STOP"
 
         const val EXTRA_TITLE = "EXTRA_TITLE"
         const val EXTRA_CONTENT = "EXTRA_CONTENT"
@@ -34,13 +34,11 @@ class TransferForegroundService : Service() {
                 putExtra(EXTRA_MAX_PROGRESS, maxProgress)
                 putExtra(EXTRA_PROGRESS, progress)
             }
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    context.startForegroundService(intent)
-                } else {
-                    context.startService(intent)
-                }
-            } catch (_: Exception) {}
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
         }
 
         fun updateProgress(context: Context, title: String, content: String, maxProgress: Int, progress: Int) {
@@ -51,18 +49,11 @@ class TransferForegroundService : Service() {
                 putExtra(EXTRA_MAX_PROGRESS, maxProgress)
                 putExtra(EXTRA_PROGRESS, progress)
             }
-            try {
-                context.startService(intent)
-            } catch (_: Exception) {}
+            context.startService(intent)
         }
 
         fun stopService(context: Context) {
-            val intent = Intent(context, TransferForegroundService::class.java).apply {
-                action = ACTION_STOP
-            }
-            try {
-                context.startService(intent)
-            } catch (_: Exception) {}
+            context.stopService(Intent(context, TransferForegroundService::class.java))
         }
     }
 
@@ -75,12 +66,6 @@ class TransferForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
-        if (action == ACTION_STOP) {
-            stopForeground(true)
-            stopSelf()
-            return START_NOT_STICKY
-        }
-
         val title = intent?.getStringExtra(EXTRA_TITLE) ?: "Diptych"
         val content = intent?.getStringExtra(EXTRA_CONTENT) ?: "正在处理传输任务..."
         val maxProgress = intent?.getIntExtra(EXTRA_MAX_PROGRESS, 0) ?: 0
@@ -98,7 +83,11 @@ class TransferForegroundService : Service() {
             } else {
                 startForeground(NOTIFICATION_ID, notification)
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            Log.w("DiptychTransfer", "Unable to enter foreground", e)
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
 
         if (action == ACTION_UPDATE) {
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager

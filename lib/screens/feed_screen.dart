@@ -161,7 +161,6 @@ class FeedScreen extends ConsumerWidget {
               partner,
               selectedDate,
               context,
-              scale,
             ),
           ),
         ),
@@ -176,7 +175,6 @@ class FeedScreen extends ConsumerWidget {
     partner,
     DateTime selectedDate,
     BuildContext context,
-    double scale,
   ) {
     // 只有彻底加载失败且无用户数据才显示错误
     if (currentUser == null && loadUsersAsync.hasError) {
@@ -226,10 +224,9 @@ class FeedScreen extends ConsumerWidget {
           onNextDay: _canChangeDay(selectedDate, 1)
               ? () => _changeDay(ref, selectedDate, 1)
               : null,
-          scale: scale,
         ),
         if (currentUser != null && partner != null)
-          _buildDayView(ref, currentUser, partner, context, scale)
+          _buildDayView(ref, currentUser, partner, context)
         else
           Expanded(child: _paperArea(ref)),
       ],
@@ -250,7 +247,6 @@ class FeedScreen extends ConsumerWidget {
     currentUser,
     partner,
     BuildContext context,
-    double scale,
   ) {
     final dayMomentsAsync = ref.watch(dayMomentsProvider);
 
@@ -269,7 +265,6 @@ class FeedScreen extends ConsumerWidget {
           partnerNickname: partner.nickname,
           myAvatarUrl: currentUser.avatarUrl,
           partnerAvatarUrl: partner.avatarUrl,
-          scale: scale,
         );
       },
       loading: () => Expanded(child: _paperArea(ref)),

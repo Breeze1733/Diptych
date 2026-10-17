@@ -58,12 +58,6 @@ class AppTheme {
     color: selfColor,
   );
 
-  static const TextStyle momentContent = TextStyle(
-    fontSize: 15,
-    color: textPrimary,
-    height: 1.65,
-  );
-
   static const TextStyle momentTime = TextStyle(
     fontSize: 12,
     color: textSecondary,

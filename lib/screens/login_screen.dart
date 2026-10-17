@@ -26,6 +26,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   }
 
   Future<void> _handleLogin() async {
+    if (_isLoading) return;
     if (!_formKey.currentState!.validate()) return;
 
     setState(() {
@@ -33,17 +34,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       _errorText = null;
     });
 
-    final loginAction = ref.read(loginActionProvider);
-    final role = await loginAction(_keyController.text.trim());
-
-    if (!mounted) return;
-
-    setState(() => _isLoading = false);
-
-    if (role == null) {
-      setState(() => _errorText = AppStrings.loginError);
+    try {
+      final loginAction = ref.read(loginActionProvider);
+      final role = await loginAction(_keyController.text.trim());
+      if (!mounted) return;
+      if (role == null) setState(() => _errorText = AppStrings.loginError);
+    } catch (_) {
+      if (mounted) {
+        setState(() => _errorText = '暂时无法登录，请检查网络或稍后重试');
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
-    // 登录成功后，由 autoLoginProvider 驱动跳转到主页
   }
 
   @override
@@ -108,6 +110,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     // 密钥输入框
                     SelectionContainer.disabled(
                       child: TextFormField(
+                        enabled: !_isLoading,
                         controller: _keyController,
                         contextMenuBuilder: (context, editableTextState) =>
                             AdaptiveTextSelectionToolbar.buttonItems(

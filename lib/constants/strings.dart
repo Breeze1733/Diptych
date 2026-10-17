@@ -9,30 +9,19 @@ class AppStrings {
   static const String loginButton = '进入';
   static const String loginError = '密钥错误，请重试';
 
-  // 主页
-  static const String noPostPlaceholder = '未发布';
-
   // 编辑页
   static const String photosLabel = '今日照片';
   static const String feelingLabel = '今日心情';
   static const String feelingHint = '记录今天的感受...';
   static const String saveButton = '发布';
-  static const String createTitle = '写日记';
-  static const String editTitle = '编辑日记';
 
   // 交互按钮
   static const String editButton = '编辑';
-  static const String commentButton = '评论';
-  static const String commentHint = '写下你的评论...';
-  static const String commentTitle = '添加评论';
-  static const String deleteComment = '删除评论';
-  static const String deleteCommentConfirm = '确定删除这条评论？';
 
   // 通用
   static const String cancel = '取消';
   static const String confirm = '确定';
   static const String uploadSuccess = '保存成功';
-  static const String uploadFailed = '保存失败，请重试';
 
   // 日历
   static const String selectDate = '选择日期';

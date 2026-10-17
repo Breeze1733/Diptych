@@ -87,9 +87,6 @@ class DiptychAssetPickerBuilderDelegate
   /// 通知实况状态更新，驱动底栏和角标刷新
   final ValueNotifier<int> liveNotifier = ValueNotifier<int>(0);
 
-  /// 默认实况倾向（选图时默认静态，用户可主动针对某张图片开启实况）
-  bool defaultLive = false;
-
   @override
   void dispose() {
     liveNotifier.dispose();
@@ -104,13 +101,8 @@ class DiptychAssetPickerBuilderDelegate
     bool selected,
   ) async {
     await super.selectAsset(context, asset, index, selected);
-    if (!selected) {
-      // 刚选中：若默认倾向开启，记录为实况
-      if (defaultLive) {
-        liveAssetIds.add(asset.id);
-      }
-    } else {
-      // 取消选中：从实况集合中移除
+    if (selected) {
+      // 取消选中时同步移除实况选择；新照片默认为静态。
       liveAssetIds.remove(asset.id);
     }
     liveNotifier.value++;
@@ -156,8 +148,6 @@ class DiptychAssetPickerBuilderDelegate
           provider: provider,
           liveAssetIds: liveAssetIds,
           liveNotifier: liveNotifier,
-          textDelegate: textDelegate,
-          themeColor: themeColor,
         ),
       ),
     );
@@ -832,8 +822,6 @@ class _DiptychAssetViewerScreen extends StatefulWidget {
   final DiptychAssetPickerProvider provider;
   final Set<String> liveAssetIds;
   final ValueNotifier<int> liveNotifier;
-  final AssetPickerTextDelegate textDelegate;
-  final Color? themeColor;
 
   const _DiptychAssetViewerScreen({
     required this.previewAssets,
@@ -841,8 +829,6 @@ class _DiptychAssetViewerScreen extends StatefulWidget {
     required this.provider,
     required this.liveAssetIds,
     required this.liveNotifier,
-    required this.textDelegate,
-    this.themeColor,
   });
 
   @override

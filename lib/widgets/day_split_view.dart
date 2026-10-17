@@ -14,14 +14,7 @@ class DaySplitView extends StatelessWidget {
   final String? myAvatarUrl;
   final String? partnerAvatarUrl;
   final VoidCallback? onCreateMyMoment;
-  final VoidCallback? onEditMyMoment;
-  final VoidCallback? onCommentPartner;
   final ValueChanged<Moment>? onOpenReading;
-  final void Function(Comment comment)? onDeleteMyComment;
-  final void Function(Comment comment)? onDeletePartnerComment;
-  final void Function(Comment? parentComment)? onReplyMyComment;
-  final void Function(Comment? parentComment)? onReplyPartnerComment;
-  final double scale;
   final double cardOpacity;
 
   const DaySplitView({
@@ -33,14 +26,7 @@ class DaySplitView extends StatelessWidget {
     this.myAvatarUrl,
     this.partnerAvatarUrl,
     this.onCreateMyMoment,
-    this.onEditMyMoment,
-    this.onCommentPartner,
     this.onOpenReading,
-    this.onDeleteMyComment,
-    this.onDeletePartnerComment,
-    this.onReplyMyComment,
-    this.onReplyPartnerComment,
-    this.scale = 1.0,
     required this.cardOpacity,
   });
 
@@ -66,9 +52,6 @@ class DaySplitView extends StatelessWidget {
                     avatarUrl: myAvatarUrl,
                     isSelf: true,
                     showCreateButton: !showFloatingCreate,
-                    onEdit: onEditMyMoment,
-                    onDeleteComment: onDeleteMyComment,
-                    onReplyComment: onReplyMyComment,
                   ),
                 ),
                 const VerticalDivider(
@@ -83,9 +66,6 @@ class DaySplitView extends StatelessWidget {
                     partnerNickname: myNickname,
                     avatarUrl: partnerAvatarUrl,
                     isSelf: false,
-                    onComment: onCommentPartner,
-                    onDeleteComment: onDeletePartnerComment,
-                    onReplyComment: onReplyPartnerComment,
                   ),
                 ),
               ],
@@ -114,10 +94,6 @@ class DaySplitView extends StatelessWidget {
     required String? avatarUrl,
     required bool isSelf,
     bool showCreateButton = true,
-    VoidCallback? onEdit,
-    VoidCallback? onComment,
-    void Function(Comment comment)? onDeleteComment,
-    void Function(Comment? parentComment)? onReplyComment,
   }) {
     if (moment != null) {
       return MomentCard(
@@ -127,14 +103,9 @@ class DaySplitView extends StatelessWidget {
         avatarUrl: avatarUrl,
         partnerNickname: partnerNickname,
         isSelf: isSelf,
-        onEdit: onEdit,
-        onComment: onComment,
         onOpenReading: onOpenReading == null
             ? null
             : () => onOpenReading!(moment),
-        onDeleteComment: onDeleteComment,
-        onReplyComment: onReplyComment,
-        scale: scale,
       );
     }
 

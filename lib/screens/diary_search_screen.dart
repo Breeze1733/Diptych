@@ -39,6 +39,7 @@ class _DiarySearchScreenState extends ConsumerState<DiarySearchScreen> {
   final ScrollController _scrollController = ScrollController();
 
   Timer? _debounceTimer;
+  int _searchGeneration = 0;
   String _keyword = '';
   bool _isSearching = false;
   bool _isLoadingMore = false;
@@ -78,12 +79,32 @@ class _DiarySearchScreenState extends ConsumerState<DiarySearchScreen> {
 
   void _onQueryChanged(String val) {
     _debounceTimer?.cancel();
+    // 输入一变就使在途请求失效，防止旧响应在防抖等待期间写回。
+    final generation = ++_searchGeneration;
+    if (val.trim().isEmpty) {
+      _performSearch('', generation: generation);
+      return;
+    }
+    setState(() {
+      _isSearching = true;
+      _isLoadingMore = false;
+    });
     _debounceTimer = Timer(const Duration(milliseconds: 300), () {
-      _performSearch(val, isLoadMore: false);
+      _performSearch(val, generation: generation);
     });
   }
 
-  Future<void> _performSearch(String query, {bool isLoadMore = false}) async {
+  Future<void> _performSearch(
+    String query, {
+    bool isLoadMore = false,
+    int? generation,
+  }) async {
+    if (!mounted) return;
+    if (!isLoadMore) _debounceTimer?.cancel();
+    final requestGeneration = isLoadMore
+        ? _searchGeneration
+        : generation ?? ++_searchGeneration;
+    if (requestGeneration != _searchGeneration) return;
     final trimmed = query.trim();
     if (trimmed.isEmpty) {
       if (!mounted) return;
@@ -110,7 +131,9 @@ class _DiarySearchScreenState extends ConsumerState<DiarySearchScreen> {
         _errorMessage = null;
       });
     } else {
-      if (_isLoadingMore || !_hasMore) return;
+      if (_isLoadingMore || _isSearching || !_hasMore || trimmed != _keyword) {
+        return;
+      }
       setState(() => _isLoadingMore = true);
     }
 
@@ -130,7 +153,7 @@ class _DiarySearchScreenState extends ConsumerState<DiarySearchScreen> {
         cursor: isLoadMore ? _nextCursor : null,
       );
 
-      if (!mounted) return;
+      if (!mounted || requestGeneration != _searchGeneration) return;
 
       final newHits = <_SearchHit>[];
       final qLower = trimmed.toLowerCase();
@@ -174,7 +197,7 @@ class _DiarySearchScreenState extends ConsumerState<DiarySearchScreen> {
         _isLoadingMore = false;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || requestGeneration != _searchGeneration) return;
       setState(() {
         _isSearching = false;
         _isLoadingMore = false;

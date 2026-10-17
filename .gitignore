@@ -61,3 +61,13 @@ app.*.map.json
 
 # 本地辅助运维与上传脚本
 scripts/
+
+# 后端运行时数据和私有鉴权配置
+/backend/node_modules/
+/backend/data/
+/backend/uploads/
+/backend/chunks_temp/
+/backend/clips/
+/backend/apk/
+/backend/version.json
+/backend/.env

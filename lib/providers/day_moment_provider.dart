@@ -1,14 +1,13 @@
 import 'dart:convert';
 
-import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/moment.dart';
 import '../models/calendar_marked_dates.dart';
 import '../services/cache_service.dart';
+import '../services/private_image_cache.dart';
 import '../utils/date_helper.dart';
-import '../utils/foreground_service_helper.dart';
-import '../utils/wakelock_helper.dart';
+import '../services/transfer_keep_alive.dart';
 import 'auth_provider.dart';
 import 'selected_date_provider.dart';
 
@@ -33,7 +32,7 @@ void preloadDayImages(List<Moment> moments) {
 
   // 异步处理，绝不阻塞 UI 渲染
   Future(() async {
-    final cacheManager = DefaultCacheManager();
+    final cacheManager = PrivateImageCache();
     final newUrls = <String>[];
 
     for (final url in targetUrls) {
@@ -62,16 +61,18 @@ Future<void> _runPreloadWorker() async {
   if (_isPreloadWorkerRunning) return;
   _isPreloadWorkerRunning = true;
 
-  final cacheManager = DefaultCacheManager();
-  await WakelockHelper.acquire(timeout: const Duration(minutes: 10));
-
+  final cacheManager = PrivateImageCache();
+  final lease = await TransferKeepAlive.acquire(
+    title: 'Diptych 照片缓存',
+    content: '正在缓存照片...',
+  );
   try {
     while (_pendingPreloadUrls.isNotEmpty) {
       final currentBatch = _pendingPreloadUrls.toList();
       _pendingPreloadUrls.clear();
       _inFlightPreloadUrls.addAll(currentBatch);
 
-      await ForegroundServiceHelper.start(
+      await lease.update(
         title: 'Diptych 照片缓存',
         content: '正在缓存照片 ($_preloadDoneCount/$_preloadTotalCount)...',
         maxProgress: _preloadTotalCount,
@@ -87,7 +88,7 @@ Future<void> _runPreloadWorker() async {
           } finally {
             _inFlightPreloadUrls.remove(url);
             _preloadDoneCount++;
-            await ForegroundServiceHelper.update(
+            await lease.update(
               title: 'Diptych 照片缓存',
               content: '正在缓存照片 ($_preloadDoneCount/$_preloadTotalCount)...',
               maxProgress: _preloadTotalCount,
@@ -103,8 +104,7 @@ Future<void> _runPreloadWorker() async {
     _preloadDoneCount = 0;
     _pendingPreloadUrls.clear();
     _inFlightPreloadUrls.clear();
-    await ForegroundServiceHelper.stop();
-    await WakelockHelper.release();
+    await lease.release();
   }
 }
 
@@ -178,30 +178,26 @@ final FutureProvider<Map<String, Moment?>> dayMomentsProvider =
 
       // 从未请求过 → 等网络（仅首次）
       final apiService = ref.read(apiServiceProvider);
-      try {
-        final moments = await apiService.getDayMoments(dateStr, [
+      final moments = await apiService.getDayMoments(dateStr, [
+        currentUser.uid,
+        partner.uid,
+      ]);
+      if (!ref.mounted || CacheService.dayVersion(dateStr) != cacheVersion) {
+        final latest = await CacheService.loadDayMoments(dateStr) ?? [];
+        return _splitMoments(
+          latest.map(Moment.fromJson).toList(),
           currentUser.uid,
           partner.uid,
-        ]);
-        if (!ref.mounted || CacheService.dayVersion(dateStr) != cacheVersion) {
-          final latest = await CacheService.loadDayMoments(dateStr) ?? [];
-          return _splitMoments(
-            latest.map(Moment.fromJson).toList(),
-            currentUser.uid,
-            partner.uid,
-          );
-        }
-        // 即使空也保存，下次秒开
-        await CacheService.saveDayMoments(
-          dateStr,
-          moments.map((m) => m.toJson()).toList(),
         );
-        preloadDayImages(moments);
-        await syncMarkedDatesFromMoments(ref, dateStr, moments);
-        return _splitMoments(moments, currentUser.uid, partner.uid);
-      } catch (_) {
-        return {'myMoment': null, 'partnerMoment': null};
       }
+      // 即使空也保存，下次秒开
+      await CacheService.saveDayMoments(
+        dateStr,
+        moments.map((m) => m.toJson()).toList(),
+      );
+      preloadDayImages(moments);
+      await syncMarkedDatesFromMoments(ref, dateStr, moments);
+      return _splitMoments(moments, currentUser.uid, partner.uid);
     });
 
 /// 日历标记数据（纯本地缓存优先；仅首次无缓存时调一次 API）
@@ -239,7 +235,7 @@ final FutureProvider<CalendarMarkedDates> markedDatesProvider =
 
 /// 从某天日记列表中纯本地同步日历标记（0 网络开销，保证日记与日历强一致）
 Future<void> syncMarkedDatesFromMoments(
-  dynamic ref,
+  Ref ref,
   String dateStr,
   List<Moment> moments,
 ) async {
@@ -267,13 +263,14 @@ Future<void> syncMarkedDatesFromMoments(
   }
 
   if (changed) {
+    if (!ref.mounted) return;
     ref.invalidate(markedDatesProvider);
   }
 }
 
 /// 联网强制拉取所有日期的日记情况并全量覆盖本地缓存（全局刷新或弹窗手动刷新专用）
 Future<void> syncCalendarMarkedDatesFromNetwork(
-  dynamic ref, {
+  WidgetRef ref, {
   bool throwOnError = false,
 }) async {
   try {
@@ -282,6 +279,7 @@ Future<void> syncCalendarMarkedDatesFromNetwork(
     final listA = map['A'] ?? [];
     final listB = map['B'] ?? [];
     await CacheService.overwriteAllCalendarDates(listA, listB);
+    if (!ref.context.mounted) return;
     ref.invalidate(markedDatesProvider);
   } catch (e) {
     if (throwOnError) rethrow;
@@ -301,5 +299,6 @@ Future<void> updateMarkedDateCache(WidgetRef ref) async {
     cached.sort();
     await CacheService.saveMarkedDates(targetUid, cached);
   }
+  if (!ref.context.mounted) return;
   ref.invalidate(markedDatesProvider);
 }

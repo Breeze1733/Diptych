@@ -1,7 +1,8 @@
 import 'dart:io';
 
+import '../services/private_image_cache.dart';
+
 import 'package:flutter/material.dart';
-import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -10,7 +11,7 @@ import '../models/app_user.dart';
 import '../providers/auth_provider.dart';
 import '../providers/wallpaper_provider.dart';
 import '../services/cache_service.dart';
-import '../utils/wakelock_helper.dart';
+import '../services/transfer_keep_alive.dart';
 import 'wallpaper_preview_screen.dart';
 
 import 'package:image_cropper/image_cropper.dart';
@@ -60,7 +61,7 @@ class _WallpaperSettingsScreenState
     return File(cropped.path);
   }
 
-  /// 上传新壁纸：传云端 → 删旧图 → 写本地缓存 → 自动进预览页
+  /// 上传新壁纸：传云端 → 更新记录 → 清理旧图 → 写本地缓存。
   Future<void> _uploadWallpaper(WallpaperType type) async {
     if (_uploading != null) return;
     final user = ref.read(currentUserProvider);
@@ -68,12 +69,13 @@ class _WallpaperSettingsScreenState
 
     final file = await _pickAndCrop();
     if (file == null) return;
-    if (!mounted) return;
+    if (!mounted || ref.read(currentUserProvider)?.uid != user.uid) return;
 
     setState(() => _uploading = type);
-    await WakelockHelper.acquire(timeout: const Duration(minutes: 5));
-
+    TransferKeepAliveLease? lease;
     try {
+      lease = await TransferKeepAlive.acquire();
+      if (!mounted) return;
       final storageService = ref.read(storageServiceProvider);
       final apiService = ref.read(apiServiceProvider);
       final settings = ref.read(wallpaperSettingsProvider);
@@ -81,11 +83,10 @@ class _WallpaperSettingsScreenState
       // 1. 上传新图
       final url = await storageService.uploadImage(file, 'wallpapers');
 
-      // 2. 旧的覆盖掉：删服务器上的旧壁纸图
+      // 2. 记录被替换的旧图，远端更新确认后再清理。
       final oldUrl = type == WallpaperType.diary
           ? settings.diaryUrl
           : settings.topicUrl;
-      if (oldUrl.isNotEmpty) storageService.deleteImage(oldUrl);
 
       // 3. 推到云端
       if (type == WallpaperType.diary) {
@@ -94,18 +95,30 @@ class _WallpaperSettingsScreenState
         await apiService.updateUser(user.uid, wallpaperTopicUrl: url);
       }
 
+      if (oldUrl.isNotEmpty && oldUrl != url) {
+        try {
+          await storageService.deleteImage(oldUrl);
+        } catch (error) {
+          debugPrint('壁纸已保存，清理旧图失败: $error');
+        }
+      }
       // 4. 更新本地（provider + 本地 key + 整对象缓存）
       final newSettings = settings.copyWith(
         diaryUrl: type == WallpaperType.diary ? url : null,
         topicUrl: type == WallpaperType.topic ? url : null,
       );
+      try {
+        await saveWallpaperSettings(user.uid, newSettings);
+        await CacheService.saveUser(_withWallpaper(user, newSettings));
+      } catch (error) {
+        debugPrint('壁纸已保存，本地缓存更新失败: $error');
+      }
+      if (!mounted || ref.read(currentUserProvider)?.uid != user.uid) return;
       ref.read(wallpaperSettingsProvider.notifier).setSettings(newSettings);
-      await saveWallpaperSettings(newSettings);
-      await CacheService.saveUser(_withWallpaper(user, newSettings));
 
       // 5. 种子化磁盘缓存：刚上传的壁纸本地立即可用，无需重新下载
       try {
-        await DefaultCacheManager().putFile(url, await file.readAsBytes());
+        await PrivateImageCache().putFile(url, await file.readAsBytes());
       } catch (_) {}
 
       // 6. 自动进入透明度预览页
@@ -133,7 +146,7 @@ class _WallpaperSettingsScreenState
         ),
       );
     } finally {
-      await WakelockHelper.release();
+      await lease?.release();
       if (mounted) setState(() => _uploading = null);
     }
   }
@@ -190,7 +203,7 @@ class _WallpaperSettingsScreenState
       topicOpacity: type == WallpaperType.topic ? 0.0 : null,
     );
     ref.read(wallpaperSettingsProvider.notifier).setSettings(newSettings);
-    await saveWallpaperSettings(newSettings);
+    await saveWallpaperSettings(user.uid, newSettings);
     await CacheService.saveUser(_withWallpaper(user, newSettings));
 
     if (!mounted) return;

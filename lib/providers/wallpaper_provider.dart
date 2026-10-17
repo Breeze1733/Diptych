@@ -40,17 +40,13 @@ class WallpaperSettings {
   }
 }
 
-/// 本地壁纸设置 key（独立于 AppUser 缓存，作为"本地优先"主源）
-const _keyDiaryUrl = 'wallpaper_diary_url';
-const _keyTopicUrl = 'wallpaper_topic_url';
-const _keyDiaryOpacity = 'wallpaper_diary_opacity';
-const _keyTopicOpacity = 'wallpaper_topic_opacity';
-const _keyCardOpacity = 'card_opacity';
-
-/// 壁纸状态 Provider：启动时由 [initWallpaperProvider] 填充
+/// 账号切换时立即清空界面，再由初始化流程加载该账号自己的设置。
 class WallpaperSettingsNotifier extends Notifier<WallpaperSettings> {
   @override
-  WallpaperSettings build() => const WallpaperSettings();
+  WallpaperSettings build() {
+    ref.watch(currentUserProvider.select((user) => user?.uid));
+    return const WallpaperSettings();
+  }
 
   void setSettings(WallpaperSettings settings) => state = settings;
 }
@@ -60,66 +56,45 @@ final wallpaperSettingsProvider =
       WallpaperSettingsNotifier.new,
     );
 
-/// 启动初始化壁纸（依赖当前用户：登录后本地优先，云端兜底）。
-/// currentUser 从 null → 有值时自动重跑一次，保证登录后能取到云端壁纸。
 final initWallpaperProvider = FutureProvider<void>((ref) async {
   final user = ref.watch(currentUserProvider);
   final settings = await buildWallpaperSettings(user);
   if (!ref.mounted) return;
   ref.read(wallpaperSettingsProvider.notifier).setSettings(settings);
-  // 用户信息尚未到达时不落盘默认值，保留随后从云端兜底的机会。
-  if (user != null) await saveWallpaperSettings(settings);
+  if (user != null) await saveWallpaperSettings(user.uid, settings);
 });
 
-/// 从本地 SharedPreferences 读取壁纸设置
-Future<WallpaperSettings> loadWallpaperSettings() async {
+String _key(String userId, String field) =>
+    'wallpaper_${Uri.encodeComponent(userId)}_$field';
+
+/// 旧版全局设置没有账号归属，不自动迁移；缺省从当前账号云端记录恢复。
+Future<void> saveWallpaperSettings(
+  String userId,
+  WallpaperSettings settings,
+) async {
   final prefs = await SharedPreferences.getInstance();
-  return WallpaperSettings(
-    diaryUrl: prefs.getString(_keyDiaryUrl) ?? '',
-    topicUrl: prefs.getString(_keyTopicUrl) ?? '',
-    diaryOpacity: prefs.getDouble(_keyDiaryOpacity) ?? 1.0,
-    topicOpacity: prefs.getDouble(_keyTopicOpacity) ?? 1.0,
-    cardOpacity: prefs.getDouble(_keyCardOpacity) ?? AppUser.defaultCardOpacity,
-  );
+  await prefs.setString(_key(userId, 'diary_url'), settings.diaryUrl);
+  await prefs.setString(_key(userId, 'topic_url'), settings.topicUrl);
+  await prefs.setDouble(_key(userId, 'diary_opacity'), settings.diaryOpacity);
+  await prefs.setDouble(_key(userId, 'topic_opacity'), settings.topicOpacity);
+  await prefs.setDouble(_key(userId, 'card_opacity'), settings.cardOpacity);
 }
 
-/// 保存壁纸设置到本地（本地优先主源）
-Future<void> saveWallpaperSettings(WallpaperSettings settings) async {
-  final prefs = await SharedPreferences.getInstance();
-  await prefs.setString(_keyDiaryUrl, settings.diaryUrl);
-  await prefs.setString(_keyTopicUrl, settings.topicUrl);
-  await prefs.setDouble(_keyDiaryOpacity, settings.diaryOpacity);
-  await prefs.setDouble(_keyTopicOpacity, settings.topicOpacity);
-  await prefs.setDouble(_keyCardOpacity, settings.cardOpacity);
-}
-
-/// 计算壁纸设置：
-/// - 本地有壁纸 → 直接用本地（不检查云端是否一致，本地优先）
-/// - 本地没有 → 用 AppUser（云端/缓存）兜底
-/// 透明度同理：本地有 key 用本地，缺省才用 AppUser 的值。
 Future<WallpaperSettings> buildWallpaperSettings(AppUser? user) async {
+  if (user == null) return const WallpaperSettings();
   final prefs = await SharedPreferences.getInstance();
-  final localDiaryUrl = prefs.getString(_keyDiaryUrl);
-  final localTopicUrl = prefs.getString(_keyTopicUrl);
-
-  final diaryUrl = localDiaryUrl?.isNotEmpty == true
-      ? localDiaryUrl!
-      : (user?.wallpaperDiaryUrl ?? '');
-  final topicUrl = localTopicUrl?.isNotEmpty == true
-      ? localTopicUrl!
-      : (user?.wallpaperTopicUrl ?? '');
-
-  final localDiaryOpacity = prefs.getDouble(_keyDiaryOpacity);
-  final localTopicOpacity = prefs.getDouble(_keyTopicOpacity);
-
   return WallpaperSettings(
-    diaryUrl: diaryUrl,
-    topicUrl: topicUrl,
-    diaryOpacity: localDiaryOpacity ?? (user?.wallpaperDiaryOpacity ?? 1.0),
-    topicOpacity: localTopicOpacity ?? (user?.wallpaperTopicOpacity ?? 1.0),
+    diaryUrl:
+        prefs.getString(_key(user.uid, 'diary_url')) ?? user.wallpaperDiaryUrl,
+    topicUrl:
+        prefs.getString(_key(user.uid, 'topic_url')) ?? user.wallpaperTopicUrl,
+    diaryOpacity:
+        prefs.getDouble(_key(user.uid, 'diary_opacity')) ??
+        user.wallpaperDiaryOpacity,
+    topicOpacity:
+        prefs.getDouble(_key(user.uid, 'topic_opacity')) ??
+        user.wallpaperTopicOpacity,
     cardOpacity:
-        prefs.getDouble(_keyCardOpacity) ??
-        user?.cardOpacity ??
-        AppUser.defaultCardOpacity,
+        prefs.getDouble(_key(user.uid, 'card_opacity')) ?? user.cardOpacity,
   );
 }

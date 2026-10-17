@@ -2,9 +2,13 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
+
 import 'package:http/http.dart' as http;
+
 import '../utils/url_helper.dart';
 import '../constants/api_config.dart';
+import 'auth_session.dart';
+import 'http_request.dart';
 
 /// 分片上传被主动取消的异常
 class UploadCancelledException implements Exception {
@@ -47,19 +51,12 @@ class _ChunkMultipartRequestWithProgress extends http.MultipartRequest {
 /// 图片上传服务（分片拆包 + 显式合并引擎）
 class StorageService {
   static const String _baseUrl = ApiConfig.apiBaseUrl;
+  final _http = HttpRequests();
+  final _sessionRevision = AuthSession.revision;
 
-  // 复用 HTTP 连接，避免每次建立新连接
-  final http.Client _client = http.Client();
-
-  /// 安全解析流式 JSON
-  dynamic _safeDecode(http.StreamedResponse res, {String? body}) {
-    try {
-      return jsonDecode(body ?? '');
-    } catch (e) {
-      final preview = (body != null && body.length > 200)
-          ? '${body.substring(0, 200)}...'
-          : (body ?? '');
-      throw Exception('服务器返回非 JSON（状态 ${res.statusCode}）: $preview');
+  void _ensureSession() {
+    if (AuthSession.revision != _sessionRevision) {
+      throw const UploadCancelledException('登录状态已变化，上传已取消');
     }
   }
 
@@ -77,13 +74,12 @@ class StorageService {
   Future<void> abortUpload(String uploadId) async {
     if (uploadId.isEmpty) return;
     try {
-      await _client
-          .post(
-            Uri.parse('$_baseUrl/upload/abort'),
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({'upload_id': uploadId}),
-          )
-          .timeout(const Duration(seconds: 5));
+      await _http.post(
+        Uri.parse('$_baseUrl/upload/abort'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'upload_id': uploadId}),
+        timeout: const Duration(seconds: 5),
+      );
     } catch (_) {
       // 忽略超时或网络断开异常，服务端被动定时清理机制兜底
     }
@@ -97,6 +93,7 @@ class StorageService {
     bool Function()? isCancelled,
     void Function(String uploadId)? onUploadIdCreated,
   }) async {
+    _ensureSession();
     final totalBytes = await file.length();
     if (totalBytes <= 0) {
       throw Exception('文件为空或不存在');
@@ -109,8 +106,11 @@ class StorageService {
     final uploadId =
         'upl_${DateTime.now().millisecondsSinceEpoch}_${totalBytes}_${100000 + math.Random().nextInt(900000)}';
     onUploadIdCreated?.call(uploadId);
-    final fileName =
-        file.path.split(Platform.pathSeparator).last.split('/').last;
+    final fileName = file.path
+        .split(Platform.pathSeparator)
+        .last
+        .split('/')
+        .last;
 
     final raf = await file.open(mode: FileMode.read);
 
@@ -119,13 +119,16 @@ class StorageService {
 
       // ─── 第一阶段：逐片上传 ───
       for (int i = 0; i < totalChunks; i++) {
+        _ensureSession();
         if (isCancelled?.call() == true) {
           await abortUpload(uploadId);
           throw const UploadCancelledException();
         }
 
         final start = i * chunkSize;
-        final end = (start + chunkSize > totalBytes) ? totalBytes : start + chunkSize;
+        final end = (start + chunkSize > totalBytes)
+            ? totalBytes
+            : start + chunkSize;
         final currentChunkSize = end - start;
 
         await raf.setPosition(start);
@@ -135,16 +138,14 @@ class StorageService {
         const maxChunkAttempts = 3;
 
         while (true) {
+          _ensureSession();
           if (isCancelled?.call() == true) {
             await abortUpload(uploadId);
             throw const UploadCancelledException();
           }
 
           attempts++;
-          http.Client? chunkClient;
           try {
-            chunkClient = http.Client();
-
             final uri = Uri.parse('$_baseUrl/upload/chunk');
             final request = _ChunkMultipartRequestWithProgress(
               'POST',
@@ -174,11 +175,16 @@ class StorageService {
             );
 
             // 单个分片 60 秒超时，快速故障重试，绝不触发 Cloudflare 100 秒超时
-            final streamed = await chunkClient
-                .send(request)
-                .timeout(const Duration(seconds: 60));
-            final body = await streamed.stream.bytesToString();
-            final decoded = _safeDecode(streamed, body: body);
+            final response = await runHttpRequest(
+              (client) async =>
+                  http.Response.fromStream(await client.send(request)),
+              timeout: const Duration(seconds: 60),
+              sessionRevision: _sessionRevision,
+            );
+            if (response.statusCode < 200 || response.statusCode >= 300) {
+              throw Exception('分片 $i 上传失败（${response.statusCode}）');
+            }
+            final decoded = _safeDecodeBody(response.body, response.statusCode);
 
             if (decoded['ok'] != true) {
               throw Exception(decoded['error'] ?? '分片 $i 服务器返回失败');
@@ -187,6 +193,7 @@ class StorageService {
             // 当前分片成功，跳出重试循环进入下一分片
             break;
           } catch (e) {
+            _ensureSession();
             if (isCancelled?.call() == true) {
               await abortUpload(uploadId);
               throw const UploadCancelledException();
@@ -196,8 +203,6 @@ class StorageService {
             }
             // 局部重试，绝不将整个任务进度归零！等待 500ms 重传当前片
             await Future.delayed(const Duration(milliseconds: 500));
-          } finally {
-            chunkClient?.close();
           }
         }
       }
@@ -214,6 +219,7 @@ class StorageService {
       const maxMergeAttempts = 3;
 
       while (true) {
+        _ensureSession();
         if (isCancelled?.call() == true) {
           await abortUpload(uploadId);
           throw const UploadCancelledException();
@@ -221,21 +227,23 @@ class StorageService {
 
         mergeAttempts++;
         try {
-          final mergeRes = await _client
-              .post(
-                Uri.parse('$_baseUrl/upload/merge'),
-                headers: {'Content-Type': 'application/json'},
-                body: jsonEncode({
-                  'upload_id': uploadId,
-                  'filename': fileName,
-                  'total_chunks': totalChunks,
-                  'folder': folder,
-                }),
-              )
-              .timeout(const Duration(seconds: 60));
+          final mergeRes = await _http.post(
+            Uri.parse('$_baseUrl/upload/merge'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'upload_id': uploadId,
+              'filename': fileName,
+              'total_chunks': totalChunks,
+              'folder': folder,
+            }),
+            timeout: const Duration(seconds: 60),
+          );
 
-          final decoded =
-              _safeDecodeBody(mergeRes.body, mergeRes.statusCode);
+          if (mergeRes.statusCode < 200 || mergeRes.statusCode >= 300) {
+            throw Exception('文件合并失败（${mergeRes.statusCode}）');
+          }
+
+          final decoded = _safeDecodeBody(mergeRes.body, mergeRes.statusCode);
           if (decoded['ok'] != true) {
             throw Exception(decoded['error'] ?? '文件合并失败');
           }
@@ -248,6 +256,7 @@ class StorageService {
           onProgress?.call(1.0);
           return UrlHelper.normalize(url);
         } catch (e) {
+          _ensureSession();
           if (isCancelled?.call() == true) {
             await abortUpload(uploadId);
             throw const UploadCancelledException();
@@ -267,7 +276,7 @@ class StorageService {
   Future<void> deleteImage(String url) async {
     if (url.isEmpty) return;
     try {
-      await _client.post(
+      await _http.post(
         Uri.parse('$_baseUrl/upload/delete'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'url': url}),
