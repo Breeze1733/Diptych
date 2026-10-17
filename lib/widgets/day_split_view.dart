@@ -22,6 +22,7 @@ class DaySplitView extends StatelessWidget {
   final void Function(Comment? parentComment)? onReplyMyComment;
   final void Function(Comment? parentComment)? onReplyPartnerComment;
   final double scale;
+  final double cardOpacity;
 
   const DaySplitView({
     super.key,
@@ -40,6 +41,7 @@ class DaySplitView extends StatelessWidget {
     this.onReplyMyComment,
     this.onReplyPartnerComment,
     this.scale = 1.0,
+    required this.cardOpacity,
   });
 
   @override
@@ -48,7 +50,7 @@ class DaySplitView extends StatelessWidget {
         myMoment == null && partnerMoment == null && onCreateMyMoment != null;
     return Expanded(
       child: ColoredBox(
-        color: AppTheme.surfaceColor.withAlpha(235),
+        color: AppTheme.surfaceColor.withValues(alpha: cardOpacity),
         child: Stack(
           key: const ValueKey('diary-split-page'),
           fit: StackFit.expand,

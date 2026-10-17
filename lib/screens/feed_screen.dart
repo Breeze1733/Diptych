@@ -11,16 +11,14 @@ import '../providers/day_moment_provider.dart';
 import '../providers/notification_provider.dart';
 import '../providers/selected_date_provider.dart';
 import '../providers/wallpaper_provider.dart';
-import '../services/cache_service.dart';
-import '../services/draft_service.dart';
 import '../services/update_service.dart';
 import '../utils/date_helper.dart';
 import '../widgets/calendar_picker.dart';
 import '../widgets/date_header.dart';
 import '../widgets/day_split_view.dart';
-import '../widgets/moment_card.dart';
 import '../widgets/wallpaper_layer.dart';
 import 'edit_moment_screen.dart';
+import 'diary_reading_screen.dart';
 import 'notification_screen.dart';
 import 'profile_screen.dart';
 import 'diary_search_screen.dart';
@@ -37,73 +35,6 @@ final _autoUpdateCheckedProvider =
     NotifierProvider<AutoUpdateCheckedNotifier, bool>(
       AutoUpdateCheckedNotifier.new,
     );
-
-class _CommentDialogResult {
-  final String content;
-  final bool saveDraft;
-
-  const _CommentDialogResult(this.content, {required this.saveDraft});
-}
-
-class _DiaryCommentDialog extends StatefulWidget {
-  final String initialText;
-  final bool isReply;
-
-  const _DiaryCommentDialog({required this.initialText, required this.isReply});
-
-  @override
-  State<_DiaryCommentDialog> createState() => _DiaryCommentDialogState();
-}
-
-class _DiaryCommentDialogState extends State<_DiaryCommentDialog> {
-  late final _controller = TextEditingController(text: widget.initialText);
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _submit({required bool saveDraft}) {
-    final text = _controller.text.trim();
-    if (text.isNotEmpty) {
-      Navigator.pop(context, _CommentDialogResult(text, saveDraft: saveDraft));
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: Text(widget.isReply ? '回复评论' : AppStrings.commentTitle),
-    content: SelectionContainer.disabled(
-      child: TextField(
-        controller: _controller,
-        maxLines: 3,
-        contextMenuBuilder: (context, editableTextState) =>
-            AdaptiveTextSelectionToolbar.buttonItems(
-              anchors: editableTextState.contextMenuAnchors,
-              buttonItems: editableTextState.contextMenuButtonItems,
-            ),
-        decoration: InputDecoration(
-          hintText: widget.isReply ? '写下回复...' : AppStrings.commentHint,
-        ),
-      ),
-    ),
-    actions: [
-      TextButton(
-        onPressed: () => Navigator.pop(context),
-        child: Text(AppStrings.cancel),
-      ),
-      TextButton(
-        onPressed: () => _submit(saveDraft: true),
-        child: const Text('存草稿'),
-      ),
-      FilledButton(
-        onPressed: () => _submit(saveDraft: false),
-        child: Text(AppStrings.confirm),
-      ),
-    ],
-  );
-}
 
 /// Diary section: quiet app chrome, date picker and the two daily entries.
 class FeedScreen extends ConsumerWidget {
@@ -144,7 +75,9 @@ class FeedScreen extends ConsumerWidget {
         Scaffold(
           backgroundColor: Colors.transparent,
           appBar: AppBar(
-            backgroundColor: AppTheme.surfaceColor.withAlpha(235),
+            backgroundColor: AppTheme.surfaceColor.withValues(
+              alpha: wallpaper.cardOpacity,
+            ),
             surfaceTintColor: Colors.transparent,
             elevation: 0,
             toolbarHeight: (kToolbarHeight * scale).clamp(44.0, 56.0),
@@ -249,6 +182,7 @@ class FeedScreen extends ConsumerWidget {
     if (currentUser == null && loadUsersAsync.hasError) {
       debugPrint('加载用户数据失败: ${loadUsersAsync.error}');
       return _paperArea(
+        ref,
         child: Center(
           child: Padding(
             padding: const EdgeInsets.all(32),
@@ -282,6 +216,7 @@ class FeedScreen extends ConsumerWidget {
     return Column(
       children: [
         DateHeader(
+          cardOpacity: ref.watch(wallpaperSettingsProvider).cardOpacity,
           dateText: DateHelper.toChineseDate(selectedDate),
           date: selectedDate,
           onCalendarTap: () => _openCalendar(context, ref),
@@ -296,14 +231,16 @@ class FeedScreen extends ConsumerWidget {
         if (currentUser != null && partner != null)
           _buildDayView(ref, currentUser, partner, context, scale)
         else
-          Expanded(child: _paperArea()),
+          Expanded(child: _paperArea(ref)),
       ],
     );
   }
 
   /// 非日记内容状态也铺满同一张纸面，不额外覆盖已有的双联纸页。
-  Widget _paperArea({Widget? child}) => ColoredBox(
-    color: AppTheme.surfaceColor.withAlpha(235),
+  Widget _paperArea(WidgetRef ref, {Widget? child}) => ColoredBox(
+    color: AppTheme.surfaceColor.withValues(
+      alpha: ref.watch(wallpaperSettingsProvider).cardOpacity,
+    ),
     child: SizedBox.expand(child: child),
   );
 
@@ -323,6 +260,7 @@ class FeedScreen extends ConsumerWidget {
         final myMoment = data['myMoment'];
         final partnerMoment = data['partnerMoment'];
         return DaySplitView(
+          cardOpacity: ref.watch(wallpaperSettingsProvider).cardOpacity,
           onCreateMyMoment: () => _openCreateEditor(ref, context),
           onOpenReading: (moment) => _openReading(context, moment),
           myMoment: myMoment,
@@ -332,41 +270,14 @@ class FeedScreen extends ConsumerWidget {
           myAvatarUrl: currentUser.avatarUrl,
           partnerAvatarUrl: partner.avatarUrl,
           scale: scale,
-          // 编辑自己的动态
-          onEditMyMoment: myMoment != null
-              ? () => _openEditor(
-                  context,
-                  ref,
-                  ref.read(selectedDateProvider),
-                  myMoment,
-                )
-              : null,
-          // 评论对方的动态
-          onCommentPartner: partnerMoment != null
-              ? () => _openCommentDialog(context, ref, partnerMoment, null)
-              : null,
-          // 删除自己动态下的评论
-          onDeleteMyComment: myMoment != null
-              ? (c) => _deleteComment(context, ref, myMoment, c)
-              : null,
-          onDeletePartnerComment: partnerMoment != null
-              ? (c) => _deleteComment(context, ref, partnerMoment, c)
-              : null,
-          // 回复评论
-          onReplyMyComment: myMoment != null
-              ? (parent) => _openCommentDialog(context, ref, myMoment, parent)
-              : null,
-          onReplyPartnerComment: partnerMoment != null
-              ? (parent) =>
-                    _openCommentDialog(context, ref, partnerMoment, parent)
-              : null,
         );
       },
-      loading: () => Expanded(child: _paperArea()),
+      loading: () => Expanded(child: _paperArea(ref)),
       error: (e, _) {
         debugPrint('加载日记失败: $e');
         return Expanded(
           child: _paperArea(
+            ref,
             child: Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -391,77 +302,10 @@ class FeedScreen extends ConsumerWidget {
     );
   }
 
-  void _openReading(BuildContext context, Moment initialMoment) {
+  void _openReading(BuildContext context, Moment moment) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (readingContext) => Consumer(
-          builder: (context, readingRef, _) {
-            final day = readingRef.watch(dayMomentsProvider).value;
-            var moment = initialMoment;
-            if (day != null) {
-              for (final entry in day.values) {
-                if (entry?.id == initialMoment.id) moment = entry!;
-              }
-            }
-            final currentUser = readingRef.watch(currentUserProvider);
-            final partner = readingRef.watch(partnerUserProvider);
-            final isSelf = moment.authorId == currentUser?.uid;
-            final author = isSelf ? currentUser : partner;
-            final other = isSelf ? partner : currentUser;
-            final nickname = author?.nickname.trim();
-            final displayName = nickname == null || nickname.isEmpty
-                ? (isSelf ? '我' : 'TA')
-                : nickname;
-            final currentMoment = moment;
-            return Scaffold(
-              appBar: AppBar(title: Text('$displayName 的日记')),
-              body: SafeArea(
-                top: false,
-                child: SingleChildScrollView(
-                  key: PageStorageKey('reading-${currentMoment.id}'),
-                  child: Center(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 680),
-                      child: MomentCard(
-                        key: ValueKey(currentMoment.id),
-                        moment: currentMoment,
-                        nickname: displayName,
-                        avatarUrl: author?.avatarUrl,
-                        partnerNickname: other?.nickname ?? '',
-                        isSelf: isSelf,
-                        expandedReading: true,
-                        onEdit: () => _openEditor(
-                          readingContext,
-                          readingRef,
-                          DateHelper.parseDateStr(currentMoment.dateStr),
-                          currentMoment,
-                        ),
-                        onComment: () => _openCommentDialog(
-                          readingContext,
-                          readingRef,
-                          currentMoment,
-                          null,
-                        ),
-                        onDeleteComment: (comment) => _deleteComment(
-                          readingContext,
-                          readingRef,
-                          currentMoment,
-                          comment,
-                        ),
-                        onReplyComment: (parent) => _openCommentDialog(
-                          readingContext,
-                          readingRef,
-                          currentMoment,
-                          parent,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            );
-          },
-        ),
+        builder: (_) => DiaryReadingScreen(initialMoment: moment),
       ),
     );
   }
@@ -500,220 +344,6 @@ class FeedScreen extends ConsumerWidget {
     );
     if (result == true) {
       _refresh(ref);
-    }
-  }
-
-  /// 打开编辑页
-  Future<void> _openEditor(
-    BuildContext context,
-    WidgetRef ref,
-    DateTime date,
-    Moment existingMoment,
-  ) async {
-    final result = await Navigator.push<bool>(
-      context,
-      MaterialPageRoute(
-        builder: (_) =>
-            EditMomentScreen(date: date, existingMoment: existingMoment),
-      ),
-    );
-    if (result == true) {
-      _refresh(ref);
-    }
-  }
-
-  /// 生成评论 ID
-  String _makeCommentId() {
-    return DateTime.now().millisecondsSinceEpoch.toString();
-  }
-
-  String _commentDraftKey(String userId, Moment moment, Comment? replyTo) {
-    return '${userId}_${moment.id}_${replyTo?.id ?? 'root'}';
-  }
-
-  /// 打开评论弹窗（新增 / 回复）
-  Future<void> _openCommentDialog(
-    BuildContext context,
-    WidgetRef ref,
-    Moment moment,
-    Comment? replyTo, // null = 新增顶级评论，非 null = 回复某条
-  ) async {
-    final currentUser = ref.read(currentUserProvider);
-    final draftKey = _commentDraftKey(
-      currentUser?.uid ?? 'anonymous',
-      moment,
-      replyTo,
-    );
-    final savedDraft = await DraftService.loadComment(draftKey);
-    if (!context.mounted) return;
-
-    final result = await showDialog<_CommentDialogResult>(
-      context: context,
-      builder: (ctx) => _DiaryCommentDialog(
-        initialText: savedDraft ?? '',
-        isReply: replyTo != null,
-      ),
-    );
-
-    if (result == null || result.content.isEmpty) return;
-
-    if (result.saveDraft) {
-      try {
-        await DraftService.saveComment(draftKey, result.content);
-        if (context.mounted) {
-          ScaffoldMessenger.of(context)
-              .showSnackBar(const SnackBar(content: Text('评论草稿已保存')));
-        }
-      } catch (e) {
-        debugPrint('评论草稿保存失败: $e');
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('评论草稿保存失败，请重试'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      }
-      return;
-    }
-
-    {
-      final newComment = Comment(
-        id: _makeCommentId(),
-        authorId: currentUser?.uid ?? '',
-        content: result.content,
-        replyTo: replyTo?.id, // 如果是回复，记录父评论 id
-        createdAt: DateTime.now(),
-      );
-
-      final newComments = List<Comment>.from(moment.comments);
-
-      if (replyTo != null) {
-        // 回复：插入到父评论的正下方（找到父评论后面所有同父评论之后）
-        int insertIndex = newComments.indexWhere((c) => c.id == replyTo.id);
-        if (insertIndex != -1) {
-          // 跳过父评论及其已有的所有子回复
-          insertIndex++;
-          while (insertIndex < newComments.length &&
-              newComments[insertIndex].replyTo == replyTo.id) {
-            insertIndex++;
-          }
-          newComments.insert(insertIndex, newComment);
-        } else {
-          newComments.add(newComment);
-        }
-      } else {
-        // 顶级评论：追加到末尾
-        newComments.add(newComment);
-      }
-
-      final apiService = ref.read(apiServiceProvider);
-      try {
-        await apiService.updateMoment(moment.id, {
-          'comments': newComments.map((c) => c.toJson()).toList(),
-        });
-        await DraftService.clearComment(draftKey);
-        // 立即更新本地缓存，确保刷新后读到最新数据
-        await _updateCachedMomentComments(ref, moment.id, newComments);
-        _refresh(ref);
-      } catch (e) {
-        debugPrint('发送评论失败: $e');
-        // 上传失败自动保存为草稿，避免用户输入的内容丢失
-        try {
-          await DraftService.saveComment(draftKey, result.content);
-        } catch (_) {}
-
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('评论失败，已自动为您保存为草稿，请重试'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      }
-    }
-  }
-
-  /// 更新本地缓存中某条日记的评论
-  Future<void> _updateCachedMomentComments(
-    WidgetRef ref,
-    String momentId,
-    List<Comment> comments,
-  ) async {
-    final dateStr = DateHelper.toDateStr(ref.read(selectedDateProvider));
-    final cached = await CacheService.loadDayMoments(dateStr);
-    if (cached == null) return;
-    for (int i = 0; i < cached.length; i++) {
-      if (cached[i]['id'] == momentId) {
-        cached[i]['comments'] = comments.map((c) => c.toJson()).toList();
-        break;
-      }
-    }
-    await CacheService.saveDayMoments(dateStr, cached);
-  }
-
-  /// 删除评论（同时删除其所有子回复）
-  Future<void> _deleteComment(
-    BuildContext context,
-    WidgetRef ref,
-    Moment moment,
-    Comment comment,
-  ) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text(AppStrings.deleteComment),
-        content: const Text(AppStrings.deleteCommentConfirm),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text(
-              AppStrings.cancel,
-              style: TextStyle(color: Colors.grey[600]),
-            ),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            child: Text(AppStrings.confirm),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true) return;
-
-    // 收集要删除的评论 id（包括子回复）
-    final toRemove = <String>{comment.id};
-    // 找出所有回复该评论的子评论
-    for (final c in moment.comments) {
-      if (c.replyTo == comment.id) toRemove.add(c.id);
-    }
-
-    final newComments = moment.comments
-        .where((c) => !toRemove.contains(c.id))
-        .toList();
-
-    final apiService = ref.read(apiServiceProvider);
-    try {
-      await apiService.updateMoment(moment.id, {
-        'comments': newComments.map((c) => c.toJson()).toList(),
-      });
-      // 立即更新本地缓存
-      await _updateCachedMomentComments(ref, moment.id, newComments);
-      _refresh(ref);
-    } catch (e) {
-      debugPrint('删除评论失败: $e');
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('删除失败，请稍后重试'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
     }
   }
 

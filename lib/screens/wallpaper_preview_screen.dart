@@ -17,17 +17,19 @@ import '../widgets/wallpaper_layer.dart';
 /// 壁纸透明度预览页：
 /// - 背景：该类型壁纸 + 当前透明度
 /// - 前景：与日记页一模一样的布局（DateHeader + 分屏卡片），仅文字为预设示例
-/// - 滑条实时改内存透明度；点「应用」才写本地 + 推云端
+/// - 两条滑条分别预览壁纸与卡片不透明度；点「应用」才写本地 + 推云端
 class WallpaperPreviewScreen extends ConsumerStatefulWidget {
   final WallpaperType type;
   final String url;
   final double initialOpacity;
+  final double initialCardOpacity;
 
   const WallpaperPreviewScreen({
     super.key,
     required this.type,
     required this.url,
     required this.initialOpacity,
+    required this.initialCardOpacity,
   });
 
   @override
@@ -38,12 +40,14 @@ class WallpaperPreviewScreen extends ConsumerStatefulWidget {
 class _WallpaperPreviewScreenState
     extends ConsumerState<WallpaperPreviewScreen> {
   late double _opacity;
+  late double _cardOpacity;
   bool _applying = false;
 
   @override
   void initState() {
     super.initState();
     _opacity = widget.initialOpacity;
+    _cardOpacity = widget.initialCardOpacity;
   }
 
   /// 确定应用：写本地 + 推云端 + 更新整对象缓存
@@ -59,16 +63,18 @@ class _WallpaperPreviewScreenState
       final isDiary = widget.type == WallpaperType.diary;
 
       // 推云端
-      if (isDiary) {
-        await apiService.updateUser(user.uid, wallpaperDiaryOpacity: _opacity);
-      } else {
-        await apiService.updateUser(user.uid, wallpaperTopicOpacity: _opacity);
-      }
+      await apiService.updateUser(
+        user.uid,
+        wallpaperDiaryOpacity: isDiary ? _opacity : null,
+        wallpaperTopicOpacity: isDiary ? null : _opacity,
+        cardOpacity: _cardOpacity,
+      );
 
       // 写本地（provider + 本地 key + 整对象缓存）
       final newSettings = settings.copyWith(
         diaryOpacity: isDiary ? _opacity : null,
         topicOpacity: isDiary ? null : _opacity,
+        cardOpacity: _cardOpacity,
       );
       ref.read(wallpaperSettingsProvider.notifier).setSettings(newSettings);
       await saveWallpaperSettings(newSettings);
@@ -103,6 +109,7 @@ class _WallpaperPreviewScreenState
       wallpaperTopicUrl: s.topicUrl,
       wallpaperDiaryOpacity: s.diaryOpacity,
       wallpaperTopicOpacity: s.topicOpacity,
+      cardOpacity: s.cardOpacity,
     );
   }
 
@@ -153,12 +160,14 @@ class _WallpaperPreviewScreenState
       children: [
         // 与日记页一致的日期顶栏（示例日期）
         DateHeader(
+          cardOpacity: _cardOpacity,
           dateText: DateHelper.toChineseDate(DateTime.now()),
           date: DateTime.now(),
           onCalendarTap: () {}, // 预览页日历不响应
         ),
         // 与日记页一致的分屏卡片，昵称固定「用户A/用户B」，头像留空
         DaySplitView(
+          cardOpacity: _cardOpacity,
           myMoment: selfMoment,
           partnerMoment: partnerMoment,
           myNickname: '用户A',
@@ -182,7 +191,7 @@ class _WallpaperPreviewScreenState
       itemBuilder: (context, index) {
         final (title, author) = samples[index];
         return Material(
-          color: AppTheme.surfaceColor.withAlpha(235),
+          color: AppTheme.surfaceColor.withValues(alpha: _cardOpacity),
           borderRadius: BorderRadius.circular(20),
           child: Padding(
             padding: const EdgeInsets.all(20),
@@ -276,7 +285,11 @@ class _WallpaperPreviewScreenState
               scrolledUnderElevation: 0,
               surfaceTintColor: Colors.transparent,
               flexibleSpace: isDiary
-                  ? ColoredBox(color: AppTheme.surfaceColor.withAlpha(235))
+                  ? ColoredBox(
+                      color: AppTheme.surfaceColor.withValues(
+                        alpha: _cardOpacity,
+                      ),
+                    )
                   : null,
               title: Text(isDiary ? '日记壁纸预览' : '话题壁纸预览'),
               actions: [
@@ -311,38 +324,16 @@ class _WallpaperPreviewScreenState
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Row(
-                        children: [
-                          Text(
-                            '不透明度',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Slider(
-                              value: _opacity,
-                              onChanged: (v) => setState(() => _opacity = v),
-                            ),
-                          ),
-                          SizedBox(
-                            width: 44,
-                            child: Text(
-                              '${(_opacity * 100).round()}%',
-                              textAlign: TextAlign.right,
-                              style: const TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ],
+                      _buildOpacitySlider(
+                        label: '壁纸不透明度',
+                        value: _opacity,
+                        onChanged: (value) => setState(() => _opacity = value),
                       ),
-                      Text(
-                        '拖动滑条实时预览，点右上角「应用」保存到云端',
-                        style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                      _buildOpacitySlider(
+                        label: '卡片不透明度',
+                        value: _cardOpacity,
+                        onChanged: (value) =>
+                            setState(() => _cardOpacity = value),
                       ),
                     ],
                   ),
@@ -352,6 +343,41 @@ class _WallpaperPreviewScreenState
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildOpacitySlider({
+    required String label,
+    required double value,
+    required ValueChanged<double> onChanged,
+  }) {
+    return Row(
+      children: [
+        Text(
+          label,
+          style: const TextStyle(fontSize: 13, color: AppTheme.textPrimary),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Semantics(
+            label: label,
+            child: Slider(
+              value: value,
+              label: '${(value * 100).round()}%',
+              semanticFormatterCallback: (value) => '${(value * 100).round()}%',
+              onChanged: _applying ? null : onChanged,
+            ),
+          ),
+        ),
+        SizedBox(
+          width: 42,
+          child: Text(
+            '${(value * 100).round()}%',
+            textAlign: TextAlign.right,
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          ),
+        ),
+      ],
     );
   }
 }

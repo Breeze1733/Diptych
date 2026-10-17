@@ -2,14 +2,17 @@ import '../utils/url_helper.dart';
 
 /// 用户数据模型
 class AppUser {
+  static const double defaultCardOpacity = 235 / 255;
+
   final String uid; // "A" 或 "B"
   final String nickname;
   final String partnerUid;
   final String avatarUrl;
-  final String wallpaperDiaryUrl;  // 日记壁纸
-  final String wallpaperTopicUrl;  // 话题壁纸
-  final double wallpaperDiaryOpacity;  // 壁纸不透明度 0~1，默认 1（完全不透明）
+  final String wallpaperDiaryUrl; // 日记壁纸
+  final String wallpaperTopicUrl; // 话题壁纸
+  final double wallpaperDiaryOpacity; // 壁纸不透明度 0~1，默认 1（完全不透明）
   final double wallpaperTopicOpacity;
+  final double cardOpacity; // 日记与话题共用的卡片不透明度
 
   const AppUser({
     required this.uid,
@@ -20,6 +23,7 @@ class AppUser {
     this.wallpaperTopicUrl = '',
     this.wallpaperDiaryOpacity = 1.0,
     this.wallpaperTopicOpacity = 1.0,
+    this.cardOpacity = defaultCardOpacity,
   });
 
   factory AppUser.fromJson(Map<String, dynamic> json) {
@@ -28,10 +32,19 @@ class AppUser {
       nickname: json['nickname'] as String? ?? '',
       partnerUid: json['partner_uid'] as String? ?? '',
       avatarUrl: UrlHelper.normalize(json['avatar_url'] as String? ?? ''),
-      wallpaperDiaryUrl: UrlHelper.normalize(json['wallpaper_diary_url'] as String? ?? ''),
-      wallpaperTopicUrl: UrlHelper.normalize(json['wallpaper_topic_url'] as String? ?? ''),
-      wallpaperDiaryOpacity: (json['wallpaper_diary_opacity'] as num?)?.toDouble() ?? 1.0,
-      wallpaperTopicOpacity: (json['wallpaper_topic_opacity'] as num?)?.toDouble() ?? 1.0,
+      wallpaperDiaryUrl: UrlHelper.normalize(
+        json['wallpaper_diary_url'] as String? ?? '',
+      ),
+      wallpaperTopicUrl: UrlHelper.normalize(
+        json['wallpaper_topic_url'] as String? ?? '',
+      ),
+      wallpaperDiaryOpacity:
+          (json['wallpaper_diary_opacity'] as num?)?.toDouble() ?? 1.0,
+      wallpaperTopicOpacity:
+          (json['wallpaper_topic_opacity'] as num?)?.toDouble() ?? 1.0,
+      cardOpacity:
+          (json['card_opacity'] as num?)?.toDouble().clamp(0.0, 1.0) ??
+          defaultCardOpacity,
     );
   }
 
@@ -45,6 +58,7 @@ class AppUser {
       'wallpaper_topic_url': wallpaperTopicUrl,
       'wallpaper_diary_opacity': wallpaperDiaryOpacity,
       'wallpaper_topic_opacity': wallpaperTopicOpacity,
+      'card_opacity': cardOpacity,
     };
   }
 
@@ -55,6 +69,7 @@ class AppUser {
     String? wallpaperTopicUrl,
     double? wallpaperDiaryOpacity,
     double? wallpaperTopicOpacity,
+    double? cardOpacity,
   }) {
     return AppUser(
       uid: uid,
@@ -63,8 +78,11 @@ class AppUser {
       avatarUrl: avatarUrl ?? this.avatarUrl,
       wallpaperDiaryUrl: wallpaperDiaryUrl ?? this.wallpaperDiaryUrl,
       wallpaperTopicUrl: wallpaperTopicUrl ?? this.wallpaperTopicUrl,
-      wallpaperDiaryOpacity: wallpaperDiaryOpacity ?? this.wallpaperDiaryOpacity,
-      wallpaperTopicOpacity: wallpaperTopicOpacity ?? this.wallpaperTopicOpacity,
+      wallpaperDiaryOpacity:
+          wallpaperDiaryOpacity ?? this.wallpaperDiaryOpacity,
+      wallpaperTopicOpacity:
+          wallpaperTopicOpacity ?? this.wallpaperTopicOpacity,
+      cardOpacity: cardOpacity ?? this.cardOpacity,
     );
   }
 }

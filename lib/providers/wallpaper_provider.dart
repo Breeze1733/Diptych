@@ -1,23 +1,26 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import '../models/app_user.dart';
 import 'auth_provider.dart';
 
 /// 壁纸类型：日记 / 话题，各自独立
 enum WallpaperType { diary, topic }
 
-/// 壁纸设置（日记 / 话题两套，互相独立）
+/// 日记 / 话题壁纸分别设置，卡片不透明度共用。
 class WallpaperSettings {
   final String diaryUrl;
   final String topicUrl;
   final double diaryOpacity; // 0~1，越大壁纸越清晰
   final double topicOpacity;
+  final double cardOpacity; // 日记与话题共用，只调整背景，保留文字/图片不透明度
 
   const WallpaperSettings({
     this.diaryUrl = '',
     this.topicUrl = '',
     this.diaryOpacity = 1.0,
     this.topicOpacity = 1.0,
+    this.cardOpacity = AppUser.defaultCardOpacity,
   });
 
   WallpaperSettings copyWith({
@@ -25,12 +28,14 @@ class WallpaperSettings {
     String? topicUrl,
     double? diaryOpacity,
     double? topicOpacity,
+    double? cardOpacity,
   }) {
     return WallpaperSettings(
       diaryUrl: diaryUrl ?? this.diaryUrl,
       topicUrl: topicUrl ?? this.topicUrl,
       diaryOpacity: diaryOpacity ?? this.diaryOpacity,
       topicOpacity: topicOpacity ?? this.topicOpacity,
+      cardOpacity: cardOpacity ?? this.cardOpacity,
     );
   }
 }
@@ -40,6 +45,7 @@ const _keyDiaryUrl = 'wallpaper_diary_url';
 const _keyTopicUrl = 'wallpaper_topic_url';
 const _keyDiaryOpacity = 'wallpaper_diary_opacity';
 const _keyTopicOpacity = 'wallpaper_topic_opacity';
+const _keyCardOpacity = 'card_opacity';
 
 /// 壁纸状态 Provider：启动时由 [initWallpaperProvider] 填充
 class WallpaperSettingsNotifier extends Notifier<WallpaperSettings> {
@@ -51,15 +57,18 @@ class WallpaperSettingsNotifier extends Notifier<WallpaperSettings> {
 
 final wallpaperSettingsProvider =
     NotifierProvider<WallpaperSettingsNotifier, WallpaperSettings>(
-        WallpaperSettingsNotifier.new);
+      WallpaperSettingsNotifier.new,
+    );
 
 /// 启动初始化壁纸（依赖当前用户：登录后本地优先，云端兜底）。
 /// currentUser 从 null → 有值时自动重跑一次，保证登录后能取到云端壁纸。
 final initWallpaperProvider = FutureProvider<void>((ref) async {
   final user = ref.watch(currentUserProvider);
   final settings = await buildWallpaperSettings(user);
+  if (!ref.mounted) return;
   ref.read(wallpaperSettingsProvider.notifier).setSettings(settings);
-  await saveWallpaperSettings(settings);
+  // 用户信息尚未到达时不落盘默认值，保留随后从云端兜底的机会。
+  if (user != null) await saveWallpaperSettings(settings);
 });
 
 /// 从本地 SharedPreferences 读取壁纸设置
@@ -70,6 +79,7 @@ Future<WallpaperSettings> loadWallpaperSettings() async {
     topicUrl: prefs.getString(_keyTopicUrl) ?? '',
     diaryOpacity: prefs.getDouble(_keyDiaryOpacity) ?? 1.0,
     topicOpacity: prefs.getDouble(_keyTopicOpacity) ?? 1.0,
+    cardOpacity: prefs.getDouble(_keyCardOpacity) ?? AppUser.defaultCardOpacity,
   );
 }
 
@@ -80,6 +90,7 @@ Future<void> saveWallpaperSettings(WallpaperSettings settings) async {
   await prefs.setString(_keyTopicUrl, settings.topicUrl);
   await prefs.setDouble(_keyDiaryOpacity, settings.diaryOpacity);
   await prefs.setDouble(_keyTopicOpacity, settings.topicOpacity);
+  await prefs.setDouble(_keyCardOpacity, settings.cardOpacity);
 }
 
 /// 计算壁纸设置：
@@ -106,5 +117,9 @@ Future<WallpaperSettings> buildWallpaperSettings(AppUser? user) async {
     topicUrl: topicUrl,
     diaryOpacity: localDiaryOpacity ?? (user?.wallpaperDiaryOpacity ?? 1.0),
     topicOpacity: localTopicOpacity ?? (user?.wallpaperTopicOpacity ?? 1.0),
+    cardOpacity:
+        prefs.getDouble(_keyCardOpacity) ??
+        user?.cardOpacity ??
+        AppUser.defaultCardOpacity,
   );
 }

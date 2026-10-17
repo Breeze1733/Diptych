@@ -1,5 +1,7 @@
 import 'dart:convert';
+
 import 'package:http/http.dart' as http;
+
 import '../models/app_user.dart';
 import '../models/moment.dart';
 import '../models/app_notification.dart';
@@ -33,19 +35,36 @@ class ApiService {
     String? wallpaperTopicUrl,
     double? wallpaperDiaryOpacity,
     double? wallpaperTopicOpacity,
+    double? cardOpacity,
   }) async {
     final Map<String, dynamic> data = {};
     if (nickname != null) data['nickname'] = nickname;
     if (avatarUrl != null) data['avatar_url'] = avatarUrl;
-    if (wallpaperDiaryUrl != null) data['wallpaper_diary_url'] = wallpaperDiaryUrl;
-    if (wallpaperTopicUrl != null) data['wallpaper_topic_url'] = wallpaperTopicUrl;
-    if (wallpaperDiaryOpacity != null) data['wallpaper_diary_opacity'] = wallpaperDiaryOpacity;
-    if (wallpaperTopicOpacity != null) data['wallpaper_topic_opacity'] = wallpaperTopicOpacity;
-    await http.put(
+    if (wallpaperDiaryUrl != null) {
+      data['wallpaper_diary_url'] = wallpaperDiaryUrl;
+    }
+    if (wallpaperTopicUrl != null) {
+      data['wallpaper_topic_url'] = wallpaperTopicUrl;
+    }
+    if (wallpaperDiaryOpacity != null) {
+      data['wallpaper_diary_opacity'] = wallpaperDiaryOpacity;
+    }
+    if (wallpaperTopicOpacity != null) {
+      data['wallpaper_topic_opacity'] = wallpaperTopicOpacity;
+    }
+    if (cardOpacity != null) data['card_opacity'] = cardOpacity;
+    final res = await http.put(
       Uri.parse('$_baseUrl/users/$uid'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode(data),
     );
+    if (res.statusCode != 200) {
+      throw Exception('PUT /users/$uid 返回 ${res.statusCode}: ${res.body}');
+    }
+    final body = _safeDecode(res);
+    if (body['ok'] != true) {
+      throw Exception(body['error'] ?? '更新用户信息失败');
+    }
   }
 
   /// 确保预设用户存在
@@ -57,24 +76,32 @@ class ApiService {
 
   /// 获取指定日期指定用户的动态（Future）
   Future<Moment?> getMomentByDate(String userId, String dateStr) async {
-    final res = await http.get(
-      Uri.parse('$_baseUrl/moments?date_str=$dateStr&author_ids=$userId'),
-    );
-    if (res.statusCode != 200) return null;
-    final body = _safeDecode(res);
-    if (body['ok'] != true || body['data'] == null) return null;
-    final list = body['data'] as List;
-    if (list.isEmpty) return null;
-    return Moment.fromJson(list.first);
+    final moments = await getDayMoments(dateStr, [userId]);
+    return moments.isEmpty ? null : moments.first;
   }
 
   /// 获取指定日期的多人动态
-  Future<List<Moment>> getDayMoments(String dateStr, List<String> authorIds) async {
+  Future<List<Moment>> getDayMoments(
+    String dateStr,
+    List<String> authorIds,
+  ) async {
     if (authorIds.isEmpty) return [];
     final ids = authorIds.join(',');
-    final res = await http.get(
-      Uri.parse('$_baseUrl/moments?date_str=$dateStr&author_ids=$ids'),
-    );
+    final res = await http
+        .get(
+          Uri.parse('$_baseUrl/moments').replace(
+            queryParameters: {
+              'date_str': dateStr,
+              'author_ids': ids,
+              '_fresh': DateTime.now().microsecondsSinceEpoch.toString(),
+            },
+          ),
+          headers: const {
+            'Cache-Control': 'no-cache, no-store',
+            'Pragma': 'no-cache',
+          },
+        )
+        .timeout(const Duration(seconds: 25));
     if (res.statusCode != 200) {
       throw Exception('GET /moments 返回 ${res.statusCode}: ${res.body}');
     }
@@ -85,12 +112,78 @@ class ApiService {
     return (body['data'] as List).map((e) => Moment.fromJson(e)).toList();
   }
 
+  /// 详情强制读服务端，跳过本地与代理缓存。
+  Future<Moment> getMoment(String momentId) async {
+    final uri = Uri.parse('$_baseUrl/moments/${Uri.encodeComponent(momentId)}')
+        .replace(
+          queryParameters: {
+            '_fresh': DateTime.now().microsecondsSinceEpoch.toString(),
+          },
+        );
+    final res = await http
+        .get(
+          uri,
+          headers: const {
+            'Cache-Control': 'no-cache, no-store',
+            'Pragma': 'no-cache',
+          },
+        )
+        .timeout(const Duration(seconds: 25));
+    return _momentResponse(res, momentId);
+  }
+
+  /// 单条追加；固定评论 ID 让超时后的重试不会生成重复评论。
+  Future<Moment> addComment(String momentId, Comment comment) async {
+    final res = await http
+        .post(
+          Uri.parse(
+            '$_baseUrl/moments/${Uri.encodeComponent(momentId)}/comments',
+          ),
+          headers: const {'Content-Type': 'application/json'},
+          body: jsonEncode(comment.toJson()),
+        )
+        .timeout(const Duration(seconds: 25));
+    return _momentResponse(res, momentId);
+  }
+
+  Future<Moment> deleteComment(
+    String momentId,
+    String commentId,
+    String authorId,
+  ) async {
+    final res = await http
+        .delete(
+          Uri.parse(
+            '$_baseUrl/moments/${Uri.encodeComponent(momentId)}/comments/${Uri.encodeComponent(commentId)}',
+          ),
+          headers: const {'Content-Type': 'application/json'},
+          body: jsonEncode({'author_id': authorId}),
+        )
+        .timeout(const Duration(seconds: 25));
+    return _momentResponse(res, momentId);
+  }
+
+  Moment _momentResponse(http.Response res, String expectedId) {
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw Exception('日记请求失败（${res.statusCode}）');
+    }
+    final body = _safeDecode(res);
+    if (body['ok'] != true || body['data'] is! Map<String, dynamic>) {
+      throw Exception(body['error'] ?? '服务器未确认日记数据');
+    }
+    final moment = Moment.fromJson(body['data']);
+    if (moment.id != expectedId) throw Exception('服务器返回了其他日记的数据');
+    return moment;
+  }
+
   /// 安全解析 JSON，解析失败时附带原始响应内容便于排查
   dynamic _safeDecode(http.Response res) {
     try {
       return jsonDecode(res.body);
     } catch (e) {
-      final preview = res.body.length > 200 ? '${res.body.substring(0, 200)}...' : res.body;
+      final preview = res.body.length > 200
+          ? '${res.body.substring(0, 200)}...'
+          : res.body;
       throw Exception('服务器返回非 JSON（状态 ${res.statusCode}）: $preview');
     }
   }
@@ -117,7 +210,9 @@ class ApiService {
       body: jsonEncode(body),
     );
     final bodyDecoded = _safeDecode(res);
-    if (bodyDecoded['ok'] != true) throw Exception(bodyDecoded['error'] ?? '创建失败');
+    if (bodyDecoded['ok'] != true) {
+      throw Exception(bodyDecoded['error'] ?? '创建失败');
+    }
     return bodyDecoded['data']['id'].toString();
   }
 
@@ -129,12 +224,19 @@ class ApiService {
       body: jsonEncode(data),
     );
     if (res.statusCode < 200 || res.statusCode >= 300) {
-      throw Exception('PUT /moments/$momentId 返回 ${res.statusCode}: ${res.body}');
+      throw Exception(
+        'PUT /moments/$momentId 返回 ${res.statusCode}: ${res.body}',
+      );
+    }
+    final body = _safeDecode(res);
+    if (body['ok'] != true) {
+      throw Exception(body['error'] ?? '服务器未确认日记更新');
     }
   }
 
   /// 搜索日记内容（从新到旧倒序扫描，支持断点游标续搜）
-  Future<({List<Moment> items, bool hasMore, String? nextCursor})> searchMoments(
+  Future<({List<Moment> items, bool hasMore, String? nextCursor})>
+  searchMoments(
     String keyword,
     List<String> authorIds, {
     int limit = 10,
@@ -146,7 +248,8 @@ class ApiService {
       'limit': limit.toString(),
       if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
     };
-    final uri = Uri.parse('$_baseUrl/moments/search').replace(queryParameters: params);
+    final uri = Uri.parse('$_baseUrl/moments/search')
+        .replace(queryParameters: params);
     final res = await http.get(uri);
     if (res.statusCode != 200) {
       throw Exception('GET /moments/search 返回 ${res.statusCode}: ${res.body}');
@@ -170,7 +273,9 @@ class ApiService {
   Future<Map<String, List<String>>> getCalendarDates() async {
     final res = await http.get(Uri.parse('$_baseUrl/moments/calendar/dates'));
     if (res.statusCode != 200) {
-      throw Exception('GET /moments/calendar/dates 返回 ${res.statusCode}: ${res.body}');
+      throw Exception(
+        'GET /moments/calendar/dates 返回 ${res.statusCode}: ${res.body}',
+      );
     }
     final body = _safeDecode(res);
     if (body['ok'] != true || body['data'] is! Map) {

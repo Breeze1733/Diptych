@@ -1,6 +1,7 @@
 import '../utils/motion_photo_helper.dart';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 
 import '../constants/app_theme.dart';
@@ -24,6 +25,9 @@ class MomentCard extends StatefulWidget {
   final void Function(Comment? parentComment)? onReplyComment;
   final double scale;
   final bool expandedReading;
+  final String? focusCommentId;
+  final ValueChanged<String>? onCommentRevealed;
+  final bool showInlineAction;
 
   const MomentCard({
     super.key,
@@ -39,6 +43,9 @@ class MomentCard extends StatefulWidget {
     this.onReplyComment,
     this.scale = 1.0,
     this.expandedReading = false,
+    this.focusCommentId,
+    this.onCommentRevealed,
+    this.showInlineAction = true,
   });
 
   @override
@@ -47,6 +54,7 @@ class MomentCard extends StatefulWidget {
 
 class _MomentCardState extends State<MomentCard> {
   late bool _commentsExpanded;
+  final _commentKeys = <String, GlobalKey>{};
 
   Moment get moment => widget.moment;
   String get _displayName =>
@@ -56,6 +64,42 @@ class _MomentCardState extends State<MomentCard> {
   void initState() {
     super.initState();
     _commentsExpanded = widget.expandedReading;
+  }
+
+  @override
+  void didUpdateWidget(covariant MomentCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.focusCommentId != null) {
+      _commentsExpanded = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _revealComment());
+    }
+  }
+
+  Future<void> _revealComment() async {
+    if (!mounted) return;
+    final commentId = widget.focusCommentId;
+    final target = _commentKeys[commentId]?.currentContext;
+    if (target == null) return;
+    final object = target.findRenderObject();
+    final scrollable = Scrollable.maybeOf(target);
+    if (object == null || scrollable == null) return;
+    final viewport = RenderAbstractViewport.maybeOf(object);
+    if (viewport == null) return;
+    final start = viewport.getOffsetToReveal(object, 0).offset;
+    final end = viewport.getOffsetToReveal(object, 1).offset;
+    final offset = scrollable.position.pixels;
+    // 已在视野中的留言不移动页面；只为视野外的新留言做最小定位。
+    if (offset < end - 1 || offset > start + 1) {
+      await Scrollable.ensureVisible(
+        target,
+        alignment: .75,
+        duration: const Duration(milliseconds: 240),
+        curve: Curves.easeOut,
+      );
+    }
+    if (mounted && commentId != null && widget.focusCommentId == commentId) {
+      widget.onCommentRevealed?.call(commentId);
+    }
   }
 
   String _nickFor(String authorId) => authorId == moment.authorId
@@ -80,12 +124,6 @@ class _MomentCardState extends State<MomentCard> {
     final compact = height < 260 * textScale;
     final padding = compact ? 8.0 : 12.0;
     final showMetadata = height >= 200 * textScale;
-    final pageColor = widget.isSelf
-        ? AppTheme.selfColor
-        : AppTheme.partnerColor;
-    final metadata = moment.mood == null
-        ? (widget.isSelf ? '我的这一页' : 'TA 的这一页')
-        : '心情 ${moment.mood}分';
     return Padding(
       padding: EdgeInsets.all(padding),
       child: Column(
@@ -110,22 +148,25 @@ class _MomentCardState extends State<MomentCard> {
                     ),
                     if (showMetadata) ...[
                       const SizedBox(height: 2),
-                      Text(
-                        metadata,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 11, color: pageColor),
-                      ),
+                      if (moment.mood != null)
+                        _buildMoodBadge(compact: true, showLabel: true)
+                      else
+                        Text(
+                          widget.isSelf ? '我的这一页' : 'TA 的这一页',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: AppTheme.textSecondary,
+                          ),
+                        ),
                     ],
                   ],
                 ),
               ),
               if (!showMetadata && moment.mood != null) ...[
                 const SizedBox(width: 4),
-                Text(
-                  '${moment.mood}分',
-                  style: TextStyle(fontSize: 11, color: pageColor),
-                ),
+                _buildMoodBadge(compact: true),
               ],
             ],
           ),
@@ -234,8 +275,10 @@ class _MomentCardState extends State<MomentCard> {
                   ),
                 ),
               ),
-              const SizedBox(width: 12),
-              _buildActionButton(),
+              if (widget.showInlineAction) ...[
+                const SizedBox(width: 12),
+                _buildActionButton(),
+              ],
             ],
           ),
           if (moment.comments.isNotEmpty) ...[
@@ -314,20 +357,35 @@ class _MomentCardState extends State<MomentCard> {
     );
   }
 
-  Widget _buildMoodBadge() {
+  Widget _buildMoodBadge({bool compact = false, bool showLabel = false}) {
     final moodColor = AppTheme.moodColor(moment.mood!);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      height: compact ? null : 30,
+      alignment: compact ? null : Alignment.center,
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 7 : 13,
+        vertical: compact ? 2 : 0,
+      ),
       decoration: BoxDecoration(
-        color: moodColor.withAlpha(18),
-        borderRadius: BorderRadius.circular(8),
+        gradient: AppTheme.moodGradient(moment.mood!),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: moodColor.withValues(alpha: .8)),
       ),
       child: Text(
-        '${moment.mood}分',
+        '${showLabel ? '心情 ' : ''}${moment.mood}分',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
         style: TextStyle(
-          fontSize: 11,
-          color: moodColor,
+          fontSize: compact ? 11 : 13,
+          color: Colors.white,
           fontWeight: FontWeight.w600,
+          shadows: const [
+            Shadow(
+              color: Color(0x806C5670),
+              offset: Offset(0, 1),
+              blurRadius: 2,
+            ),
+          ],
         ),
       ),
     );
@@ -353,6 +411,7 @@ class _MomentCardState extends State<MomentCard> {
   );
 
   Widget _buildComments(BuildContext context) {
+    final ids = moment.comments.map((comment) => comment.id).toSet();
     final replies = <String, List<Comment>>{};
     for (final comment in moment.comments) {
       if (comment.replyTo != null) {
@@ -360,7 +419,10 @@ class _MomentCardState extends State<MomentCard> {
       }
     }
     final topLevel = moment.comments
-        .where((comment) => comment.replyTo == null)
+        .where(
+          (comment) =>
+              comment.replyTo == null || !ids.contains(comment.replyTo),
+        )
         .toList();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -388,8 +450,15 @@ class _MomentCardState extends State<MomentCard> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
+        Container(
+          key: _commentKeys.putIfAbsent(comment.id, () => GlobalKey()),
+          padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 3),
+          decoration: BoxDecoration(
+            color: comment.id == widget.focusCommentId
+                ? const Color(0xFFF5E5EF)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+          ),
           child: SelectableText.rich(
             TextSpan(
               style: const TextStyle(

@@ -17,12 +17,40 @@ class AppTheme {
   static const Color selfColor = Color(0xFF526E87);
   static const Color partnerColor = accentColor;
 
-  /// 冷静、平和与明朗三个区间，保留分数本身作为主要心情信息。
-  static Color moodColor(int mood) {
-    if (mood >= 8) return const Color(0xFFB58550);
-    if (mood >= 5) return accentColor;
-    return selfColor;
-  }
+  /// 马卡龙色阶：雾紫、粉蓝、中性灰、薄荷，7–10 分逐级偏暖粉。
+  static const _moodColors = [
+    Color(0xFFB9B9D4),
+    Color(0xFFBDC7E2),
+    Color(0xFFC3D8EB),
+    Color(0xFFCFE2EC),
+    Color(0xFFE0DDE4),
+    Color(0xFFC8E5D9),
+    Color(0xFFF0D9E5),
+    Color(0xFFF5D1E0),
+    Color(0xFFF6C4D7),
+    Color(0xFFF1B6CD),
+  ];
+
+  static Color moodColor(int mood) => _moodColors[mood.clamp(1, 10) - 1];
+
+  static final _moodGradients = _moodColors
+      .map((base) {
+        // 只做轻微的奶白高光，不再把浅色压成深色。
+        return LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color.lerp(base, Colors.white, .25)!,
+            base,
+            Color.lerp(base, const Color(0xFFD9BED2), .12)!,
+          ],
+          stops: const [0, .55, 1],
+        );
+      })
+      .toList(growable: false);
+
+  static LinearGradient moodGradient(int mood) =>
+      _moodGradients[mood.clamp(1, 10) - 1];
 
   static const TextStyle momentNickname = TextStyle(
     fontSize: 15,

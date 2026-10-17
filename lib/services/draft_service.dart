@@ -1,10 +1,13 @@
 // ignore_for_file: use_null_aware_elements
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
+
 import '../utils/motion_photo_helper.dart';
+import '../models/moment.dart';
 
 /// 日记草稿服务：本地保存/加载/清除
 ///
@@ -18,6 +21,7 @@ import '../utils/motion_photo_helper.dart';
 class DraftService {
   static const _prefix = 'draft_';
   static const _commentPrefix = 'comment_draft_';
+  static const _pendingCommentPrefix = 'pending_comment_';
   static const _topicPostPrefix = 'topic_post_draft_';
 
   /// 保存评论草稿。key 由日记 ID 和回复目标 ID 组成。
@@ -32,10 +36,30 @@ class DraftService {
     return prefs.getString('$_commentPrefix$key');
   }
 
+  static Future<void> savePendingComment(String key, Comment comment) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      '$_pendingCommentPrefix$key',
+      jsonEncode(comment.toJson()),
+    );
+  }
+
+  static Future<Comment?> loadPendingComment(String key) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString('$_pendingCommentPrefix$key');
+    if (raw == null) return null;
+    try {
+      return Comment.fromJson(jsonDecode(raw));
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// 仅在评论成功发布后清理草稿。
   static Future<void> clearComment(String key) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('$_commentPrefix$key');
+    await prefs.remove('$_pendingCommentPrefix$key');
   }
 
   /// 保存话题发帖草稿。
@@ -72,7 +96,10 @@ class DraftService {
     List<DraftPhotoItem>? items,
   }) async {
     final List<File> filesToPersist = items != null
-        ? [for (final it in items) if (it.isLocal && it.file != null) it.file!]
+        ? [
+            for (final it in items)
+              if (it.isLocal && it.file != null) it.file!,
+          ]
         : images;
 
     await _persistImages(dateStr, filesToPersist);
@@ -137,9 +164,12 @@ class DraftService {
       if (rawItems is List) {
         for (final itemJson in rawItems) {
           if (itemJson is Map<String, dynamic>) {
-            final item =
-                DraftPhotoItem.fromJson(itemJson, localFiles: localFiles);
-            if (!item.isLocal || (item.file != null && item.file!.existsSync())) {
+            final item = DraftPhotoItem.fromJson(
+              itemJson,
+              localFiles: localFiles,
+            );
+            if (!item.isLocal ||
+                (item.file != null && item.file!.existsSync())) {
               photoItems.add(item);
             }
           }
@@ -235,13 +265,9 @@ class DraftService {
             : 'jpg';
         final validExt =
             (ext == 'png' || ext == 'jpg' || ext == 'jpeg' || ext == 'webp')
-                ? ext
-                : 'jpg';
-        await cacheManager.putFile(
-          url,
-          bytes,
-          fileExtension: validExt,
-        );
+            ? ext
+            : 'jpg';
+        await cacheManager.putFile(url, bytes, fileExtension: validExt);
       } catch (e) {
         // 单张转移失败不阻塞整体流程
       }
@@ -256,7 +282,9 @@ class DraftService {
       if (entity is File && _fileName(entity).startsWith('${dateStr}_')) {
         try {
           await entity.delete();
-        } catch (_) {/* 删失败不阻塞 */}
+        } catch (_) {
+          /* 删失败不阻塞 */
+        }
       }
     }
   }
@@ -275,7 +303,10 @@ class DraftService {
     List<DraftPhotoItem>? items,
   }) async {
     final List<File> filesToPersist = items != null
-        ? [for (final it in items) if (it.isLocal && it.file != null) it.file!]
+        ? [
+            for (final it in items)
+              if (it.isLocal && it.file != null) it.file!,
+          ]
         : images;
     await _persistImages(dateStr, filesToPersist);
     await _persistUploadMetadata(
@@ -336,7 +367,9 @@ class DraftService {
       try {
         await images[i].copy(tmp.path);
         tmps.add(tmp);
-      } catch (_) {/* 单张失败跳过 */}
+      } catch (_) {
+        /* 单张失败跳过 */
+      }
     }
 
     // 2. 删除旧序号文件
@@ -372,8 +405,8 @@ class DraftService {
     final files = <int, File>{};
     await for (final entity in dir.list()) {
       if (entity is File) {
-        final match =
-            RegExp('^${dateStr}_img_(\\d+)\\.jpg\$').firstMatch(_fileName(entity));
+        final match = RegExp('^${dateStr}_img_(\\d+)\\.jpg\$')
+            .firstMatch(_fileName(entity));
         if (match != null) {
           files[int.parse(match.group(1)!)] = entity;
         }
@@ -470,7 +503,9 @@ class DraftService {
   }
 
   static Map<String, dynamic> _safeDecodeMap(
-      String raw, Map<String, dynamic> fallback) {
+    String raw,
+    Map<String, dynamic> fallback,
+  ) {
     try {
       final decoded = jsonDecode(raw);
       return decoded is Map<String, dynamic> ? decoded : fallback;
@@ -479,11 +514,13 @@ class DraftService {
     }
   }
 
-  static String _fileName(File f) => f.path.split(Platform.pathSeparator).last.split('/').last;
+  static String _fileName(File f) =>
+      f.path.split(Platform.pathSeparator).last.split('/').last;
 
   static Future<Directory> _draftDir() async {
-    final dir =
-        Directory('${(await getApplicationDocumentsDirectory()).path}/drafts');
+    final dir = Directory(
+      '${(await getApplicationDocumentsDirectory()).path}/drafts',
+    );
     if (!await dir.exists()) await dir.create(recursive: true);
     return dir;
   }
@@ -522,7 +559,7 @@ class DraftPhotoItem {
     } else {
       return {
         'type': 'remote',
-       
+
         if (url != null) 'url': url,
         'is_motion': isMotion,
         'upload_live': uploadLive,
@@ -571,10 +608,13 @@ class DraftData {
   final int? mood;
   final List<DraftPhotoItem> photoItems;
   final List<File> images;
+
   /// 断点续传进度：图片序号 → 已上传成功的 URL
   final Map<int, String> uploaded;
+
   /// 实况选择状态：图片序号 → 是否勾选上传实况
   final Map<int, bool> liveFlags;
+
   /// 已上传版本的实况属性：图片序号 → 当时上传的是否为实况
   final Map<int, bool> uploadedLive;
 
@@ -588,4 +628,3 @@ class DraftData {
     this.uploadedLive = const {},
   });
 }
-

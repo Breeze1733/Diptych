@@ -1,8 +1,10 @@
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
+
 import '../constants/settings_theme.dart';
 import '../models/app_user.dart';
 import '../providers/auth_provider.dart';
@@ -10,6 +12,7 @@ import '../providers/wallpaper_provider.dart';
 import '../services/cache_service.dart';
 import '../utils/wakelock_helper.dart';
 import 'wallpaper_preview_screen.dart';
+
 import 'package:image_cropper/image_cropper.dart';
 
 /// 壁纸设置子页面：分「日记壁纸」「话题壁纸」两个区块
@@ -116,6 +119,7 @@ class _WallpaperSettingsScreenState
             initialOpacity: type == WallpaperType.diary
                 ? newSettings.diaryOpacity
                 : newSettings.topicOpacity,
+            initialCardOpacity: newSettings.cardOpacity,
           ),
         ),
       );
@@ -143,9 +147,8 @@ class _WallpaperSettingsScreenState
         : settings.topicUrl;
     if (url.isEmpty) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('请先设置壁纸，再调整透明度')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('请先设置壁纸，再调整透明度')));
       return;
     }
     final opacity = type == WallpaperType.diary
@@ -158,6 +161,7 @@ class _WallpaperSettingsScreenState
           type: type,
           url: url,
           initialOpacity: opacity,
+          initialCardOpacity: settings.cardOpacity,
         ),
       ),
     );
@@ -170,6 +174,7 @@ class _WallpaperSettingsScreenState
       wallpaperTopicUrl: s.topicUrl,
       wallpaperDiaryOpacity: s.diaryOpacity,
       wallpaperTopicOpacity: s.topicOpacity,
+      cardOpacity: s.cardOpacity,
     );
   }
 
@@ -189,9 +194,8 @@ class _WallpaperSettingsScreenState
     await CacheService.saveUser(_withWallpaper(user, newSettings));
 
     if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('已设为白色背景')));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('已设为白色背景')));
   }
 
   @override
@@ -238,6 +242,7 @@ class _WallpaperSettingsScreenState
     final url = isDiary ? settings.diaryUrl : settings.topicUrl;
     final opacity = isDiary ? settings.diaryOpacity : settings.topicOpacity;
     final percent = (opacity * 100).round();
+    final cardPercent = (settings.cardOpacity * 100).round();
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(20),
@@ -275,7 +280,9 @@ class _WallpaperSettingsScreenState
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        url.isEmpty ? '还未设置，选一张喜欢的照片吧' : '已设置 · 不透明度 $percent%',
+                        url.isEmpty
+                            ? '还未设置，选一张喜欢的照片吧'
+                            : '壁纸 $percent% · 卡片 $cardPercent%',
                         style: const TextStyle(
                           fontSize: 12,
                           color: SettingsTheme.muted,

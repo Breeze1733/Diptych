@@ -11,6 +11,7 @@ class DateHeader extends StatelessWidget {
   final VoidCallback? onPreviousDay;
   final VoidCallback? onNextDay;
   final double scale;
+  final double cardOpacity;
 
   const DateHeader({
     super.key,
@@ -20,6 +21,7 @@ class DateHeader extends StatelessWidget {
     this.onPreviousDay,
     this.onNextDay,
     this.scale = 1.0,
+    required this.cardOpacity,
   });
 
   @override
@@ -28,7 +30,7 @@ class DateHeader extends StatelessWidget {
         ? dateText.replaceFirst(RegExp(r'\s+星期.*$'), '')
         : DateHelper.toDateStr(date!).replaceAll('-', '.');
     return Material(
-      color: AppTheme.surfaceColor.withAlpha(235),
+      color: AppTheme.surfaceColor.withValues(alpha: cardOpacity),
       child: Row(
         children: [
           IconButton(

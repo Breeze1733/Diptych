@@ -152,13 +152,13 @@ class _TopicDetailScreenState extends ConsumerState<TopicDetailScreen> {
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          body: _buildBody(currentUid),
+          body: _buildBody(currentUid, wallpaper.cardOpacity),
         ),
       ],
     );
   }
 
-  Widget _buildBody(String currentUid) {
+  Widget _buildBody(String currentUid, double cardOpacity) {
     if (_loading) return const Center(child: CircularProgressIndicator());
     if (_error != null) {
       return Center(
@@ -230,22 +230,25 @@ class _TopicDetailScreenState extends ConsumerState<TopicDetailScreen> {
                     padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
                     itemCount: _topic!.posts.length,
                     separatorBuilder: (_, _) => const SizedBox(height: 12),
-                    itemBuilder: (context, index) =>
-                        _buildPostCard(_topic!.posts[index], currentUid),
+                    itemBuilder: (context, index) => _buildPostCard(
+                      _topic!.posts[index],
+                      currentUid,
+                      cardOpacity,
+                    ),
                   ),
                 ),
         ),
-        _buildReplyBar(),
+        _buildReplyBar(cardOpacity),
       ],
     );
   }
 
-  Widget _buildPostCard(Post post, String currentUid) {
+  Widget _buildPostCard(Post post, String currentUid, double cardOpacity) {
     final isMe = post.authorId == currentUid;
     return Card(
       margin: EdgeInsets.zero,
       elevation: 0,
-      color: AppTheme.surfaceColor.withAlpha(235),
+      color: AppTheme.surfaceColor.withValues(alpha: cardOpacity),
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: Padding(
@@ -323,10 +326,10 @@ class _TopicDetailScreenState extends ConsumerState<TopicDetailScreen> {
     );
   }
 
-  Widget _buildReplyBar() {
+  Widget _buildReplyBar(double cardOpacity) {
     return Container(
       decoration: BoxDecoration(
-        color: AppTheme.surfaceColor.withAlpha(235),
+        color: AppTheme.surfaceColor.withValues(alpha: cardOpacity),
         border: const Border(top: BorderSide(color: AppTheme.dividerColor)),
       ),
       child: SafeArea(

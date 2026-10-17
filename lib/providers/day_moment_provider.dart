@@ -1,6 +1,8 @@
 import 'dart:convert';
+
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../models/moment.dart';
 import '../models/calendar_marked_dates.dart';
 import '../services/cache_service.dart';
@@ -35,7 +37,8 @@ void preloadDayImages(List<Moment> moments) {
     final newUrls = <String>[];
 
     for (final url in targetUrls) {
-      if (_inFlightPreloadUrls.contains(url) || _pendingPreloadUrls.contains(url)) {
+      if (_inFlightPreloadUrls.contains(url) ||
+          _pendingPreloadUrls.contains(url)) {
         continue;
       }
       final fileInfo = await cacheManager.getFileFromCache(url);
@@ -106,7 +109,11 @@ Future<void> _runPreloadWorker() async {
 }
 
 /// 解析动态列表，分出自己和对方的
-Map<String, Moment?> _splitMoments(List<Moment> moments, String myUid, String partnerUid) {
+Map<String, Moment?> _splitMoments(
+  List<Moment> moments,
+  String myUid,
+  String partnerUid,
+) {
   Moment? myMoment;
   Moment? partnerMoment;
   for (final m in moments) {
@@ -120,93 +127,115 @@ Map<String, Moment?> _splitMoments(List<Moment> moments, String myUid, String pa
 }
 
 /// 选定日期的双方动态（缓存优先，立即返回；invalidate 后重读缓存）
-final FutureProvider<Map<String, Moment?>> dayMomentsProvider = FutureProvider<Map<String, Moment?>>((ref) async {
-  final selectedDate = ref.watch(selectedDateProvider);
-  final dateStr = DateHelper.toDateStr(selectedDate);
-  final currentUser = ref.watch(currentUserProvider);
-  final partner = ref.watch(partnerUserProvider);
+final FutureProvider<Map<String, Moment?>> dayMomentsProvider =
+    FutureProvider<Map<String, Moment?>>((ref) async {
+      final selectedDate = ref.watch(selectedDateProvider);
+      final dateStr = DateHelper.toDateStr(selectedDate);
+      final currentUser = ref.watch(currentUserProvider);
+      final partner = ref.watch(partnerUserProvider);
 
-  if (currentUser == null || partner == null) {
-    return {'myMoment': null, 'partnerMoment': null};
-  }
-
-  // 加载缓存（null = 从未请求过该日期，[] = 请求过但无数据）
-  final cached = await CacheService.loadDayMoments(dateStr);
-
-  if (cached != null) {
-    // 缓存命中（包括空数据）→ 秒返，后台静默刷新
-    // 后台拉取最新（不阻塞，有变化才刷新 UI）
-    final apiService = ref.read(apiServiceProvider);
-    final oldJson = jsonEncode(cached);
-    final selfRef = ref;
-    apiService.getDayMoments(dateStr, [currentUser.uid, partner.uid]).then((moments) async {
-      final newRaw = moments.map((m) => m.toJson()).toList();
-      if (jsonEncode(newRaw) != oldJson) {
-        await CacheService.saveDayMoments(dateStr, newRaw);
-        preloadDayImages(moments);
-        await syncMarkedDatesFromMoments(selfRef, dateStr, moments);
-        selfRef.invalidate(dayMomentsProvider);
-      } else {
-        await syncMarkedDatesFromMoments(selfRef, dateStr, moments);
+      if (currentUser == null || partner == null) {
+        return {'myMoment': null, 'partnerMoment': null};
       }
-    }).catchError((_) {});
 
-    if (cached.isEmpty) return {'myMoment': null, 'partnerMoment': null};
-    final moments = cached.map((e) => Moment.fromJson(e)).toList();
-    preloadDayImages(moments);
-    syncMarkedDatesFromMoments(ref, dateStr, moments);
-    return _splitMoments(
-      moments,
-      currentUser.uid,
-      partner.uid,
-    );
-  }
+      // 加载缓存（null = 从未请求过该日期，[] = 请求过但无数据）
+      final cacheVersion = CacheService.dayVersion(dateStr);
+      final cached = await CacheService.loadDayMoments(dateStr);
+      if (!ref.mounted) return {'myMoment': null, 'partnerMoment': null};
 
-  // 从未请求过 → 等网络（仅首次）
-  final apiService = ref.read(apiServiceProvider);
-  try {
-    final moments = await apiService.getDayMoments(dateStr, [currentUser.uid, partner.uid]);
-    // 即使空也保存，下次秒开
-    await CacheService.saveDayMoments(dateStr, moments.map((m) => m.toJson()).toList());
-    preloadDayImages(moments);
-    await syncMarkedDatesFromMoments(ref, dateStr, moments);
-    return _splitMoments(moments, currentUser.uid, partner.uid);
-  } catch (_) {
-    return {'myMoment': null, 'partnerMoment': null};
-  }
-});
+      if (cached != null) {
+        // 缓存命中（包括空数据）→ 秒返，后台静默刷新
+        // 后台拉取最新（不阻塞，有变化才刷新 UI）
+        final apiService = ref.read(apiServiceProvider);
+        final oldJson = jsonEncode(cached);
+        final selfRef = ref;
+        apiService
+            .getDayMoments(dateStr, [currentUser.uid, partner.uid])
+            .then((moments) async {
+              if (!selfRef.mounted ||
+                  CacheService.dayVersion(dateStr) != cacheVersion) {
+                return;
+              }
+              final newRaw = moments.map((m) => m.toJson()).toList();
+              if (jsonEncode(newRaw) != oldJson) {
+                await CacheService.saveDayMoments(dateStr, newRaw);
+                if (!selfRef.mounted) return;
+                preloadDayImages(moments);
+                await syncMarkedDatesFromMoments(selfRef, dateStr, moments);
+                selfRef.invalidate(dayMomentsProvider);
+              } else {
+                await syncMarkedDatesFromMoments(selfRef, dateStr, moments);
+              }
+            })
+            .catchError((_) {});
+
+        if (cached.isEmpty) return {'myMoment': null, 'partnerMoment': null};
+        final moments = cached.map((e) => Moment.fromJson(e)).toList();
+        preloadDayImages(moments);
+        syncMarkedDatesFromMoments(ref, dateStr, moments);
+        return _splitMoments(moments, currentUser.uid, partner.uid);
+      }
+
+      // 从未请求过 → 等网络（仅首次）
+      final apiService = ref.read(apiServiceProvider);
+      try {
+        final moments = await apiService.getDayMoments(dateStr, [
+          currentUser.uid,
+          partner.uid,
+        ]);
+        if (!ref.mounted || CacheService.dayVersion(dateStr) != cacheVersion) {
+          final latest = await CacheService.loadDayMoments(dateStr) ?? [];
+          return _splitMoments(
+            latest.map(Moment.fromJson).toList(),
+            currentUser.uid,
+            partner.uid,
+          );
+        }
+        // 即使空也保存，下次秒开
+        await CacheService.saveDayMoments(
+          dateStr,
+          moments.map((m) => m.toJson()).toList(),
+        );
+        preloadDayImages(moments);
+        await syncMarkedDatesFromMoments(ref, dateStr, moments);
+        return _splitMoments(moments, currentUser.uid, partner.uid);
+      } catch (_) {
+        return {'myMoment': null, 'partnerMoment': null};
+      }
+    });
 
 /// 日历标记数据（纯本地缓存优先；仅首次无缓存时调一次 API）
-final FutureProvider<CalendarMarkedDates> markedDatesProvider = FutureProvider<CalendarMarkedDates>((ref) async {
-  final cachedA = await CacheService.loadMarkedDates('A');
-  final cachedB = await CacheService.loadMarkedDates('B');
+final FutureProvider<CalendarMarkedDates> markedDatesProvider =
+    FutureProvider<CalendarMarkedDates>((ref) async {
+      final cachedA = await CacheService.loadMarkedDates('A');
+      final cachedB = await CacheService.loadMarkedDates('B');
 
-  if (cachedA != null && cachedB != null) {
-    // 缓存命中（包括空数据）→ 秒返
-    return CalendarMarkedDates(
-      userADates: cachedA.toSet(),
-      userBDates: cachedB.toSet(),
-    );
-  }
+      if (cachedA != null && cachedB != null) {
+        // 缓存命中（包括空数据）→ 秒返
+        return CalendarMarkedDates(
+          userADates: cachedA.toSet(),
+          userBDates: cachedB.toSet(),
+        );
+      }
 
-  // 首次使用 / 缓存缺失 → 从后端拉取全量
-  final apiService = ref.read(apiServiceProvider);
-  try {
-    final map = await apiService.getCalendarDates();
-    final listA = map['A'] ?? [];
-    final listB = map['B'] ?? [];
-    await CacheService.overwriteAllCalendarDates(listA, listB);
-    return CalendarMarkedDates(
-      userADates: listA.toSet(),
-      userBDates: listB.toSet(),
-    );
-  } catch (_) {
-    return CalendarMarkedDates(
-      userADates: cachedA?.toSet() ?? {},
-      userBDates: cachedB?.toSet() ?? {},
-    );
-  }
-});
+      // 首次使用 / 缓存缺失 → 从后端拉取全量
+      final apiService = ref.read(apiServiceProvider);
+      try {
+        final map = await apiService.getCalendarDates();
+        final listA = map['A'] ?? [];
+        final listB = map['B'] ?? [];
+        await CacheService.overwriteAllCalendarDates(listA, listB);
+        return CalendarMarkedDates(
+          userADates: listA.toSet(),
+          userBDates: listB.toSet(),
+        );
+      } catch (_) {
+        return CalendarMarkedDates(
+          userADates: cachedA?.toSet() ?? {},
+          userBDates: cachedB?.toSet() ?? {},
+        );
+      }
+    });
 
 /// 从某天日记列表中纯本地同步日历标记（0 网络开销，保证日记与日历强一致）
 Future<void> syncMarkedDatesFromMoments(

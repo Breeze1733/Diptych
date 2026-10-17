@@ -187,13 +187,13 @@ class _TopicsScreenState extends ConsumerState<TopicsScreen> {
             ),
             child: FrostedPillButton(label: '创建话题', onTap: _createTopic),
           ),
-          body: SafeArea(top: false, child: _buildBody()),
+          body: SafeArea(top: false, child: _buildBody(wallpaper.cardOpacity)),
         ),
       ],
     );
   }
 
-  Widget _buildBody() {
+  Widget _buildBody(double cardOpacity) {
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -265,7 +265,7 @@ class _TopicsScreenState extends ConsumerState<TopicsScreen> {
         itemBuilder: (context, index) {
           final topic = _topics![index];
           return Material(
-            color: AppTheme.surfaceColor.withAlpha(235),
+            color: AppTheme.surfaceColor.withValues(alpha: cardOpacity),
             borderRadius: BorderRadius.circular(20),
             clipBehavior: Clip.antiAlias,
             child: InkWell(

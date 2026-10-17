@@ -680,43 +680,40 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
   /// API 保存成功后更新本地缓存
   Future<void> _updateCacheAfterSave(
     String authorId,
-    List<String> imageUrls,
-  ) async {
+    List<String> imageUrls, {
+    required String momentId,
+    Moment? previousMoment,
+  }) async {
     final cached = await CacheService.loadDayMoments(_dateStr) ?? [];
+    final idx = cached.indexWhere(
+      (m) => m['date_str'] == _dateStr && m['author_id'] == authorId,
+    );
+    final previous = previousMoment ?? widget.existingMoment;
     final feeling = _feelingController.text.trim();
 
     final now = DateHelper.toIsoString(DateTime.now());
 
     // 构建当前日记的 JSON
     final momentJson = <String, dynamic>{
+      'id': momentId,
       'date_str': _dateStr,
       'author_id': authorId,
       'image_urls': imageUrls,
       'feeling': feeling,
       'mood': _mood,
       'updated_at': now,
+      'created_at': idx >= 0
+          ? cached[idx]['created_at']
+          : (previous == null
+                ? now
+                : DateHelper.toIsoString(previous.createdAt)),
+      'comments': idx >= 0
+          ? cached[idx]['comments'] ?? []
+          : previous?.comments.map((c) => c.toJson()).toList() ?? [],
     };
 
-    if (_isEdit) {
-      momentJson['id'] = widget.existingMoment!.id;
-      momentJson['created_at'] = DateHelper.toIsoString(
-        widget.existingMoment!.createdAt,
-      );
-      momentJson['comments'] = widget.existingMoment!.comments
-          .map((c) => c.toJson())
-          .toList();
-    } else {
-      momentJson['created_at'] = now;
-      momentJson['comments'] = <Map<String, dynamic>>[];
-    }
-
     // 替换或追加到缓存列表
-    final idx = cached.indexWhere(
-      (m) => m['date_str'] == _dateStr && m['author_id'] == authorId,
-    );
     if (idx >= 0) {
-      // 保留已有的 id（创建时可能还不知道）
-      momentJson['id'] ??= cached[idx]['id'];
       cached[idx] = momentJson;
     } else {
       cached.add(momentJson);
@@ -807,7 +804,11 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
           'feeling': _feelingController.text.trim(),
           'mood': _mood,
         });
-        await _updateCacheAfterSave(currentUser.uid, imageUrls);
+        await _updateCacheAfterSave(
+          currentUser.uid,
+          imageUrls,
+          momentId: widget.existingMoment!.id,
+        );
       } else {
         // 防并发：其他设备可能已创建当天日记
         final existing = await apiService.getMomentByDate(
@@ -831,16 +832,25 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
             'feeling': _feelingController.text.trim(),
             'mood': _mood,
           });
-          await _updateCacheAfterSave(currentUser.uid, finalUrls);
+          await _updateCacheAfterSave(
+            currentUser.uid,
+            finalUrls,
+            momentId: existing.id,
+            previousMoment: existing,
+          );
         } else {
-          await apiService.createMoment(
+          final createdId = await apiService.createMoment(
             dateStr: _dateStr,
             authorId: currentUser.uid,
             imageUrls: imageUrls,
             feeling: _feelingController.text.trim(),
             mood: _mood,
           );
-          await _updateCacheAfterSave(currentUser.uid, imageUrls);
+          await _updateCacheAfterSave(
+            currentUser.uid,
+            imageUrls,
+            momentId: createdId,
+          );
         }
       }
 
@@ -1341,27 +1351,45 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
             selected: selected,
             label: '心情 $score 分',
             child: Material(
-              color: selected ? color : AppTheme.softSurface,
+              color: Colors.transparent,
               borderRadius: BorderRadius.circular(7),
-              child: InkWell(
-                onTap: () => setState(() => _mood = selected ? null : score),
-                borderRadius: BorderRadius.circular(7),
-                child: Container(
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(7),
-                    border: Border.all(
-                      color: selected ? color : AppTheme.dividerColor,
-                    ),
-                  ),
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(
-                      '$score',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: selected ? Colors.white : AppTheme.textPrimary,
+              child: Ink(
+                decoration: BoxDecoration(
+                  gradient: AppTheme.moodGradient(score),
+                  borderRadius: BorderRadius.circular(7),
+                  border: selected
+                      ? Border.all(color: color, width: 2)
+                      : Border.all(color: color.withValues(alpha: .5)),
+                ),
+                child: InkWell(
+                  onTap: () => setState(() => _mood = selected ? null : score),
+                  borderRadius: BorderRadius.circular(7),
+                  child: Container(
+                    alignment: Alignment.center,
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        '$score',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: selected
+                              ? FontWeight.w800
+                              : FontWeight.w600,
+                          color: Colors.white,
+                          decoration: selected
+                              ? TextDecoration.underline
+                              : null,
+                          decorationColor: Colors.white,
+                          decorationThickness: 2,
+                          shadows: const [
+                            Shadow(
+                              color: Color(0x806C5670),
+                              offset: Offset(0, 1),
+                              blurRadius: 2,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
