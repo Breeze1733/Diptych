@@ -1,14 +1,19 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:open_filex/open_filex.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import '../constants/api_config.dart';
-import '../utils/foreground_service_helper.dart';
-import '../utils/wakelock_helper.dart';
+import 'api_http_client.dart';
+import 'auth_session.dart';
+import 'http_request.dart';
+import 'transfer_keep_alive.dart';
 
 /// 版本信息
 class VersionInfo {
@@ -37,10 +42,35 @@ class VersionInfo {
 /// 更新检测与全速安装服务（带 CPU WakeLock 保活与启动自动清理）
 class UpdateService {
   static const String baseUrl = ApiConfig.apiBaseUrl;
-  static const _downloaderChannel = MethodChannel('com.splitmoments.split_moments/downloader');
+  static const _downloaderChannel = MethodChannel(
+    'com.splitmoments.split_moments/downloader',
+  );
   static const _keyPendingCleanupPath = 'pending_apk_cleanup_path';
 
-  final http.Client _client = http.Client();
+  final Set<http.Client> _activeClients = {};
+  final _sessionRevision = AuthSession.revision;
+  bool _disposed = false;
+
+  http.Client _createClient() {
+    if (_disposed) throw StateError('更新服务已关闭');
+    AuthSession.ensureRevision(_sessionRevision);
+    final client = ApiHttpClient.create();
+    _activeClients.add(client);
+    return client;
+  }
+
+  Future<T> _request<T>(Future<T> Function(http.Client) request) async {
+    final client = _createClient();
+    try {
+      return await runHttpRequest(
+        request,
+        clientFactory: () => client,
+        sessionRevision: _sessionRevision,
+      );
+    } finally {
+      _activeClients.remove(client);
+    }
+  }
 
   dynamic _safeDecode(String body) {
     try {
@@ -56,7 +86,9 @@ class UpdateService {
 
   /// 检查远程最新版本
   Future<VersionInfo> checkLatestVersion() async {
-    final res = await _client.get(Uri.parse('$baseUrl/version/latest'));
+    final res = await _request(
+      (client) => client.get(Uri.parse('$baseUrl/version/latest')),
+    );
     if (res.statusCode != 200) {
       throw Exception('获取版本信息失败 (${res.statusCode})');
     }
@@ -76,13 +108,10 @@ class UpdateService {
   /// 全速直连流式下载 APK（支持 Foreground Service 前台保活 + HTTP Range 断点续传 + 10 分钟 WakeLock）
   Future<String> downloadApk(
     String url, {
-    void Function(double progress, int downloadedBytes, int totalBytes)? onProgress,
+    void Function(double progress, int downloadedBytes, int totalBytes)?
+    onProgress,
   }) async {
-    // 1. 申请 10 分钟 CPU 唤醒锁，防止切后台时手机深度休眠
-    await WakelockHelper.acquire(timeout: const Duration(minutes: 10));
-
-    // 2. 启动 Android 前台保活服务并在通知栏常驻进度，获取 Linux 内核网络豁免权（100% 阻止系统掐断连接）
-    await ForegroundServiceHelper.start(
+    final lease = await TransferKeepAlive.acquire(
       title: 'Diptych 新版本下载',
       content: '正在全速下载安装包...',
       maxProgress: 100,
@@ -98,7 +127,7 @@ class UpdateService {
       // 预先探测文件总大小
       var total = 0;
       try {
-        final headRes = await _client.head(Uri.parse(url));
+        final headRes = await _request((client) => client.head(Uri.parse(url)));
         if (headRes.statusCode == 200) {
           total = int.tryParse(headRes.headers['content-length'] ?? '') ?? 0;
         }
@@ -106,61 +135,104 @@ class UpdateService {
 
       // 如果有残留旧文件先清理
       if (await file.exists()) {
-        try { await file.delete(); } catch (_) {}
+        try {
+          await file.delete();
+        } catch (_) {}
       }
 
       var downloaded = 0;
       int retryCount = 0;
       const maxRetries = 15; // 允许在极端网络抖动时自动无感重连 15 次
+      String? validator;
 
-      while (downloaded < total || total == 0) {
+      while (true) {
         IOSink? sink;
         http.Client? streamClient;
         try {
-          streamClient = http.Client();
+          streamClient = _createClient();
           final request = http.Request('GET', Uri.parse(url));
+          request.headers['Accept-Encoding'] = 'identity';
           if (downloaded > 0) {
             request.headers['Range'] = 'bytes=$downloaded-';
+            if (validator != null) request.headers['If-Range'] = validator;
           }
 
-          final streamed = await streamClient.send(request);
+          final activeClient = streamClient;
+          final streamed = await activeClient
+              .send(request)
+              .timeout(
+                const Duration(seconds: 30),
+                onTimeout: () {
+                  activeClient.close();
+                  throw TimeoutException('等待下载响应超时');
+                },
+              );
           if (streamed.statusCode != 200 && streamed.statusCode != 206) {
             throw Exception('下载失败，服务器返回 ${streamed.statusCode}');
           }
 
-          if (total == 0) {
-            if (streamed.statusCode == 206) {
-              final contentRange = streamed.headers['content-range'];
-              if (contentRange != null && contentRange.contains('/')) {
-                total = int.tryParse(contentRange.split('/').last) ?? (downloaded + (streamed.contentLength ?? 0));
-              } else {
-                total = downloaded + (streamed.contentLength ?? 0);
-              }
-            } else {
-              total = streamed.contentLength ?? 0;
+          final isAppend = streamed.statusCode == 206 && downloaded > 0;
+          int? expectedResponseBytes;
+          if (streamed.statusCode == 206) {
+            final match = RegExp(r'^bytes (\d+)-(\d+)/(\d+)$')
+                .firstMatch(streamed.headers['content-range'] ?? '');
+            if (match == null) throw Exception('服务器未返回有效的下载范围');
+            final start = int.parse(match[1]!);
+            final end = int.parse(match[2]!);
+            final rangeTotal = int.parse(match[3]!);
+            if (start != downloaded ||
+                end < start ||
+                end >= rangeTotal ||
+                (downloaded > 0 && total > 0 && total != rangeTotal)) {
+              throw Exception('服务器返回的下载范围与本地文件不一致');
             }
-          }
-
-          final isAppend = (streamed.statusCode == 206 && downloaded > 0);
-          if (!isAppend && downloaded > 0) {
-            // 服务器不支持 Range，重置从头开始
+            expectedResponseBytes = end - start + 1;
+            if (streamed.contentLength != null &&
+                streamed.contentLength != expectedResponseBytes) {
+              throw Exception('下载范围与响应长度不一致');
+            }
+            total = rangeTotal;
+          } else {
+            // 完整响应是权威版本；Range 被忽略或 If-Range 失效时从头写入。
             downloaded = 0;
+            expectedResponseBytes = streamed.contentLength;
+            total = streamed.contentLength ?? total;
           }
+          validator =
+              streamed.headers['etag'] ?? streamed.headers['last-modified'];
 
-          sink = file.openWrite(mode: isAppend ? FileMode.append : FileMode.write);
-
-          await for (final chunk in streamed.stream) {
+          sink = file.openWrite(
+            mode: isAppend ? FileMode.append : FileMode.write,
+          );
+          var responseBytes = 0;
+          final timedStream = streamed.stream.timeout(
+            const Duration(seconds: 30),
+            onTimeout: (eventSink) {
+              activeClient.close();
+              eventSink.addError(TimeoutException('下载数据接收超时'));
+              eventSink.close();
+            },
+          );
+          await for (final chunk in timedStream) {
+            responseBytes += chunk.length;
             downloaded += chunk.length;
+            if ((expectedResponseBytes != null &&
+                    responseBytes > expectedResponseBytes) ||
+                (total > 0 && downloaded > total)) {
+              throw Exception('下载内容超过服务器声明的长度');
+            }
             sink.add(chunk);
             if (total > 0) {
               final percent = downloaded / total;
               if (onProgress != null) {
                 onProgress(percent.clamp(0.0, 1.0), downloaded, total);
               }
-              final downloadedMB = (downloaded / (1024 * 1024)).toStringAsFixed(1);
+              final downloadedMB = (downloaded / (1024 * 1024)).toStringAsFixed(
+                1,
+              );
               final totalMB = (total / (1024 * 1024)).toStringAsFixed(1);
               final percentInt = (percent * 100).toInt().clamp(0, 100);
-              ForegroundServiceHelper.update(
+              lease.update(
                 title: 'Diptych 新版本下载',
                 content: '正在下载 $percentInt% ($downloadedMB MB / $totalMB MB)',
                 maxProgress: 100,
@@ -172,24 +244,25 @@ class UpdateService {
           await sink.flush();
           await sink.close();
           sink = null;
-          streamClient.close();
-          streamClient = null;
-
-          // 传输完毕退出循环
-          if (total > 0 && downloaded >= total) {
+          if (responseBytes == 0 ||
+              (expectedResponseBytes != null &&
+                  responseBytes != expectedResponseBytes)) {
+            throw Exception('下载响应不完整');
+          }
+          if ((total > 0 && downloaded == total) ||
+              (total == 0 && streamed.statusCode == 200)) {
             break;
           }
-          if (total == 0 && downloaded > 0) {
-            break;
-          }
+          throw Exception('安装包尚未下载完整');
         } catch (e) {
           if (sink != null) {
-            try { await sink.flush(); await sink.close(); } catch (_) {}
+            try {
+              await sink.flush();
+              await sink.close();
+            } catch (_) {}
             sink = null;
           }
-          streamClient?.close();
-          streamClient = null;
-
+          if (_disposed || AuthSession.revision != _sessionRevision) rethrow;
           retryCount++;
           if (retryCount > maxRetries) {
             throw Exception('网络连接中断且重试超限: $e');
@@ -199,25 +272,38 @@ class UpdateService {
           await Future.delayed(const Duration(milliseconds: 500));
           if (await file.exists()) {
             downloaded = await file.length();
+            if (total > 0 && downloaded >= total) {
+              // 失败响应即使填满了文件，也不能当成完整包继续安装。
+              await file.delete();
+              downloaded = 0;
+              validator = null;
+            }
           }
+        } finally {
+          streamClient?.close();
+          _activeClients.remove(streamClient);
         }
       }
 
       return file.path;
     } finally {
       // 无论成功失败，下载结束立即清除前台通知并释放唤醒锁
-      await ForegroundServiceHelper.stop();
-      await WakelockHelper.release();
+      await lease.release();
     }
   }
 
   /// 调起系统安装 APK
   Future<void> installApk(String filePath) async {
     try {
-      await _downloaderChannel.invokeMethod('installApk', {'filePath': filePath});
+      await _downloaderChannel.invokeMethod('installApk', {
+        'filePath': filePath,
+      });
     } catch (_) {
       // 备用 fallback
-      await OpenFilex.open(filePath, type: 'application/vnd.android.package-archive');
+      await OpenFilex.open(
+        filePath,
+        type: 'application/vnd.android.package-archive',
+      );
     }
   }
 
@@ -248,13 +334,17 @@ class UpdateService {
         if (extDir != null) {
           final rootApk = File('${extDir.path}/diptych_update.apk');
           if (await rootApk.exists()) {
-            try { await rootApk.delete(); } catch (_) {}
+            try {
+              await rootApk.delete();
+            } catch (_) {}
           }
           final downloadDir = Directory('${extDir.path}/Download');
           if (await downloadDir.exists()) {
             await for (final entity in downloadDir.list()) {
               if (entity is File && entity.path.endsWith('.apk')) {
-                try { await entity.delete(); } catch (_) {}
+                try {
+                  await entity.delete();
+                } catch (_) {}
               }
             }
           }
@@ -272,6 +362,10 @@ class UpdateService {
   }
 
   void dispose() {
-    _client.close();
+    _disposed = true;
+    for (final client in _activeClients) {
+      client.close();
+    }
+    _activeClients.clear();
   }
 }

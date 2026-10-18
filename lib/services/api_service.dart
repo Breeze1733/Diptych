@@ -6,16 +6,18 @@ import '../models/app_user.dart';
 import '../models/moment.dart';
 import '../models/app_notification.dart';
 import '../constants/api_config.dart';
+import 'http_request.dart';
 
 /// 后端 API 服务 — 替换 Firebase Firestore
 class ApiService {
   static const String _baseUrl = ApiConfig.apiBaseUrl;
+  final _http = HttpRequests();
 
   // ─── 用户相关 ───
 
   /// 获取用户信息
   Future<AppUser> getUser(String uid) async {
-    final res = await http.get(Uri.parse('$_baseUrl/users/$uid'));
+    final res = await _http.get(Uri.parse('$_baseUrl/users/$uid'));
     if (res.statusCode != 200) {
       throw Exception('GET /users/$uid 返回 ${res.statusCode}: ${res.body}');
     }
@@ -53,7 +55,7 @@ class ApiService {
       data['wallpaper_topic_opacity'] = wallpaperTopicOpacity;
     }
     if (cardOpacity != null) data['card_opacity'] = cardOpacity;
-    final res = await http.put(
+    final res = await _http.put(
       Uri.parse('$_baseUrl/users/$uid'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode(data),
@@ -69,7 +71,14 @@ class ApiService {
 
   /// 确保预设用户存在
   Future<void> ensurePresetUsers() async {
-    await http.post(Uri.parse('$_baseUrl/users/ensure'));
+    final res = await _http.post(Uri.parse('$_baseUrl/users/ensure'));
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw Exception('初始化用户失败（${res.statusCode}）');
+    }
+    final body = _safeDecode(res);
+    if (body['ok'] != true) {
+      throw Exception(body['error'] ?? '初始化用户失败');
+    }
   }
 
   // ─── 动态相关 ───
@@ -87,21 +96,19 @@ class ApiService {
   ) async {
     if (authorIds.isEmpty) return [];
     final ids = authorIds.join(',');
-    final res = await http
-        .get(
-          Uri.parse('$_baseUrl/moments').replace(
-            queryParameters: {
-              'date_str': dateStr,
-              'author_ids': ids,
-              '_fresh': DateTime.now().microsecondsSinceEpoch.toString(),
-            },
-          ),
-          headers: const {
-            'Cache-Control': 'no-cache, no-store',
-            'Pragma': 'no-cache',
-          },
-        )
-        .timeout(const Duration(seconds: 25));
+    final res = await _http.get(
+      Uri.parse('$_baseUrl/moments').replace(
+        queryParameters: {
+          'date_str': dateStr,
+          'author_ids': ids,
+          '_fresh': DateTime.now().microsecondsSinceEpoch.toString(),
+        },
+      ),
+      headers: const {
+        'Cache-Control': 'no-cache, no-store',
+        'Pragma': 'no-cache',
+      },
+    );
     if (res.statusCode != 200) {
       throw Exception('GET /moments 返回 ${res.statusCode}: ${res.body}');
     }
@@ -120,29 +127,23 @@ class ApiService {
             '_fresh': DateTime.now().microsecondsSinceEpoch.toString(),
           },
         );
-    final res = await http
-        .get(
-          uri,
-          headers: const {
-            'Cache-Control': 'no-cache, no-store',
-            'Pragma': 'no-cache',
-          },
-        )
-        .timeout(const Duration(seconds: 25));
+    final res = await _http.get(
+      uri,
+      headers: const {
+        'Cache-Control': 'no-cache, no-store',
+        'Pragma': 'no-cache',
+      },
+    );
     return _momentResponse(res, momentId);
   }
 
   /// 单条追加；固定评论 ID 让超时后的重试不会生成重复评论。
   Future<Moment> addComment(String momentId, Comment comment) async {
-    final res = await http
-        .post(
-          Uri.parse(
-            '$_baseUrl/moments/${Uri.encodeComponent(momentId)}/comments',
-          ),
-          headers: const {'Content-Type': 'application/json'},
-          body: jsonEncode(comment.toJson()),
-        )
-        .timeout(const Duration(seconds: 25));
+    final res = await _http.post(
+      Uri.parse('$_baseUrl/moments/${Uri.encodeComponent(momentId)}/comments'),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode(comment.toJson()),
+    );
     return _momentResponse(res, momentId);
   }
 
@@ -151,15 +152,13 @@ class ApiService {
     String commentId,
     String authorId,
   ) async {
-    final res = await http
-        .delete(
-          Uri.parse(
-            '$_baseUrl/moments/${Uri.encodeComponent(momentId)}/comments/${Uri.encodeComponent(commentId)}',
-          ),
-          headers: const {'Content-Type': 'application/json'},
-          body: jsonEncode({'author_id': authorId}),
-        )
-        .timeout(const Duration(seconds: 25));
+    final res = await _http.delete(
+      Uri.parse(
+        '$_baseUrl/moments/${Uri.encodeComponent(momentId)}/comments/${Uri.encodeComponent(commentId)}',
+      ),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({'author_id': authorId}),
+    );
     return _momentResponse(res, momentId);
   }
 
@@ -204,7 +203,7 @@ class ApiService {
     };
     if (mood != null) body['mood'] = mood;
 
-    final res = await http.post(
+    final res = await _http.post(
       Uri.parse('$_baseUrl/moments'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode(body),
@@ -218,7 +217,7 @@ class ApiService {
 
   /// 更新动态
   Future<void> updateMoment(String momentId, Map<String, dynamic> data) async {
-    final res = await http.put(
+    final res = await _http.put(
       Uri.parse('$_baseUrl/moments/$momentId'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode(data),
@@ -250,7 +249,7 @@ class ApiService {
     };
     final uri = Uri.parse('$_baseUrl/moments/search')
         .replace(queryParameters: params);
-    final res = await http.get(uri);
+    final res = await _http.get(uri);
     if (res.statusCode != 200) {
       throw Exception('GET /moments/search 返回 ${res.statusCode}: ${res.body}');
     }
@@ -271,7 +270,7 @@ class ApiService {
 
   /// 获取所有用户的日历日期分布 (如 {'A': [...], 'B': [...]})
   Future<Map<String, List<String>>> getCalendarDates() async {
-    final res = await http.get(Uri.parse('$_baseUrl/moments/calendar/dates'));
+    final res = await _http.get(Uri.parse('$_baseUrl/moments/calendar/dates'));
     if (res.statusCode != 200) {
       throw Exception(
         'GET /moments/calendar/dates 返回 ${res.statusCode}: ${res.body}',
@@ -293,9 +292,10 @@ class ApiService {
   /// 获取待读通知列表（服务端读取后即自毁，超时 4 秒自动跳过防卡顿）
   Future<List<AppNotification>> getPendingNotifications(String userId) async {
     try {
-      final res = await http
-          .get(Uri.parse('$_baseUrl/notifications?user_id=$userId'))
-          .timeout(const Duration(seconds: 4));
+      final res = await _http.get(
+        Uri.parse('$_baseUrl/notifications?user_id=$userId'),
+        timeout: const Duration(seconds: 4),
+      );
       if (res.statusCode != 200) return [];
       final body = _safeDecode(res);
       if (body['ok'] != true || body['data'] == null) return [];

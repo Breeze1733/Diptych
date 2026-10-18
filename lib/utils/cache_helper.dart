@@ -1,6 +1,9 @@
 import 'dart:io';
+
 import 'package:flutter/painting.dart' show imageCache;
-import 'package:flutter_cache_manager/flutter_cache_manager.dart';
+
+import '../services/private_image_cache.dart';
+
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -26,10 +29,7 @@ class CacheHelper {
       _getDirSize(tempDir),
     ]);
 
-    return {
-      '日记/用户缓存': results[0],
-      '图片缓存(temp)': results[1],
-    };
+    return {'日记/用户缓存': results[0], '图片缓存(temp)': results[1]};
   }
 
   /// 计算总缓存大小
@@ -51,7 +51,7 @@ class CacheHelper {
 
     // 2. 网络图片缓存（cached_network_image 使用的 DefaultCacheManager）
     try {
-      await DefaultCacheManager().emptyCache();
+      await PrivateImageCache().emptyCache();
     } catch (_) {}
 
     // 3. Flutter 内存图片缓存
@@ -69,7 +69,9 @@ class CacheHelper {
   static String formatSize(int bytes) {
     if (bytes < 1024) return '$bytes B';
     if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    if (bytes < 1024 * 1024 * 1024) return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
     return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
   }
 

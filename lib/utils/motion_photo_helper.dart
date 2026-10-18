@@ -1,9 +1,11 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
-import 'package:flutter_cache_manager/flutter_cache_manager.dart';
+
 import 'package:wechat_assets_picker/wechat_assets_picker.dart';
 import 'package:path_provider/path_provider.dart';
+
+import '../services/private_image_cache.dart';
 
 /// 实况照片（Motion Photo / 动态照片）解析与提取工具类
 ///
@@ -45,12 +47,11 @@ class MotionPhotoHelper {
     }
   }
 
-
   /// 检查网络 URL 对应的本地缓存文件是否为实况照片
   static Future<bool> isMotionPhotoUrl(String url) async {
     if (url.isEmpty) return false;
     try {
-      final fileInfo = await DefaultCacheManager().getFileFromCache(url);
+      final fileInfo = await PrivateImageCache().getFileFromCache(url);
       if (fileInfo != null) {
         return await isMotionPhoto(fileInfo.file);
       }
@@ -139,65 +140,6 @@ class MotionPhotoHelper {
     }
   }
 
-  /// 提取纯静态 JPEG 图片（无损剥离尾部 MP4 视频流）
-  ///
-  /// 如果文件不是实况照片，返回原文件；如果是实况照片，切片提取前半部分纯静态 JPEG。
-  static Future<File> getOrExtractStillImage(File file) async {
-    final path = file.path;
-    if (!await file.exists()) return file;
-
-    try {
-      final length = await file.length();
-      if (length < 100 * 1024) return file;
-
-      final mp4Offset = await _findMp4Offset(file, length);
-      if (mp4Offset <= 0) return file;
-
-      final tempDir = await getTemporaryDirectory();
-      final stillDir = Directory('${tempDir.path}/still_images');
-      if (!await stillDir.exists()) {
-        await stillDir.create(recursive: true);
-      }
-      File targetFile = File(
-        '${stillDir.path}/still_${path.hashCode}_$mp4Offset.jpg',
-      );
-      if (await targetFile.exists()) {
-        final existingSize = await targetFile.length();
-        if (existingSize == mp4Offset) return targetFile;
-      }
-
-      final raf = await file.open(mode: FileMode.read);
-      RandomAccessFile? outRaf;
-      try {
-        try {
-          outRaf = await targetFile.open(mode: FileMode.write);
-        } catch (_) {
-          targetFile = File(
-            '${Directory.systemTemp.path}/${path.hashCode}_still.jpg',
-          );
-          outRaf = await targetFile.open(mode: FileMode.write);
-        }
-
-        const chunkSize = 256 * 1024;
-        int bytesLeft = mp4Offset;
-        while (bytesLeft > 0) {
-          final toRead = bytesLeft > chunkSize ? chunkSize : bytesLeft;
-          final chunk = await raf.read(toRead);
-          if (chunk.isEmpty) break;
-          await outRaf.writeFrom(chunk);
-          bytesLeft -= chunk.length;
-        }
-      } finally {
-        await raf.close();
-        await outRaf?.close();
-      }
-
-      return targetFile;
-    } catch (e) {
-      return file;
-    }
-  }
-
   /// 获取或提取实况照片的 MP4 视频文件
   ///
   /// 如果存在内嵌 MP4，则返回对应的 .mp4 文件；如果是普通静态图，返回 null。
@@ -240,10 +182,6 @@ class MotionPhotoHelper {
       final videoPath =
           '${videoDir.path}/motion_${path.hashCode}_$expectedVideoSize.mp4';
       final targetVideoFile = File(videoPath);
-      if (expectedVideoSize <= 0) {
-        _memoryCache[path] = null;
-        return null;
-      }
 
       // 如果已存在且大小一致，直接复用
       if (await targetVideoFile.exists()) {
@@ -423,4 +361,3 @@ class MotionPhotoHelper {
     }
   }
 }
-

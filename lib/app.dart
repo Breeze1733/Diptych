@@ -13,12 +13,15 @@ class DiptychApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    ref.watch(authSessionLifecycleProvider);
     // 监听自动登录状态（仅用于判断初始加载完成）
     final autoLoginAsync = ref.watch(autoLoginProvider);
     // 监听当前用户角色（登录/退出后会自动更新）
     final currentRole = ref.watch(currentUserRoleProvider);
 
     return MaterialApp(
+      // Clear pushed editors, galleries and settings when the session changes.
+      key: ValueKey(currentRole),
       title: 'Diptych',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,

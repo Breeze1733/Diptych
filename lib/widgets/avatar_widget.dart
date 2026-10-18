@@ -1,22 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 
+import '../services/private_image_cache.dart';
+
 /// 头像组件
 class AvatarWidget extends StatelessWidget {
   final String? avatarUrl;
   final double size;
 
-  const AvatarWidget({
-    super.key,
-    this.avatarUrl,
-    this.size = 40,
-  });
+  const AvatarWidget({super.key, this.avatarUrl, this.size = 40});
 
   @override
   Widget build(BuildContext context) {
     if (avatarUrl != null && avatarUrl!.isNotEmpty) {
       return ClipOval(
         child: CachedNetworkImage(
+          cacheManager: PrivateImageCache(),
           imageUrl: avatarUrl!,
           width: size,
           height: size,

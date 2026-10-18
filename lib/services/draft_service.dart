@@ -1,25 +1,19 @@
-// ignore_for_file: use_null_aware_elements
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'private_image_cache.dart';
+
+import 'dart:math';
+
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 
 import '../utils/motion_photo_helper.dart';
 import '../models/moment.dart';
 
-/// 日记草稿服务：本地保存/加载/清除
-///
-/// 设计要点：
-/// - 图片列表由 [save] / [saveImages] 统一复制进草稿目录，按序号命名（第一张为封面）。
-/// - 支持混合存储远程图片 URL 与本地图片文件，满足编辑已有日记时的草稿需求。
-/// - prefs 里不存本地图片绝对路径（iOS 沙箱在 App 更新后会失效），
-///   加载时扫描当前草稿目录按序号重新解析。
-/// - 传入的本地图片可能就是草稿目录里的文件（草稿加载后再保存），复制时先落到临时文件、
-///   删除旧序号文件后再改名，避免序号变动时互相覆盖或 copy 到自身清空文件。
+/// 评论和话题草稿。调用方传入的 key 已包含作者与目标标识。
 class DraftService {
-  static const _prefix = 'draft_';
   static const _commentPrefix = 'comment_draft_';
   static const _pendingCommentPrefix = 'pending_comment_';
   static const _topicPostPrefix = 'topic_post_draft_';
@@ -79,454 +73,327 @@ class DraftService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('$_topicPostPrefix$key');
   }
+}
 
-  /// 保存草稿（文本 + 心情 + 图片列表，全量替换）
-  /// [uploaded] 为断点续传进度（序号 → URL），若未传入则保留已持久化的进度
-  /// [liveFlags] 为图片实况状态（序号 → 是否上传实况）
-  /// [uploadedLive] 为已上传图片所使用的实况状态（序号 → 当初上传时是否为实况）
-  /// [items] 为混合照片项列表（含本地文件与网络图），保留真实排序
-  static Future<void> save(
-    String dateStr,
-    String feeling,
-    int? mood, {
-    List<File> images = const [],
-    Map<int, String>? uploaded,
-    Map<int, bool>? liveFlags,
-    Map<int, bool>? uploadedLive,
-    List<DraftPhotoItem>? items,
-  }) async {
-    final List<File> filesToPersist = items != null
-        ? [
-            for (final it in items)
-              if (it.isLocal && it.file != null) it.file!,
-          ]
-        : images;
+/// 一个账号某一天的日记草稿。文件名称与照片顺序无关。
+/// 所有写入按调用顺序串行，图片完整落盘后才一次替换清单。
+class MomentDraftStore {
+  final String userId;
+  final String dateStr;
+  static final _writes = <String, Future<void>>{};
+  static final _sourceNames = <String, Map<String, String>>{};
+  static final _random = Random.secure();
 
-    await _persistImages(dateStr, filesToPersist);
-
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString('$_prefix$dateStr');
-    final data = <String, dynamic>{
-      'feeling': feeling,
-      if (mood != null) 'mood': mood,
-      'image_count': filesToPersist.length,
-    };
-
-    if (items != null) {
-      int localCounter = 0;
-      data['items'] = [
-        for (final it in items)
-          if (it.isLocal)
-            it.toJson(localIndex: localCounter++)
-          else
-            it.toJson(),
-      ];
+  MomentDraftStore({required this.userId, required this.dateStr}) {
+    if (userId.isEmpty || !RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(dateStr)) {
+      throw ArgumentError('日记草稿需要账号和有效日期');
     }
-
-    // 优先使用传入的断点续传进度，未传入时保留已持久化的进度，存草稿不应清掉它
-    final finalUploaded = uploaded ?? _readUploaded(raw);
-    if (finalUploaded.isNotEmpty) {
-      data['uploaded'] = {
-        for (final e in finalUploaded.entries) '${e.key}': e.value,
-      };
-    }
-    final finalLiveFlags = liveFlags ?? _readBoolMap(raw, 'live_flags');
-    if (finalLiveFlags.isNotEmpty) {
-      data['live_flags'] = {
-        for (final e in finalLiveFlags.entries) '${e.key}': e.value,
-      };
-    }
-    final finalUploadedLive =
-        uploadedLive ?? _readBoolMap(raw, 'uploaded_live');
-    if (finalUploadedLive.isNotEmpty) {
-      data['uploaded_live'] = {
-        for (final e in finalUploadedLive.entries) '${e.key}': e.value,
-      };
-    }
-    await prefs.setString('$_prefix$dateStr', jsonEncode(data));
   }
 
-  /// 加载草稿，无草稿返回 null。图片扫描草稿目录按序号解析。
-  static Future<DraftData?> load(String dateStr) async {
+  String get _scope => '${Uri.encodeComponent(userId)}_$dateStr';
+  String get _key => 'moment_draft_v2_$_scope';
+
+  Future<T> _serialized<T>(Future<T> Function() action) =>
+      _serialFor(_key, action);
+
+  static Future<T> _serialFor<T>(String key, Future<T> Function() action) {
+    final previous = _writes[key] ?? Future<void>.value();
+    final result = previous.then((_) => action());
+    final tail = result.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
+    _writes[key] = tail;
+    tail.then((_) {
+      if (identical(_writes[key], tail)) _writes.remove(key);
+    });
+    return result;
+  }
+
+  Future<Directory> _directory() async {
+    final root = await getApplicationDocumentsDirectory();
+    final dir = Directory('${root.path}/drafts/$_scope');
+    await dir.create(recursive: true);
+    return dir;
+  }
+
+  /// 捕获不可变快照，异步上传完成或用户重排不会改写已排队的内容。
+  Future<void> save({
+    required String feeling,
+    required int? mood,
+    required List<DraftPhotoItem> items,
+  }) {
+    final snapshot = List<DraftPhotoItem>.of(items);
+    return _serialized(() async {
+      final dir = await _directory();
+      final serialized = <Map<String, dynamic>>[];
+      for (final item in snapshot) {
+        if (!item.isLocal) {
+          serialized.add(item.toJson());
+          continue;
+        }
+        final file = item.file;
+        if (file == null) throw const FileSystemException('草稿图片不存在');
+        final target = await _persistFile(file, dir);
+        serialized.add(item.toJson(fileName: _fileName(target)));
+      }
+      final prefs = await SharedPreferences.getInstance();
+      final saved = await prefs.setString(
+        _key,
+        jsonEncode({
+          'version': 2,
+          'owner_id': userId,
+          'feeling': feeling,
+          'mood': mood,
+          'items': serialized,
+        }),
+      );
+      if (!saved) throw StateError('无法保存草稿');
+      await _removeOwnedLegacy(prefs);
+      // 编辑器/上传任务仍可能持有旧文件引用，仅 clear 时清理，绝不按序号覆盖。
+    });
+  }
+
+  Future<DraftData?> load() => _serialized(() async {
     final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString('$_prefix$dateStr');
+    var raw = prefs.getString(_key);
+    var legacy = false;
+    if (raw == null) {
+      raw = prefs.getString('draft_$dateStr');
+      legacy = true;
+    }
+    if (raw == null) return null;
+    return _decodeDraft(raw, legacy: legacy);
+  });
+
+  /// 只提供给页面的明确恢复操作，绝不在 load 中自动认领无归属旧数据。
+  Future<DraftData?> loadLegacyForRecovery() => _serialized(() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString('draft_$dateStr');
     if (raw == null) return null;
     try {
-      final data = jsonDecode(raw) as Map<String, dynamic>;
-      final localFiles = await _resolveImages(dateStr);
-      final uploaded = _readUploaded(raw);
-      final liveFlags = _readBoolMap(raw, 'live_flags');
-      final uploadedLive = _readBoolMap(raw, 'uploaded_live');
+      final data = jsonDecode(raw);
+      if (data is! Map ||
+          data['owner_id'] != null ||
+          data['author_id'] != null) {
+        return null;
+      }
+    } on FormatException {
+      return null;
+    }
+    return _decodeDraft(raw, legacy: true, allowUnowned: true);
+  });
 
-      final rawItems = data['items'];
-      final photoItems = <DraftPhotoItem>[];
-
-      if (rawItems is List) {
-        for (final itemJson in rawItems) {
-          if (itemJson is Map<String, dynamic>) {
-            final item = DraftPhotoItem.fromJson(
-              itemJson,
-              localFiles: localFiles,
-            );
-            if (!item.isLocal ||
-                (item.file != null && item.file!.existsSync())) {
-              photoItems.add(item);
-            }
+  /// 账号间共用旧草稿认领队列，确认与新清单提交成功后才移除旧记录。
+  Future<void> recoverLegacy(DraftData draft) =>
+      _serialFor('legacy_$dateStr', () async {
+        final prefs = await SharedPreferences.getInstance();
+        final source = draft._legacySource;
+        if (source == null || prefs.getString('draft_$dateStr') != source) {
+          throw StateError('旧草稿已发生变化，请重新打开编辑页');
+        }
+        await save(
+          feeling: draft.feeling,
+          mood: draft.mood,
+          items: draft.photoItems,
+        );
+        if (prefs.getString('draft_$dateStr') == source) {
+          if (!await prefs.remove('draft_$dateStr')) {
+            throw StateError('清理旧草稿记录失败');
           }
         }
-      } else {
-        // 兼容旧版草稿（纯本地图片）
-        for (var i = 0; i < localFiles.length; i++) {
-          final f = localFiles[i];
-          final wasLive = uploadedLive[i] ?? false;
-          final uploadLive = liveFlags[i] ?? false;
-          photoItems.add(
+      });
+
+  Future<DraftData?> _decodeDraft(
+    String raw, {
+    required bool legacy,
+    bool allowUnowned = false,
+  }) async {
+    try {
+      final data = jsonDecode(raw) as Map<String, dynamic>;
+      if (!allowUnowned &&
+          data['owner_id'] != userId &&
+          data['author_id'] != userId) {
+        return null;
+      }
+      final dir = legacy
+          ? Directory(
+              '${(await getApplicationDocumentsDirectory()).path}/drafts',
+            )
+          : await _directory();
+      final result = <DraftPhotoItem>[];
+      final rawItems = data['items'];
+      if (rawItems is List) {
+        for (final value in rawItems) {
+          if (value is! Map<String, dynamic>) continue;
+          final name = value['file_name'];
+          final index = value['local_index'];
+          final String? safeName = name is String && _isFileName(name)
+              ? name
+              : legacy && index is int && index >= 0
+              ? '${dateStr}_img_$index.jpg'
+              : null;
+          final item = DraftPhotoItem.fromJson(
+            value,
+            file: safeName == null ? null : File('${dir.path}/$safeName'),
+          );
+          if (!item.isLocal ||
+              (item.file != null && await item.file!.exists())) {
+            result.add(item);
+          }
+        }
+      } else if (legacy) {
+        final files = <int, File>{};
+        if (await dir.exists()) {
+          await for (final entry in dir.list()) {
+            if (entry is! File) continue;
+            final match = RegExp('^${dateStr}_img_(\\d+)\\.jpg\$')
+                .firstMatch(_fileName(entry));
+            if (match != null) files[int.parse(match.group(1)!)] = entry;
+          }
+        }
+        final indexes = files.keys.toList()..sort();
+        for (final index in indexes) {
+          result.add(
             DraftPhotoItem(
               isLocal: true,
-              file: f,
-              isMotion: uploadLive,
-              uploadLive: uploadLive,
-              uploadedUrl: uploaded[i],
-              uploadedLive: wasLive,
+              file: files[index],
+              isMotion: _legacyValue(data, 'live_flags', index) == true,
+              uploadLive: _legacyValue(data, 'live_flags', index) == true,
+              uploadedUrl: _legacyValue(data, 'uploaded', index) as String?,
+              uploadedLive: _legacyValue(data, 'uploaded_live', index) as bool?,
             ),
           );
         }
       }
-
-      final resolvedImages = [
-        for (final p in photoItems)
-          if (p.isLocal && p.file != null) p.file!,
-      ];
-
-      return DraftData(
-        feeling: data['feeling'] as String? ?? '',
-        mood: data['mood'] as int?,
-        photoItems: photoItems,
-        images: resolvedImages.isNotEmpty ? resolvedImages : localFiles,
-        uploaded: uploaded,
-        liveFlags: liveFlags,
-        uploadedLive: uploadedLive,
+      return DraftData._(
+        data['feeling'] as String? ?? '',
+        data['mood'] as int?,
+        result,
+        allowUnowned ? raw : null,
       );
     } catch (_) {
       return null;
     }
   }
 
-  /// 清除草稿（含图片文件）
-  /// 将草稿/本地已上传图片同步转移至日记图片缓存 (DefaultCacheManager)。
-  /// [localFiles] 本次上传对应的本地文件列表（包含相册原图或草稿缓存文件）
-  /// [uploadedUrls] 本地路径 -> 云端 URL 映射
-  /// [finalImageUrls] 最终发布的日记包含的图片 URL 列表（只转移最终保留在日记中的图片）
-  ///
-  /// 仅在发布/保存日记成功后调用，转移完成后再调用 [clear] 清空草稿。若上传失败切勿调用。
-  /// 这样后续查看日记及后台预加载时，可直接命中本地缓存，无需重复从云端下载自己的图片。
-  static Future<void> transferToMomentCache(
-    String dateStr,
-    List<File> localFiles,
-    Map<String, String> uploadedUrls, {
-    List<String>? finalImageUrls,
-  }) async {
-    if (uploadedUrls.isEmpty) return;
-    final cacheManager = DefaultCacheManager();
-    final candidateFiles = <File>[...localFiles];
+  /// 选图后先取得受管理的稳定路径，页面和上传任务从此使用同一个文件。
+  Future<File> importImage(File image) => _serialized(() async {
+    return _persistFile(image, await _directory());
+  });
 
-    // 补充扫描草稿目录中已存在的序号与静态图文件
-    final dir = await _draftDir();
-    if (await dir.exists()) {
-      await for (final entity in dir.list()) {
-        if (entity is File && _fileName(entity).startsWith('${dateStr}_')) {
-          candidateFiles.add(entity);
-        }
-      }
+  Future<File> _persistFile(File image, Directory dir) async {
+    if (!await image.exists()) {
+      throw FileSystemException('草稿图片不存在，保留上一次完整草稿', image.path);
     }
-
-    final seenUrls = <String>{};
-    for (var i = 0; i < candidateFiles.length; i++) {
-      final file = candidateFiles[i];
-      final url = uploadedUrls[file.path];
-      if (url == null || url.isEmpty) continue;
-      if (finalImageUrls != null && !finalImageUrls.contains(url)) continue;
-      if (!seenUrls.add(url)) continue;
-
-      File fileToRead = file;
-      if (!await fileToRead.exists()) {
-        final fallback = File('${dir.path}/${dateStr}_img_$i.jpg');
-        if (await fallback.exists()) {
-          fileToRead = fallback;
-        } else {
-          continue;
-        }
-      }
-
+    final ownName = image.parent.absolute.path == dir.absolute.path
+        ? _fileName(image)
+        : null;
+    final stat = await image.stat();
+    final sourceKey =
+        '${image.path}:${stat.modified.microsecondsSinceEpoch}:${stat.size}';
+    final names = _sourceNames.putIfAbsent(_key, () => {});
+    final name = ownName ?? names[sourceKey] ?? _newName('photo');
+    final target = File('${dir.path}/$name');
+    if (ownName == null && !await target.exists()) {
+      final tmp = File('${target.path}.pending');
       try {
-        final bytes = await fileToRead.readAsBytes();
-        final ext = fileToRead.path.contains('.')
-            ? fileToRead.path.split('.').last.toLowerCase()
-            : 'jpg';
-        final validExt =
-            (ext == 'png' || ext == 'jpg' || ext == 'jpeg' || ext == 'webp')
-            ? ext
-            : 'jpg';
-        await cacheManager.putFile(url, bytes, fileExtension: validExt);
-      } catch (e) {
-        // 单张转移失败不阻塞整体流程
+        await image.copy(tmp.path);
+        await tmp.rename(target.path);
+      } finally {
+        if (await tmp.exists()) await tmp.delete();
       }
     }
+    names[sourceKey] = name;
+    return target;
   }
 
-  static Future<void> clear(String dateStr) async {
+  Future<void> clear() => _serialized(() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('$_prefix$dateStr');
-    final dir = await _draftDir();
-    await for (final entity in dir.list()) {
-      if (entity is File && _fileName(entity).startsWith('${dateStr}_')) {
-        try {
-          await entity.delete();
-        } catch (_) {
-          /* 删失败不阻塞 */
-        }
-      }
-    }
-  }
-
-  /// 选图/删图后可即时调用，把当前图片列表先落地到草稿目录，防止临时文件被系统清理
-  /// [uploaded] 为断点续传进度（序号 → URL），一并持久化。
-  static Future<void> saveImages(
-    String dateStr,
-    List<File> images, {
-    String? feeling,
-    int? mood,
-    bool updateMood = false,
-    Map<int, String> uploaded = const {},
-    Map<int, bool> liveFlags = const {},
-    Map<int, bool> uploadedLive = const {},
-    List<DraftPhotoItem>? items,
-  }) async {
-    final List<File> filesToPersist = items != null
-        ? [
-            for (final it in items)
-              if (it.isLocal && it.file != null) it.file!,
-          ]
-        : images;
-    await _persistImages(dateStr, filesToPersist);
-    await _persistUploadMetadata(
-      dateStr,
-      uploaded: uploaded,
-      feeling: feeling,
-      mood: mood,
-      updateMood: updateMood,
-      liveFlags: liveFlags,
-      uploadedLive: uploadedLive,
-      items: items,
-    );
-  }
-
-  /// 只持久化断点续传进度，不重新复制图片（上传成功一张后调用）
-  static Future<void> saveUploadProgress(
-    String dateStr,
-    Map<int, String> uploaded, {
-    Map<int, bool>? uploadedLive,
-    String? feeling,
-    int? mood,
-    bool updateMood = false,
-    List<DraftPhotoItem>? items,
-  }) async {
-    await _persistUploadMetadata(
-      dateStr,
-      uploaded: uploaded,
-      feeling: feeling,
-      mood: mood,
-      updateMood: updateMood,
-      uploadedLive: uploadedLive,
-      items: items,
-    );
-  }
-
-  /// 将动态照片转为静态图，直接保存在草稿箱目录中（私有沙盒，绝不污染系统相册）
-  static Future<File> createDraftStillImage(
-    String dateStr,
-    File motionFile,
-  ) async {
-    final dir = await _draftDir();
-    final fileName =
-        '${dateStr}_still_${DateTime.now().microsecondsSinceEpoch}.jpg';
-    final targetFile = File('${dir.path}/$fileName');
-    return MotionPhotoHelper.extractStillImageTo(motionFile, targetFile);
-  }
-
-  // ─── 私有辅助 ───
-
-  /// 全量替换草稿图片：先复制到临时文件 → 删除旧序号文件 → 改名到位
-  static Future<void> _persistImages(String dateStr, List<File> images) async {
-    final dir = await _draftDir();
-
-    // 1. 全部复制到临时文件（源文件可能就是旧序号文件，先读后删）
-    final tmps = <File>[];
-    for (var i = 0; i < images.length; i++) {
-      final tmp = File('${dir.path}/${dateStr}_tmp_$i.jpg');
-      try {
-        await images[i].copy(tmp.path);
-        tmps.add(tmp);
-      } catch (_) {
-        /* 单张失败跳过 */
-      }
-    }
-
-    // 2. 删除旧序号文件
-    final inUsePaths = images.map((f) => f.path).toSet();
-    await for (final entity in dir.list()) {
-      if (entity is File) {
-        final name = _fileName(entity);
-        if (name.startsWith('${dateStr}_img_')) {
-          try {
-            await entity.delete();
-          } catch (_) {}
-        } else if (name.startsWith('${dateStr}_still_') &&
-            !inUsePaths.contains(entity.path)) {
-          // 只删除未在当前图片列表中使用的孤儿静态图缓存，正在使用的静态图严禁删除
-          try {
-            await entity.delete();
-          } catch (_) {}
-        }
-      }
-    }
-
-    // 3. 临时文件改名为正式序号文件
-    for (var i = 0; i < tmps.length; i++) {
-      try {
-        await tmps[i].rename('${dir.path}/${dateStr}_img_$i.jpg');
-      } catch (_) {}
-    }
-  }
-
-  /// 扫描草稿目录，按序号顺序返回存在的图片
-  static Future<List<File>> _resolveImages(String dateStr) async {
-    final dir = await _draftDir();
-    final files = <int, File>{};
-    await for (final entity in dir.list()) {
-      if (entity is File) {
-        final match = RegExp('^${dateStr}_img_(\\d+)\\.jpg\$')
-            .firstMatch(_fileName(entity));
-        if (match != null) {
-          files[int.parse(match.group(1)!)] = entity;
-        }
-      }
-    }
-    final indexes = files.keys.toList()..sort();
-    return [for (final i in indexes) files[i]!];
-  }
-
-  /// 把上传元数据（断点续传进度、实况开关、已上传实况标识）写入草稿 JSON
-  static Future<void> _persistUploadMetadata(
-    String dateStr, {
-    String? feeling,
-    int? mood,
-    bool updateMood = false,
-    Map<int, String>? uploaded,
-    Map<int, bool>? liveFlags,
-    Map<int, bool>? uploadedLive,
-    List<DraftPhotoItem>? items,
-  }) async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString('$_prefix$dateStr');
-    final data = raw == null
-        ? <String, dynamic>{}
-        : _safeDecodeMap(raw, <String, dynamic>{});
-
-    if (feeling != null) {
-      data['feeling'] = feeling;
-    }
-    if (updateMood) {
-      if (mood != null) {
-        data['mood'] = mood;
-      } else {
-        data.remove('mood');
-      }
-    } else if (mood != null) {
-      data['mood'] = mood;
-    }
-
-    if (items != null) {
-      int localCounter = 0;
-      data['items'] = [
-        for (final it in items)
-          if (it.isLocal)
-            it.toJson(localIndex: localCounter++)
-          else
-            it.toJson(),
-      ];
-    }
-    if (uploaded != null) {
-      data['uploaded'] = {
-        for (final e in uploaded.entries) '${e.key}': e.value,
-      };
-    }
-    if (liveFlags != null) {
-      data['live_flags'] = {
-        for (final e in liveFlags.entries) '${e.key}': e.value,
-      };
-    }
-    if (uploadedLive != null) {
-      data['uploaded_live'] = {
-        for (final e in uploadedLive.entries) '${e.key}': e.value,
-      };
-    }
-    await prefs.setString('$_prefix$dateStr', jsonEncode(data));
-  }
-
-  /// 从草稿 JSON 中读取断点续传进度，格式为 序号字符串 → URL
-  static Map<int, String> _readUploaded(String? raw) {
-    if (raw == null) return const {};
-    final data = _safeDecodeMap(raw, <String, dynamic>{});
-    final uploadedRaw = data['uploaded'];
-    if (uploadedRaw is! Map) return const {};
-    final uploaded = <int, String>{};
-    uploadedRaw.forEach((k, v) {
-      final idx = int.tryParse('$k');
-      if (idx != null && v is String && v.isNotEmpty) uploaded[idx] = v;
-    });
-    return uploaded;
-  }
-
-  /// 从草稿 JSON 中读取 bool 映射（如 live_flags 或 uploaded_live）
-  static Map<int, bool> _readBoolMap(String? raw, String key) {
-    if (raw == null) return const {};
-    final data = _safeDecodeMap(raw, <String, dynamic>{});
-    final mapRaw = data[key];
-    if (mapRaw is! Map) return const {};
-    final result = <int, bool>{};
-    mapRaw.forEach((k, v) {
-      final idx = int.tryParse('$k');
-      if (idx != null && v is bool) result[idx] = v;
-    });
-    return result;
-  }
-
-  static Map<String, dynamic> _safeDecodeMap(
-    String raw,
-    Map<String, dynamic> fallback,
-  ) {
+    if (!await prefs.remove(_key)) throw StateError('无法清除草稿');
+    await _removeOwnedLegacy(prefs);
+    _sourceNames.remove(_key);
+    final dir = await _directory();
+    // 只删除当前账号、当前日期的文件，不接触未归属旧草稿。
     try {
-      final decoded = jsonDecode(raw);
-      return decoded is Map<String, dynamic> ? decoded : fallback;
-    } catch (_) {
-      return fallback;
+      await dir.delete(recursive: true);
+    } on FileSystemException {
+      // 清单已清除，文件删除失败不会恢复已发布草稿。
+    }
+  });
+
+  Future<File> createStillImage(File motionFile) => _serialized(() async {
+    final dir = await _directory();
+    return MotionPhotoHelper.extractStillImageTo(
+      motionFile,
+      File('${dir.path}/${_newName('still')}'),
+    );
+  });
+
+  static Future<void> transferToMomentCache(
+    List<DraftPhotoItem> items,
+    List<String> finalImageUrls,
+  ) async {
+    final cache = PrivateImageCache();
+    for (final item in items) {
+      final file = item.file;
+      final url = item.uploadedUrl;
+      if (!item.isLocal ||
+          file == null ||
+          url == null ||
+          !finalImageUrls.contains(url)) {
+        continue;
+      }
+      try {
+        await cache.putFile(
+          url,
+          await file.readAsBytes(),
+          fileExtension: 'jpg',
+        );
+      } on FileSystemException {
+        // 缓存是可选优化，远端保存成功不应被本地缓存失败回滚。
+      }
     }
   }
 
-  static String _fileName(File f) =>
-      f.path.split(Platform.pathSeparator).last.split('/').last;
-
-  static Future<Directory> _draftDir() async {
-    final dir = Directory(
-      '${(await getApplicationDocumentsDirectory()).path}/drafts',
-    );
-    if (!await dir.exists()) await dir.create(recursive: true);
-    return dir;
+  Future<void> _removeOwnedLegacy(SharedPreferences prefs) async {
+    final raw = prefs.getString('draft_$dateStr');
+    if (raw == null) return;
+    try {
+      final legacy = jsonDecode(raw);
+      if (legacy is Map &&
+          (legacy['owner_id'] == userId || legacy['author_id'] == userId)) {
+        await prefs.remove('draft_$dateStr');
+      }
+    } on FormatException {
+      // 未归属或损坏旧草稿不自动认领和删除。
+    }
   }
+
+  static dynamic _legacyValue(
+    Map<String, dynamic> data,
+    String key,
+    int index,
+  ) {
+    final map = data[key];
+    return map is Map ? map['$index'] : null;
+  }
+
+  static String _newName(String prefix) =>
+      '${prefix}_${DateTime.now().microsecondsSinceEpoch}_${_random.nextInt(1 << 32)}.jpg';
+
+  static bool _isFileName(String name) =>
+      name.isNotEmpty &&
+      name != '.' &&
+      name != '..' &&
+      !name.contains('/') &&
+      !name.contains('\\');
+
+  static String _fileName(File file) =>
+      file.path.split(Platform.pathSeparator).last.split('/').last;
 }
 
-/// 草稿中的单张图片项：可以是远程 URL 或本地 File
+/// 排序、实况开关、上传进度与同一张照片一起持久化，避免按序号错配。
 class DraftPhotoItem {
   final bool isLocal;
   final String? url;
@@ -546,85 +413,38 @@ class DraftPhotoItem {
     this.uploadedLive,
   });
 
-  Map<String, dynamic> toJson({int? localIndex}) {
-    if (isLocal) {
-      return {
-        'type': 'local',
-        if (localIndex != null) 'local_index': localIndex,
-        'is_motion': isMotion,
-        'upload_live': uploadLive,
-        if (uploadedUrl != null) 'uploaded_url': uploadedUrl,
-        if (uploadedLive != null) 'uploaded_live': uploadedLive,
-      };
-    } else {
-      return {
-        'type': 'remote',
+  Map<String, dynamic> toJson({String? fileName}) => {
+    'type': isLocal ? 'local' : 'remote',
+    if (isLocal && fileName != null) 'file_name': fileName,
+    if (!isLocal && url != null) 'url': url,
+    'is_motion': isMotion,
+    'upload_live': uploadLive,
+    if (isLocal && uploadedUrl != null) 'uploaded_url': uploadedUrl,
+    if (isLocal && uploadedLive != null) 'uploaded_live': uploadedLive,
+  };
 
-        if (url != null) 'url': url,
-        'is_motion': isMotion,
-        'upload_live': uploadLive,
-      };
-    }
-  }
-
-  factory DraftPhotoItem.fromJson(
-    Map<String, dynamic> json, {
-    List<File> localFiles = const [],
-  }) {
-    final type = json['type'] as String? ?? 'local';
-    final isMotion = json['is_motion'] as bool? ?? false;
-    final uploadLive = json['upload_live'] as bool? ?? false;
-
-    if (type == 'remote') {
-      return DraftPhotoItem(
-        isLocal: false,
+  factory DraftPhotoItem.fromJson(Map<String, dynamic> json, {File? file}) =>
+      DraftPhotoItem(
+        isLocal: json['type'] != 'remote',
         url: json['url'] as String?,
-        isMotion: isMotion,
-        uploadLive: uploadLive,
-      );
-    } else {
-      final localIndex = json['local_index'] as int?;
-      File? file;
-      if (localIndex != null &&
-          localIndex >= 0 &&
-          localIndex < localFiles.length) {
-        file = localFiles[localIndex];
-      }
-      return DraftPhotoItem(
-        isLocal: true,
         file: file,
-        isMotion: isMotion,
-        uploadLive: uploadLive,
+        isMotion: json['is_motion'] as bool? ?? false,
+        uploadLive: json['upload_live'] as bool? ?? false,
         uploadedUrl: json['uploaded_url'] as String?,
         uploadedLive: json['uploaded_live'] as bool?,
       );
-    }
-  }
 }
 
-/// 草稿数据：包含文字、心情与图片项列表
 class DraftData {
   final String feeling;
   final int? mood;
   final List<DraftPhotoItem> photoItems;
-  final List<File> images;
+  final String? _legacySource;
 
-  /// 断点续传进度：图片序号 → 已上传成功的 URL
-  final Map<int, String> uploaded;
-
-  /// 实况选择状态：图片序号 → 是否勾选上传实况
-  final Map<int, bool> liveFlags;
-
-  /// 已上传版本的实况属性：图片序号 → 当时上传的是否为实况
-  final Map<int, bool> uploadedLive;
-
-  const DraftData({
-    required this.feeling,
+  const DraftData._(
+    this.feeling,
     this.mood,
-    this.photoItems = const [],
-    this.images = const [],
-    this.uploaded = const {},
-    this.liveFlags = const {},
-    this.uploadedLive = const {},
-  });
+    this.photoItems,
+    this._legacySource,
+  );
 }

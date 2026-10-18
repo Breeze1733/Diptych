@@ -29,10 +29,18 @@ class _DiaryReadingScreenState extends ConsumerState<DiaryReadingScreen> {
   final _scrollController = ScrollController();
   bool _refreshing = false;
   bool _publishing = false;
+  bool _editing = false;
   bool _commentDialogOpen = false;
   int _loadVersion = 0;
   String? _focusCommentId;
   Completer<void>? _commentRevealed;
+
+  bool get _canEdit =>
+      _moment.id.isNotEmpty &&
+      !_refreshing &&
+      !_publishing &&
+      !_editing &&
+      !_commentDialogOpen;
 
   @override
   void initState() {
@@ -63,7 +71,7 @@ class _DiaryReadingScreenState extends ConsumerState<DiaryReadingScreen> {
   }
 
   Future<void> _refresh({bool quiet = false}) async {
-    if (_refreshing || _publishing) return;
+    if (_refreshing || _publishing || _editing) return;
     final version = ++_loadVersion;
     setState(() => _refreshing = true);
     try {
@@ -88,6 +96,7 @@ class _DiaryReadingScreenState extends ConsumerState<DiaryReadingScreen> {
   }
 
   Future<void> _publishComment(Comment comment) async {
+    if (_editing || _publishing) throw StateError('日记正在更新，请稍后重试');
     final api = ref.read(apiServiceProvider);
     ++_loadVersion; // 正在途中的刷新结果从此失效。
     setState(() {
@@ -136,12 +145,13 @@ class _DiaryReadingScreenState extends ConsumerState<DiaryReadingScreen> {
   Future<void> _openCommentDialog([Comment? replyTo]) async {
     final user = ref.read(currentUserProvider);
     if (user == null ||
+        _editing ||
         _publishing ||
         _commentDialogOpen ||
         _moment.id.isEmpty) {
       return;
     }
-    _commentDialogOpen = true;
+    setState(() => _commentDialogOpen = true);
     final key = '${user.uid}_${_moment.id}_${replyTo?.id ?? 'root'}';
     try {
       final text = await DraftService.loadComment(key);
@@ -160,40 +170,56 @@ class _DiaryReadingScreenState extends ConsumerState<DiaryReadingScreen> {
         ),
       );
     } finally {
-      _commentDialogOpen = false;
+      if (mounted) setState(() => _commentDialogOpen = false);
     }
   }
 
   Future<void> _edit() async {
-    final saved = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
-        builder: (_) => EditMomentScreen(
-          date: DateHelper.parseDateStr(_moment.dateStr),
-          existingMoment: _moment,
+    // 刷新与缓存写入结束后才能编辑，避免编辑器拿到过期快照。
+    if (!_canEdit) return;
+    ++_loadVersion;
+    setState(() => _editing = true);
+    bool? saved;
+    try {
+      saved = await Navigator.of(context).push<bool>(
+        MaterialPageRoute(
+          builder: (_) => EditMomentScreen(
+            date: DateHelper.parseDateStr(_moment.dateStr),
+            existingMoment: _moment,
+          ),
         ),
-      ),
-    );
+      );
+    } finally {
+      if (mounted) setState(() => _editing = false);
+    }
     if (saved == true && mounted) await _refresh();
   }
 
   Future<void> _deleteComment(Comment comment) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('删除留言'),
-        content: const Text('删除这条留言及其下的所有回复？'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('删除'),
-          ),
-        ],
-      ),
-    );
+    if (_editing || _publishing || _commentDialogOpen) return;
+    setState(() => _commentDialogOpen = true);
+    bool? confirmed;
+    try {
+      confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('删除留言'),
+          content: const Text('删除这条留言及其下的所有回复？'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('删除'),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _commentDialogOpen = false);
+    }
     if (confirmed != true || !mounted) return;
     final user = ref.read(currentUserProvider);
     if (user == null) return;
@@ -232,7 +258,9 @@ class _DiaryReadingScreenState extends ConsumerState<DiaryReadingScreen> {
         actions: [
           IconButton(
             tooltip: '刷新这条日记',
-            onPressed: _refreshing || _publishing ? null : () => _refresh(),
+            onPressed: _refreshing || _publishing || _editing
+                ? null
+                : () => _refresh(),
             icon: _refreshing
                 ? const SizedBox(
                     width: 20,
@@ -268,7 +296,7 @@ class _DiaryReadingScreenState extends ConsumerState<DiaryReadingScreen> {
                     pending.complete();
                   }
                 },
-                onEdit: isSelf && _moment.id.isNotEmpty ? _edit : null,
+                onEdit: isSelf && _canEdit ? _edit : null,
                 onComment: _openCommentDialog,
                 onDeleteComment: _deleteComment,
                 onReplyComment: _openCommentDialog,
@@ -282,7 +310,7 @@ class _DiaryReadingScreenState extends ConsumerState<DiaryReadingScreen> {
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
           child: OutlinedButton.icon(
-            onPressed: _publishing || _moment.id.isEmpty
+            onPressed: _editing || _publishing || _moment.id.isEmpty
                 ? null
                 : _openCommentDialog,
             icon: const Icon(Icons.chat_bubble_outline_rounded, size: 18),

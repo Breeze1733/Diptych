@@ -7,10 +7,7 @@ class SettingsTheme {
   SettingsTheme._();
 
   static const ink = AppTheme.primaryColor;
-  static const background = AppTheme.backgroundColor;
-  static const surface = AppTheme.surfaceColor;
   static const muted = AppTheme.textSecondary;
-  static const border = AppTheme.dividerColor;
   static const accent = AppTheme.accentColor;
   static const accentSurface = AppTheme.accentSurface;
   static const softSurface = AppTheme.softSurface;

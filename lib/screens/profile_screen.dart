@@ -14,7 +14,8 @@ import '../services/update_service.dart';
 import '../services/network_diagnostics_service.dart';
 import '../services/cache_service.dart';
 import '../utils/cache_helper.dart';
-import '../utils/wakelock_helper.dart';
+import '../services/transfer_keep_alive.dart';
+import '../services/private_image_cache.dart';
 import '../widgets/network_diagnostics_card.dart';
 import 'wallpaper_settings_screen.dart';
 
@@ -105,21 +106,18 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
   Future<void> _handleSave() async {
     setState(() => _isSaving = true);
-    if (_avatarFile != null) {
-      await WakelockHelper.acquire(timeout: const Duration(minutes: 5));
-    }
+    TransferKeepAliveLease? lease;
     try {
+      if (_avatarFile != null) lease = await TransferKeepAlive.acquire();
+      if (!mounted) return;
       final user = ref.read(currentUserProvider);
       if (user == null) return;
 
       final apiService = ref.read(apiServiceProvider);
+      final storageService = ref.read(storageServiceProvider);
       String? avatarUrl;
       if (_avatarFile != null) {
-        final storageService = ref.read(storageServiceProvider);
         avatarUrl = await storageService.uploadImage(_avatarFile!, 'avatars');
-        if (user.avatarUrl.isNotEmpty) {
-          storageService.deleteImage(user.avatarUrl);
-        }
       }
 
       final newNickname = _nicknameController.text.trim();
@@ -129,12 +127,28 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         avatarUrl: avatarUrl,
       );
 
+      // 更新记录确认成功后，才允许删除原头像；清理失败不影响保存结果。
+      if (avatarUrl != null &&
+          user.avatarUrl.isNotEmpty &&
+          avatarUrl != user.avatarUrl) {
+        try {
+          await storageService.deleteImage(user.avatarUrl);
+        } catch (error) {
+          debugPrint('头像已保存，清理旧头像失败: $error');
+        }
+      }
+
       final updatedUser = user.copyWith(
         nickname: newNickname.isNotEmpty ? newNickname : user.nickname,
         avatarUrl: avatarUrl ?? user.avatarUrl,
       );
-      await CacheService.saveUser(updatedUser);
+      try {
+        await CacheService.saveUser(updatedUser);
+      } catch (error) {
+        debugPrint('个人资料已保存，本地缓存更新失败: $error');
+      }
       if (!mounted) return;
+      if (ref.read(currentUserProvider)?.uid != user.uid) return;
       ref.read(currentUserProvider.notifier).setUser(updatedUser);
 
       if (!mounted) return;
@@ -155,9 +169,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         ),
       );
     } finally {
-      if (_avatarFile != null) {
-        await WakelockHelper.release();
-      }
+      await lease?.release();
       if (mounted) setState(() => _isSaving = false);
     }
   }
@@ -594,7 +606,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           backgroundImage: _avatarFile != null
                               ? FileImage(_avatarFile!)
                               : user.avatarUrl.isNotEmpty
-                              ? CachedNetworkImageProvider(user.avatarUrl)
+                              ? CachedNetworkImageProvider(
+                                  user.avatarUrl,
+                                  cacheManager: PrivateImageCache(),
+                                )
                               : null,
                           child: !hasAvatar
                               ? Text(

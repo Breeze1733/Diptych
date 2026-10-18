@@ -5,6 +5,7 @@ class Topic {
   final String title;
   final String authorId;
   final DateTime createdAt;
+  final DateTime latestUpdatedAt;
   final List<Post> posts;
 
   const Topic({
@@ -12,16 +13,24 @@ class Topic {
     required this.title,
     required this.authorId,
     required this.createdAt,
+    DateTime? latestUpdatedAt,
     this.posts = const [],
-  });
+  }) : latestUpdatedAt = latestUpdatedAt ?? createdAt;
 
   factory Topic.fromJson(Map<String, dynamic> json) {
+    final createdAt = DateHelper.tryParseDateTime(
+      json['created_at'] as String? ?? '',
+    );
     return Topic(
       id: json['id']?.toString() ?? '',
       title: json['title'] as String? ?? '',
       authorId: json['author_id'] as String? ?? '',
-      createdAt: DateHelper.tryParseDateTime(json['created_at'] as String? ?? ''),
-      posts: (json['posts'] as List<dynamic>?)
+      createdAt: createdAt,
+      latestUpdatedAt:
+          DateTime.tryParse(json['latest_updated_at'] as String? ?? '') ??
+          createdAt,
+      posts:
+          (json['posts'] as List<dynamic>?)
               ?.map((e) => Post.fromJson(e as Map<String, dynamic>))
               .toList() ??
           [],
@@ -50,7 +59,9 @@ class Post {
       topicId: json['topic_id'] as String? ?? '',
       authorId: json['author_id'] as String? ?? '',
       content: json['content'] as String? ?? '',
-      createdAt: DateHelper.tryParseDateTime(json['created_at'] as String? ?? ''),
+      createdAt: DateHelper.tryParseDateTime(
+        json['created_at'] as String? ?? '',
+      ),
     );
   }
 

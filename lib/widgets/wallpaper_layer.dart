@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../constants/app_theme.dart';
+import '../services/private_image_cache.dart';
 
 /// 壁纸背景层：永远放在页面最底层，不拦截手势、不遮挡内容。
 ///
@@ -26,6 +27,7 @@ class WallpaperLayer extends StatelessWidget {
         fit: StackFit.expand,
         children: [
           CachedNetworkImage(
+            cacheManager: PrivateImageCache(),
             imageUrl: url,
             fit: BoxFit.cover,
             // 加载/失败都用背景色兜底，绝不显示转圈

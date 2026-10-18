@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 
 import '../constants/app_theme.dart';
+import '../services/private_image_cache.dart';
 import '../utils/diptych_asset_picker.dart';
 import '../utils/motion_photo_helper.dart';
 import 'live_photo_badge.dart';
@@ -32,27 +33,6 @@ class PhotoEntry {
   }) : file = null;
 
   bool get isLocal => file != null;
-
-  PhotoEntry copyWith({
-    File? file,
-    String? url,
-    bool? isMotion,
-    bool? uploadLive,
-  }) {
-    if (isLocal) {
-      return PhotoEntry.file(
-        file ?? this.file!,
-        isMotion: isMotion ?? this.isMotion,
-        uploadLive: uploadLive ?? this.uploadLive,
-      );
-    } else {
-      return PhotoEntry.url(
-        url ?? this.url!,
-        isMotion: isMotion ?? this.isMotion,
-        uploadLive: uploadLive ?? this.uploadLive,
-      );
-    }
-  }
 }
 
 /// 图片九宫格选择器
@@ -66,7 +46,6 @@ class PhotoGridPicker extends StatelessWidget {
   final double? Function(PhotoEntry entry)? progressProvider;
   final ValueChanged<int>? onRetry;
   final ValueChanged<int>? onTap;
-  final ValueChanged<int>? onToggleLive;
 
   /// When bounded, show this many rows and scroll additional photos internally.
   final int? visibleRows;
@@ -81,7 +60,6 @@ class PhotoGridPicker extends StatelessWidget {
     this.progressProvider,
     this.onRetry,
     this.onTap,
-    this.onToggleLive,
     this.visibleRows,
   });
 
@@ -317,6 +295,7 @@ class PhotoGridPicker extends StatelessWidget {
     final image = entry.isLocal
         ? Image.file(entry.file!, fit: BoxFit.cover)
         : CachedNetworkImage(
+            cacheManager: PrivateImageCache(),
             imageUrl: entry.url!,
             fit: BoxFit.cover,
             placeholder: (_, _) => Container(color: AppTheme.softSurface),
@@ -440,10 +419,7 @@ class PhotoGridPicker extends StatelessWidget {
             Positioned(
               left: 4,
               bottom: 4,
-              child: LivePhotoBadge(
-                isLiveSelected: true,
-                onTap: onToggleLive != null ? () => onToggleLive!(index) : null,
-              ),
+              child: const LivePhotoBadge(isLiveSelected: true),
             ),
           // 删除角标
           if (showDeleteButton)

@@ -1,7 +1,12 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../models/app_user.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
+import '../services/auth_session.dart';
 import '../services/cache_service.dart';
 import '../services/storage_service.dart';
 
@@ -9,10 +14,16 @@ import '../services/storage_service.dart';
 final authServiceProvider = Provider<AuthService>((ref) => AuthService());
 
 /// API 服务实例
-final apiServiceProvider = Provider<ApiService>((ref) => ApiService());
+final apiServiceProvider = Provider<ApiService>((ref) {
+  ref.watch(currentUserRoleProvider);
+  return ApiService();
+});
 
 /// Storage 服务实例
-final storageServiceProvider = Provider<StorageService>((ref) => StorageService());
+final storageServiceProvider = Provider<StorageService>((ref) {
+  ref.watch(currentUserRoleProvider);
+  return StorageService();
+});
 
 /// 当前登录用户角色 ("A" 或 "B")，null 表示未登录
 class CurrentUserRoleNotifier extends Notifier<String?> {
@@ -23,7 +34,9 @@ class CurrentUserRoleNotifier extends Notifier<String?> {
 }
 
 final currentUserRoleProvider =
-    NotifierProvider<CurrentUserRoleNotifier, String?>(CurrentUserRoleNotifier.new);
+    NotifierProvider<CurrentUserRoleNotifier, String?>(
+      CurrentUserRoleNotifier.new,
+    );
 
 /// 当前用户信息
 class CurrentUserNotifier extends Notifier<AppUser?> {
@@ -33,8 +46,9 @@ class CurrentUserNotifier extends Notifier<AppUser?> {
   void setUser(AppUser? user) => state = user;
 }
 
-final currentUserProvider =
-    NotifierProvider<CurrentUserNotifier, AppUser?>(CurrentUserNotifier.new);
+final currentUserProvider = NotifierProvider<CurrentUserNotifier, AppUser?>(
+  CurrentUserNotifier.new,
+);
 
 /// 对方信息
 class PartnerUserNotifier extends Notifier<AppUser?> {
@@ -44,8 +58,28 @@ class PartnerUserNotifier extends Notifier<AppUser?> {
   void setUser(AppUser? user) => state = user;
 }
 
-final partnerUserProvider =
-    NotifierProvider<PartnerUserNotifier, AppUser?>(PartnerUserNotifier.new);
+final partnerUserProvider = NotifierProvider<PartnerUserNotifier, AppUser?>(
+  PartnerUserNotifier.new,
+);
+
+/// Installed once by the app. An old expiry/401 event must never log out a new
+/// session, even if the user signs back into the same role before delivery.
+final authSessionLifecycleProvider = Provider<void>((ref) {
+  final authService = ref.read(authServiceProvider);
+  final subscription = AuthSession.invalidations.listen((revision) {
+    if (!ref.mounted || AuthSession.revision != revision) return;
+    final cleanup = authService.logout();
+    ref.read(currentUserRoleProvider.notifier).setRole(null);
+    ref.read(currentUserProvider.notifier).setUser(null);
+    ref.read(partnerUserProvider.notifier).setUser(null);
+    unawaited(
+      cleanup.catchError((Object error) {
+        debugPrint('登录状态已失效，清理本地会话失败: $error');
+      }),
+    );
+  });
+  ref.onDispose(() => unawaited(subscription.cancel()));
+});
 
 /// 尝试自动登录：从 SharedPreferences 读取已保存的角色
 final autoLoginProvider = FutureProvider<String?>((ref) async {
@@ -58,12 +92,13 @@ final autoLoginProvider = FutureProvider<String?>((ref) async {
 });
 
 /// 登录操作
-final loginActionProvider = Provider<Future<String?> Function(String key)>((ref) {
+final loginActionProvider = Provider<Future<String?> Function(String key)>((
+  ref,
+) {
   return (String key) async {
     final authService = ref.read(authServiceProvider);
-    final role = authService.validateKey(key);
+    final role = await authService.login(key);
     if (role != null) {
-      await authService.saveUserRole(role);
       ref.read(currentUserRoleProvider.notifier).setRole(role);
     }
     return role;
@@ -74,10 +109,11 @@ final loginActionProvider = Provider<Future<String?> Function(String key)>((ref)
 final logoutActionProvider = Provider<Future<void> Function()>((ref) {
   return () async {
     final authService = ref.read(authServiceProvider);
-    await authService.logout();
+    final cleanup = authService.logout();
     ref.read(currentUserRoleProvider.notifier).setRole(null);
     ref.read(currentUserProvider.notifier).setUser(null);
     ref.read(partnerUserProvider.notifier).setUser(null);
+    await cleanup;
   };
 });
 
@@ -85,43 +121,46 @@ final logoutActionProvider = Provider<Future<void> Function()>((ref) {
 final loadUsersProvider = FutureProvider<void>((ref) async {
   final role = ref.watch(currentUserRoleProvider);
   if (role == null) return;
+  final sessionToken = AuthSession.token;
+  final sessionRevision = AuthSession.revision;
+  bool isCurrentSession() =>
+      ref.mounted &&
+      ref.read(currentUserRoleProvider) == role &&
+      AuthSession.revision == sessionRevision &&
+      AuthSession.token == sessionToken;
+
+  final apiService = ref.read(apiServiceProvider);
+  Future<void> refresh() async {
+    await apiService.ensurePresetUsers();
+    if (!isCurrentSession()) return;
+    final currentUser = await apiService.getUser(role);
+    if (!isCurrentSession()) return;
+    final partner = await apiService.getUser(currentUser.partnerUid);
+    if (!isCurrentSession()) return;
+
+    await CacheService.saveUser(currentUser);
+    if (!isCurrentSession()) return;
+    await CacheService.saveUser(partner);
+    if (!isCurrentSession()) return;
+    ref.read(currentUserProvider.notifier).setUser(currentUser);
+    ref.read(partnerUserProvider.notifier).setUser(partner);
+  }
 
   // 1. 先尝试从缓存加载（毫秒级，不阻塞 UI）
   final cachedCurrent = await CacheService.loadUser(role);
+  if (!isCurrentSession()) return;
   if (cachedCurrent != null) {
     ref.read(currentUserProvider.notifier).setUser(cachedCurrent);
     final cachedPartner = await CacheService.loadUser(cachedCurrent.partnerUid);
+    if (!isCurrentSession()) return;
     if (cachedPartner != null) {
       ref.read(partnerUserProvider.notifier).setUser(cachedPartner);
     }
     // 缓存命中 → 立即返回，后台静默更新
-    final apiService = ref.read(apiServiceProvider);
-    _refreshUsersBg(apiService, role, cachedCurrent.partnerUid);
+    refresh().catchError((_) {});
     return;
   }
 
   // 2. 无缓存 → 必须等网络（仅首次安装/清缓存后）
-  final apiService = ref.read(apiServiceProvider);
-  await apiService.ensurePresetUsers();
-
-  final currentUser = await apiService.getUser(role);
-  ref.read(currentUserProvider.notifier).setUser(currentUser);
-  await CacheService.saveUser(currentUser);
-
-  final partner = await apiService.getUser(currentUser.partnerUid);
-  ref.read(partnerUserProvider.notifier).setUser(partner);
-  await CacheService.saveUser(partner);
+  await refresh();
 });
-
-/// 后台刷新用户信息（不阻塞，失败静默）
-void _refreshUsersBg(ApiService api, String role, String partnerUid) {
-  Future(() async {
-    try {
-      await api.ensurePresetUsers();
-      final currentUser = await api.getUser(role);
-      await CacheService.saveUser(currentUser);
-      final partner = await api.getUser(partnerUid);
-      await CacheService.saveUser(partner);
-    } catch (_) {}
-  });
-}

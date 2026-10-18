@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../constants/app_theme.dart';
+import '../models/topic.dart';
 import '../providers/auth_provider.dart';
 import '../providers/wallpaper_provider.dart';
 import '../services/topic_service.dart';
@@ -20,11 +21,10 @@ class TopicsScreen extends ConsumerStatefulWidget {
 
 class _TopicsScreenState extends ConsumerState<TopicsScreen> {
   final _service = TopicService();
-  List<dynamic>? _topics;
+  List<Topic>? _topics;
   bool _loading = true;
   String? _error;
-  // 各话题最新更新时间（最近一条帖子时间，无帖子则为话题创建时间）
-  final Map<String, DateTime> _latestUpdate = {};
+  int _loadGeneration = 0;
 
   @override
   void initState() {
@@ -33,52 +33,27 @@ class _TopicsScreenState extends ConsumerState<TopicsScreen> {
   }
 
   Future<void> _loadTopics() async {
+    if (!mounted) return;
+    final generation = ++_loadGeneration;
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
       final topics = await _service.getTopics();
-      if (!mounted) return;
+      if (!mounted || generation != _loadGeneration) return;
       setState(() {
         _topics = topics;
         _loading = false;
       });
-      // 列表文字先秒开，最新更新时间后台并行补齐（每次打开都会重新比对）
-      _loadLatestUpdates(topics);
     } catch (e) {
       debugPrint('加载话题列表失败: $e');
-      if (!mounted) return;
+      if (!mounted || generation != _loadGeneration) return;
       setState(() {
         _loading = false;
         _error = '网络连接异常，请检查网络后重试';
       });
     }
-  }
-
-  /// 并行拉取每个话题的详情，计算最新更新时间
-  /// （列表接口只返回创建时间，最新帖子时间需从详情里取）
-  Future<void> _loadLatestUpdates(List<dynamic> topics) async {
-    final results = await Future.wait(
-      topics.map((t) async {
-        try {
-          final detail = await _service.getTopic(t.id);
-          DateTime latest = t.createdAt;
-          for (final p in detail.posts) {
-            if (p.createdAt.isAfter(latest)) latest = p.createdAt;
-          }
-          return MapEntry<String, DateTime>(t.id, latest);
-        } catch (_) {
-          return MapEntry<String, DateTime>(t.id, t.createdAt);
-        }
-      }),
-    );
-    if (!mounted) return;
-    setState(() {
-      for (final e in results) {
-        _latestUpdate[e.key] = e.value;
-      }
-    });
   }
 
   Future<void> _createTopic() async {
@@ -322,9 +297,7 @@ class _TopicsScreenState extends ConsumerState<TopicsScreen> {
                           ),
                           const SizedBox(height: 5),
                           Text(
-                            _latestUpdate[topic.id] != null
-                                ? '更新于 ${DateHelper.toFriendlyDateTime(_latestUpdate[topic.id]!)}'
-                                : '正在同步最近动态…',
+                            '更新于 ${DateHelper.toFriendlyDateTime(topic.latestUpdatedAt)}',
                             style: const TextStyle(
                               fontSize: 12,
                               color: AppTheme.textSecondary,

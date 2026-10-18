@@ -7,6 +7,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../constants/app_theme.dart';
 import '../constants/strings.dart';
 import '../models/moment.dart';
+import '../services/private_image_cache.dart';
 import '../utils/date_helper.dart';
 import 'avatar_widget.dart';
 import 'image_gallery.dart';
@@ -23,7 +24,6 @@ class MomentCard extends StatefulWidget {
   final VoidCallback? onOpenReading;
   final void Function(Comment comment)? onDeleteComment;
   final void Function(Comment? parentComment)? onReplyComment;
-  final double scale;
   final bool expandedReading;
   final String? focusCommentId;
   final ValueChanged<String>? onCommentRevealed;
@@ -41,7 +41,6 @@ class MomentCard extends StatefulWidget {
     this.onOpenReading,
     this.onDeleteComment,
     this.onReplyComment,
-    this.scale = 1.0,
     this.expandedReading = false,
     this.focusCommentId,
     this.onCommentRevealed,
@@ -551,6 +550,7 @@ class _MomentCardState extends State<MomentCard> {
             fit: StackFit.expand,
             children: [
               CachedNetworkImage(
+                cacheManager: PrivateImageCache(),
                 imageUrl: urls.first,
                 fit: BoxFit.cover,
                 placeholder: (_, _) => _imagePlaceholder(),

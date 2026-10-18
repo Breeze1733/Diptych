@@ -10,7 +10,6 @@ class DateHeader extends StatelessWidget {
   final VoidCallback onCalendarTap;
   final VoidCallback? onPreviousDay;
   final VoidCallback? onNextDay;
-  final double scale;
   final double cardOpacity;
 
   const DateHeader({
@@ -20,7 +19,6 @@ class DateHeader extends StatelessWidget {
     this.date,
     this.onPreviousDay,
     this.onNextDay,
-    this.scale = 1.0,
     required this.cardOpacity,
   });
 
