@@ -7,6 +7,12 @@ import '../constants/api_config.dart';
 import 'auth_session.dart';
 import 'http_request.dart';
 
+class AuthLoginException implements Exception {
+  const AuthLoginException(this.message);
+
+  final String message;
+}
+
 /// 登录口令只交给服务器校验，不再编译进客户端或保存到本机。
 class AuthService {
   static const _keySession = 'auth_session_v1';
@@ -37,8 +43,12 @@ class AuthService {
     );
     _checkOperation(operation);
     if (response.statusCode == 401) return null;
-    if (response.statusCode == 429) throw StateError('尝试次数过多，请稍后再试');
-    if (response.statusCode != 200) throw StateError('暂时无法登录，请稍后重试');
+    if (response.statusCode == 429) {
+      throw const AuthLoginException('尝试次数过多，请稍后再试');
+    }
+    if (response.statusCode != 200) {
+      throw const AuthLoginException('登录服务暂不可用，请稍后重试');
+    }
     final Object? decoded = jsonDecode(response.body);
     if (decoded is! Map<String, dynamic> || decoded['ok'] != true) {
       throw const FormatException('服务器未确认登录');
@@ -63,26 +73,35 @@ class AuthService {
     }
     return _serialize(() async {
       _checkOperation(operation);
-      final prefs = await SharedPreferences.getInstance();
-      _checkOperation(operation);
-      // 用单个清单提交，避免口令/角色/有效期分步写入时形成混合会话。
-      final saved = await prefs.setString(
-        _keySession,
-        jsonEncode({
-          'user_id': role,
-          'token': token,
-          'expires_at': expiry.toIso8601String(),
-        }),
-      );
-      if (operation != _operation) {
-        // This transaction owns the serial queue, so a later login has not
-        // committed yet. Remove only this stale commit before handing it on.
-        await prefs.remove(_keySession);
-        throw const AuthSessionChangedException();
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        _checkOperation(operation);
+        // 用单个清单提交，避免口令/角色/有效期分步写入时形成混合会话。
+        final saved = await prefs.setString(
+          _keySession,
+          jsonEncode({
+            'user_id': role,
+            'token': token,
+            'expires_at': expiry.toIso8601String(),
+          }),
+        );
+        if (operation != _operation) {
+          // This transaction owns the serial queue, so a later login has not
+          // committed yet. Remove only this stale commit before handing it on.
+          await prefs.remove(_keySession);
+          throw const AuthSessionChangedException();
+        }
+        if (!saved) throw StateError('无法保存登录状态');
+        AuthSession.set(userId: role, token: token, expiresAt: expiry);
+        return role;
+      } on AuthSessionChangedException {
+        rethrow;
+      } catch (_, stackTrace) {
+        Error.throwWithStackTrace(
+          const AuthLoginException('无法保存本机登录状态，请更新应用后重试'),
+          stackTrace,
+        );
       }
-      if (!saved) throw StateError('无法保存登录状态，请重试');
-      AuthSession.set(userId: role, token: token, expiresAt: expiry);
-      return role;
     });
   }
 

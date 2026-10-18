@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../constants/app_theme.dart';
 import '../constants/strings.dart';
 import '../providers/auth_provider.dart';
+import '../services/auth_service.dart';
 
 /// 登录页：输入密钥验证身份
 class LoginScreen extends ConsumerStatefulWidget {
@@ -39,9 +40,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       final role = await loginAction(_keyController.text.trim());
       if (!mounted) return;
       if (role == null) setState(() => _errorText = AppStrings.loginError);
-    } catch (_) {
+    } catch (error, stackTrace) {
+      debugPrint('登录失败：${error.runtimeType}');
+      debugPrintStack(stackTrace: stackTrace);
       if (mounted) {
-        setState(() => _errorText = '暂时无法登录，请检查网络或稍后重试');
+        setState(() {
+          _errorText = switch (error) {
+            AuthLoginException(:final message) => message,
+            FormatException() => '登录服务返回的数据异常，请稍后重试',
+            _ => '暂时无法登录，请检查网络或稍后重试',
+          };
+        });
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
