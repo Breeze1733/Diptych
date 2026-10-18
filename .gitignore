@@ -6,7 +6,7 @@ lib/constants/secrets.dart
 # 后端地址配置
 lib/constants/api_config.dart
 
-# 临时文件
+# 临时文件（temp 仅保留 server.js 和 version.json 快照）
 temp/
 latest-apk/
 
@@ -62,12 +62,7 @@ app.*.map.json
 # 本地辅助运维与上传脚本
 scripts/
 
-# 后端运行时数据和私有鉴权配置
-/backend/node_modules/
-/backend/data/
-/backend/uploads/
-/backend/chunks_temp/
-/backend/clips/
-/backend/apk/
-/backend/version.json
-/backend/.env
+# 后端代码和部署配置在服务器独立维护
+/backend/
+/transfer-backend/
+/deploy/

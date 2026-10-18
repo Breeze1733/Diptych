@@ -185,7 +185,7 @@ lib/
     └── wallpaper_layer.dart   # 全局/局部壁纸背景渲染层
 ```
 
-`backend/` 包含配套 Node.js 后端、服务端鉴权与现有统计接口；运行时数据、照片和私有配置不纳入 Git。`lib/controllers/` 管理编辑器的串行上传、取消和保活。
+本仓库维护 Flutter 客户端。后端代码、运行时数据、私有配置与 Nginx 部署配置在服务器独立维护，不纳入本仓库。`lib/controllers/` 管理编辑器的串行上传、取消和保活。
 
 `android/` 包含 Kotlin 原生通道、传输前台服务与启动图标资源；`assets/` 只保存 APK 使用的应用图片，目前为应用图标和双方未发布状态贴图，均在 `pubspec.yaml` 中声明。
 
@@ -235,13 +235,13 @@ cd Diptych
 
 ### 配置密钥
 
-客户端不再需要 `lib/constants/secrets.dart`。在后端为 A/B 配置各自口令的加盐哈希及会话签名密钥，配置文件只保存在服务器私有目录，部署方法见 [后端说明](backend/README.md)。
+客户端不再需要 `lib/constants/secrets.dart`。后端需为 A/B 配置各自口令的加盐哈希及会话签名密钥，配置文件只保存在服务器私有目录，由后端独立维护。
 
 登录时通过 `POST /auth/login` 校验输入的口令，成功后保存服务器返回的会话。旧版只有角色的登录态需要重新登录一次；服务器启用鉴权后，旧客户端需要更新。口令不会保存在客户端，也不再打包进 APK。
 
 ### 配置后端地址
 
-App 对接自托管 REST API，`backend/` 提供配套后端源码，部署与私有配置见 [后端说明](backend/README.md)。在 `lib/constants/` 下创建 `api_config.dart`（该文件已在 `.gitignore` 中排除，不会提交到仓库）：
+App 对接自托管 REST API，后端需提供上文列出的接口。在 `lib/constants/` 下创建 `api_config.dart`（该文件已在 `.gitignore` 中排除，不会提交到仓库）：
 
 ```dart
 class ApiConfig {
@@ -293,6 +293,7 @@ flutter build apk --release
 - **提交代码**：Fork 仓库 → 基于 `main` 分支新建特性分支 → 提交 PR，按改动需要运行 `flutter analyze` 静态检查或在设备上验证
 - **代码风格**：遵循 `analysis_options.yaml` 中的 `flutter_lints` 规则
 - **图片维护**：README 图片引用统一使用 `pic/` 路径；未引用的图片移入 `pic/ignore/`，应用运行及 APK 构建资源留在 `assets/` 或 Android 原生资源目录
+- **临时文件**：任务完成后清理临时脚本和部署副本；`temp/` 仅保留 `server.js` 与 `version.json` 两个本地快照，整个目录不提交到 Git。服务器代码及部署配置不放回本仓库
 
 ## License
 
