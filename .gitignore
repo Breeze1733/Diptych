@@ -1,68 +1,18 @@
-# ─── Diptych 项目 .gitignore ───
+# 本地配置
+/lib/constants/secrets.dart
+/lib/constants/api_config.dart
 
-# 密钥文件
-lib/constants/secrets.dart
-
-# 后端地址配置
-lib/constants/api_config.dart
-
-# 临时文件（temp 仅保留 server.js 和 version.json 快照）
-temp/
-latest-apk/
-
-# README 未引用的备选图片、历史截图和原始素材
+# 临时文件
+/temp/
+/latest-apk/
+/scripts/
 /pic/ignore/
 
-# Miscellaneous
-*.class
-*.log
-*.pyc
-*.swp
-.DS_Store
-.atom/
-.build/
-.buildlog/
-.history
-.svn/
-.swiftpm/
-migrate_working_dir/
-
-# IntelliJ related
+# 开发环境与构建产物
+/.idea/
 *.iml
-*.ipr
-*.iws
-.idea/
-
-# Flutter/Dart/Pub related
-**/doc/api/
-**/ios/Flutter/.last_build_id
-.dart_tool/
-.flutter-plugins
-.flutter-plugins-dependencies
-.pub-cache/
-.pub/
+/.dart_tool/
+/.flutter-plugins-dependencies
 /build/
-/coverage/
-
-# Symbolication related
-app.*.symbols
-
-# Obfuscation related
-app.*.map.json
-
-# Android Studio
 /android/build/
-/android/.gradle/
 /android/.kotlin/
-/android/app/debug
-/android/app/profile
-/android/app/release
-/android/local.properties
-
-# 本地辅助运维与上传脚本
-scripts/
-
-# 后端代码和部署配置在服务器独立维护
-/backend/
-/transfer-backend/
-/deploy/
