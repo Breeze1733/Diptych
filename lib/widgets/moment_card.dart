@@ -2,15 +2,15 @@ import '../utils/motion_photo_helper.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 
 import '../constants/app_theme.dart';
 import '../constants/strings.dart';
 import '../models/moment.dart';
-import '../services/private_image_cache.dart';
 import '../utils/date_helper.dart';
 import 'avatar_widget.dart';
 import 'image_gallery.dart';
+import 'image_download_placeholder.dart';
+import 'private_network_image.dart';
 
 /// 双联纸页中的一天；长文可以进入完整阅读页。
 class MomentCard extends StatefulWidget {
@@ -148,7 +148,7 @@ class _MomentCardState extends State<MomentCard> {
                     if (showMetadata) ...[
                       const SizedBox(height: 2),
                       if (moment.mood != null)
-                        _buildMoodBadge(compact: true, showLabel: true)
+                        _buildMoodBadge(compact: true)
                       else
                         Text(
                           widget.isSelf ? '我的这一页' : 'TA 的这一页',
@@ -356,7 +356,7 @@ class _MomentCardState extends State<MomentCard> {
     );
   }
 
-  Widget _buildMoodBadge({bool compact = false, bool showLabel = false}) {
+  Widget _buildMoodBadge({bool compact = false}) {
     final moodColor = AppTheme.moodColor(moment.mood!);
     return Container(
       height: compact ? null : 30,
@@ -371,7 +371,7 @@ class _MomentCardState extends State<MomentCard> {
         border: Border.all(color: moodColor.withValues(alpha: .8)),
       ),
       child: Text(
-        '${showLabel ? '心情 ' : ''}${moment.mood}分',
+        '${moment.mood}分',
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: TextStyle(
@@ -549,11 +549,10 @@ class _MomentCardState extends State<MomentCard> {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              CachedNetworkImage(
-                cacheManager: PrivateImageCache(),
+              PrivateNetworkImage(
                 imageUrl: urls.first,
                 fit: BoxFit.cover,
-                placeholder: (_, _) => _imagePlaceholder(),
+                placeholder: (_, url) => ImageDownloadPlaceholder(url: url),
                 errorWidget: (_, _, _) => _imagePlaceholder(),
               ),
               _MomentCoverLiveBadge(url: urls.first),

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 
-import '../services/private_image_cache.dart';
+import 'image_download_placeholder.dart';
+import 'private_network_image.dart';
 
 /// 头像组件
 class AvatarWidget extends StatelessWidget {
@@ -14,13 +14,15 @@ class AvatarWidget extends StatelessWidget {
   Widget build(BuildContext context) {
     if (avatarUrl != null && avatarUrl!.isNotEmpty) {
       return ClipOval(
-        child: CachedNetworkImage(
-          cacheManager: PrivateImageCache(),
+        child: PrivateNetworkImage(
           imageUrl: avatarUrl!,
           width: size,
           height: size,
           fit: BoxFit.cover,
-          placeholder: (_, _) => _buildFallback(),
+          placeholder: (_, url) => ImageDownloadPlaceholder(
+            url: url,
+            backgroundColor: Colors.grey.shade300,
+          ),
           errorWidget: (_, _, _) => _buildFallback(),
         ),
       );

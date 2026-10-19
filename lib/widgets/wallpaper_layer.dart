@@ -1,8 +1,8 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../constants/app_theme.dart';
-import '../services/private_image_cache.dart';
+import 'image_download_placeholder.dart';
+import 'private_network_image.dart';
 
 /// 壁纸背景层：永远放在页面最底层，不拦截手势、不遮挡内容。
 ///
@@ -26,13 +26,13 @@ class WallpaperLayer extends StatelessWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          CachedNetworkImage(
-            cacheManager: PrivateImageCache(),
+          PrivateNetworkImage(
             imageUrl: url,
             fit: BoxFit.cover,
-            // 加载/失败都用背景色兜底，绝不显示转圈
-            placeholder: (_, _) =>
-                const ColoredBox(color: AppTheme.backgroundColor),
+            placeholder: (_, url) => ImageDownloadPlaceholder(
+              url: url,
+              backgroundColor: AppTheme.backgroundColor,
+            ),
             errorWidget: (_, _, _) =>
                 const ColoredBox(color: AppTheme.backgroundColor),
           ),

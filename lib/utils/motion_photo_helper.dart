@@ -51,7 +51,11 @@ class MotionPhotoHelper {
   static Future<bool> isMotionPhotoUrl(String url) async {
     if (url.isEmpty) return false;
     try {
-      final fileInfo = await PrivateImageCache().getFileFromCache(url);
+      final cache = PrivateImageCache();
+      final info = await cache.getInfo(url);
+      if (info != null) return info.isMotion;
+      // Never fetch an original merely to detect whether a photo is live.
+      final fileInfo = await cache.getOriginalFromCache(url);
       if (fileInfo != null) {
         return await isMotionPhoto(fileInfo.file);
       }

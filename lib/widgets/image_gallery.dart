@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -9,10 +10,13 @@ import 'package:photo_view/photo_view_gallery.dart';
 import 'package:video_player/video_player.dart';
 
 import '../services/private_image_cache.dart';
+import '../services/transfer_keep_alive.dart';
 import '../utils/file_helper.dart';
 import '../utils/motion_photo_helper.dart';
 import 'photo_grid_picker.dart';
 import 'image_preview_chrome.dart';
+import 'image_download_placeholder.dart';
+import 'private_network_image.dart';
 
 /// 弹出半透明底色的图片列表（一行三张，可滑动），点击单张进入全屏查看
 void showImageGallery(BuildContext context, List<String> urls) {
@@ -143,19 +147,13 @@ class _GalleryGridItemState extends State<_GalleryGridItem> {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          CachedNetworkImage(
-            cacheManager: PrivateImageCache(),
+          PrivateNetworkImage(
             imageUrl: widget.url,
             fit: BoxFit.cover,
-            placeholder: (_, _) => const Center(
-              child: SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Colors.white54,
-                ),
-              ),
+            placeholder: (_, url) => ImageDownloadPlaceholder(
+              url: url,
+              color: Colors.white70,
+              backgroundColor: Colors.transparent,
             ),
             errorWidget: (_, _, _) =>
                 const Icon(Icons.broken_image, color: Colors.white38),
@@ -203,12 +201,14 @@ class FullScreenImage extends StatefulWidget {
   final List<String>? urls;
   final List<PhotoEntry>? entries;
   final int initialIndex;
+  final PrivateImageCache? cacheManager;
 
   const FullScreenImage({
     super.key,
     this.urls,
     this.entries,
     this.initialIndex = 0,
+    this.cacheManager,
   }) : assert(urls != null || entries != null, 'urls 与 entries 至少提供一个');
 
   @override
@@ -219,7 +219,11 @@ class _FullScreenImageState extends State<FullScreenImage> {
   late int _currentIndex;
   late PageController _pageController;
   bool _isDownloading = false;
+  String? _downloadingUrl;
   bool _controlsVisible = true;
+  StreamSubscription<String>? _cacheSubscription;
+  final _originalRequests = <String, Future<File>>{};
+  PrivateImageCache get _cache => widget.cacheManager ?? PrivateImageCache();
 
   // 实况状态
   VideoPlayerController? _videoController;
@@ -241,11 +245,20 @@ class _FullScreenImageState extends State<FullScreenImage> {
     super.initState();
     _currentIndex = widget.initialIndex;
     _pageController = PageController(initialPage: widget.initialIndex);
+    _cacheSubscription = _cache.changes.listen((url) {
+      if (mounted &&
+          (url.isEmpty ||
+              widget.urls?.contains(url) == true ||
+              widget.entries?.any((entry) => entry.url == url) == true)) {
+        setState(() {});
+      }
+    });
     _checkMotionPhotoForIndex(_currentIndex);
   }
 
   @override
   void dispose() {
+    _cacheSubscription?.cancel();
     _videoController?.dispose();
     _pageController.dispose();
     super.dispose();
@@ -278,39 +291,31 @@ class _FullScreenImageState extends State<FullScreenImage> {
       } else {
         return CachedNetworkImageProvider(
           entry.url!,
-          cacheManager: PrivateImageCache(),
+          cacheManager: _cache,
+          cacheKey: _cache.displayKey(entry.url!),
         );
       }
     }
     return CachedNetworkImageProvider(
       widget.urls![index],
-      cacheManager: PrivateImageCache(),
+      cacheManager: _cache,
+      cacheKey: _cache.displayKey(widget.urls![index]),
     );
   }
 
-  /// 获取当前索引对应的本地文件（本地新选的 File，或已下载到磁盘缓存的 File）
+  /// Entering the viewer only inspects originals already on this device.
   Future<File?> _resolveFile(int index) async {
     if (widget.entries != null && index < widget.entries!.length) {
       final entry = widget.entries![index];
       if (entry.isLocal && entry.file != null) return entry.file;
       if (entry.url != null && entry.url!.isNotEmpty) {
-        final fileInfo = await PrivateImageCache().getFileFromCache(entry.url!);
+        final fileInfo = await _cache.getOriginalFromCache(entry.url!);
         if (fileInfo != null) return fileInfo.file;
-        try {
-          return await PrivateImageCache().getSingleFile(entry.url!);
-        } catch (_) {
-          return null;
-        }
       }
     } else if (widget.urls != null && index < widget.urls!.length) {
       final url = widget.urls![index];
-      final fileInfo = await PrivateImageCache().getFileFromCache(url);
+      final fileInfo = await _cache.getOriginalFromCache(url);
       if (fileInfo != null) return fileInfo.file;
-      try {
-        return await PrivateImageCache().getSingleFile(url);
-      } catch (_) {
-        return null;
-      }
     }
     return null;
   }
@@ -331,7 +336,16 @@ class _FullScreenImageState extends State<FullScreenImage> {
     await oldController?.dispose();
 
     final file = await _resolveFile(index);
-    if (file == null || !mounted || _checkingIndex != index) return;
+    if (!mounted || _checkingIndex != index) return;
+    if (file == null) {
+      final url = widget.urls?[index] ?? widget.entries?[index].url;
+      if (url == null) return;
+      final info = await _cache.getInfo(url);
+      if (mounted && _checkingIndex == index) {
+        setState(() => _isMotionPhoto = info?.isMotion ?? false);
+      }
+      return;
+    }
 
     // 先快速检测二进制特征，若为实况照片立即点亮实况标识
     final isMotion = await MotionPhotoHelper.isMotionPhoto(file);
@@ -380,7 +394,20 @@ class _FullScreenImageState extends State<FullScreenImage> {
   /// 轻点左下角实况按钮：无感播放一遍（播完自动停住恢复静态图）
   Future<void> _toggleLivePlayback() async {
     if (_videoController == null || !_videoController!.value.isInitialized) {
-      return;
+      final index = _currentIndex;
+      final url = _currentUrl;
+      if (url == null) return;
+      try {
+        await _ensureOriginal(url);
+        if (!mounted || _currentIndex != index) return;
+        await _checkMotionPhotoForIndex(index);
+      } catch (_) {
+        if (mounted) _showOriginalError();
+        return;
+      }
+      if (!mounted || _currentIndex != index || _videoController == null) {
+        return;
+      }
     }
     if (_isPlaying) {
       await _videoController!.pause();
@@ -399,6 +426,7 @@ class _FullScreenImageState extends State<FullScreenImage> {
   }
 
   Future<void> _download() async {
+    if (_isDownloading) return;
     final url = _currentUrl;
     final manufacturer = await FileHelper.getDeviceManufacturer();
 
@@ -442,15 +470,12 @@ class _FullScreenImageState extends State<FullScreenImage> {
       return;
     }
 
-    setState(() => _isDownloading = true);
+    setState(() {
+      _isDownloading = true;
+      _downloadingUrl = url;
+    });
     try {
-      File? sourceFile;
-      final fileInfo = await PrivateImageCache().getFileFromCache(url);
-      if (fileInfo != null) {
-        sourceFile = fileInfo.file;
-      } else {
-        sourceFile = await PrivateImageCache().getSingleFile(url);
-      }
+      final sourceFile = await _ensureOriginal(url);
 
       final dir = await FileHelper.getDownloadsDirectory();
       String name = url.split('/').last;
@@ -477,8 +502,108 @@ class _FullScreenImageState extends State<FullScreenImage> {
         ),
       );
     } finally {
-      if (mounted) setState(() => _isDownloading = false);
+      if (mounted) {
+        setState(() {
+          _isDownloading = false;
+          _downloadingUrl = null;
+        });
+      }
     }
+  }
+
+  Future<File> _ensureOriginal(String url) async {
+    final cached = await _cache.getOriginalFromCache(url);
+    if (cached != null) return cached.file;
+    final existing = _originalRequests[url];
+    if (existing != null) return existing;
+    final request = () async {
+      final lease = await TransferKeepAlive.acquire(
+        title: 'Diptych 原图下载',
+        content: '正在获取原图…',
+      );
+      final subscription = _cache.downloads
+          .watch(_cache.progressKey(url, original: true))
+          .listen((progress) {
+            unawaited(
+              lease.update(
+                content: progress.percent == null
+                    ? '正在获取原图…'
+                    : '正在获取原图 ${progress.percent}%',
+                maxProgress: 100,
+                progress: progress.percent ?? 0,
+              ),
+            );
+          });
+      try {
+        return await _cache.getOriginalFile(url);
+      } finally {
+        await subscription.cancel();
+        await lease.release();
+      }
+    }();
+    _originalRequests[url] = request;
+    if (mounted) setState(() {});
+    try {
+      return await request;
+    } finally {
+      if (identical(_originalRequests[url], request)) {
+        _originalRequests.remove(url);
+      }
+      if (mounted) setState(() {});
+    }
+  }
+
+  void _showOriginalError() {
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('原图加载失败，预览图已保留，请重试')));
+  }
+
+  Future<void> _viewOriginal(String url) async {
+    final index = _currentIndex;
+    try {
+      await _ensureOriginal(url);
+      if (mounted && _currentIndex == index) {
+        await _checkMotionPhotoForIndex(index);
+      }
+    } catch (_) {
+      if (mounted) _showOriginalError();
+    }
+  }
+
+  Widget _buildOriginalButton(String url) {
+    final loading = _originalRequests.containsKey(url);
+    final ready = _cache.isOriginalKnown(url);
+    final bytes = _cache.mediaInfo(url)?.originalBytes ?? 0;
+    final size = bytes >= 1024 * 1024
+        ? '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB'
+        : '${(bytes / 1024).ceil()} KB';
+    return TextButton(
+      key: const ValueKey('view-original-button'),
+      onPressed: loading || ready ? null : () => _viewOriginal(url),
+      style: TextButton.styleFrom(
+        foregroundColor: Colors.white,
+        disabledForegroundColor: Colors.white70,
+        backgroundColor: Colors.black54,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        minimumSize: const Size(0, 36),
+      ),
+      child: loading
+          ? SizedBox(
+              width: 112,
+              height: 20,
+              child: ImageDownloadPlaceholder(
+                url: url,
+                original: true,
+                tracker: _cache.downloads,
+                color: Colors.white,
+                backgroundColor: Colors.transparent,
+              ),
+            )
+          : Text(
+              ready ? '已加载原图' : '查看原图${bytes > 0 ? ' · $size' : ''}',
+              style: const TextStyle(fontSize: 12),
+            ),
+    );
   }
 
   Widget _buildLiveButton() {
@@ -565,6 +690,27 @@ class _FullScreenImageState extends State<FullScreenImage> {
                   ),
                 ),
               ),
+              loadingBuilder: (context, _) {
+                // Each gallery page has its own provider, including neighbors
+                // loaded while swiping. Do not use the current page's URL here.
+                final provider = context
+                    .findAncestorWidgetOfExactType<PhotoView>()
+                    ?.imageProvider;
+                if (provider is CachedNetworkImageProvider) {
+                  return ImageDownloadPlaceholder(
+                    url: provider.url,
+                    tracker: _cache.downloads,
+                    color: Colors.white70,
+                    backgroundColor: Colors.black,
+                  );
+                }
+                return const Center(
+                  child: Text(
+                    '正在读取图片…',
+                    style: TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                );
+              },
               pageController: _pageController,
               onPageChanged: _onPageChanged,
               backgroundDecoration: const BoxDecoration(color: Colors.black),
@@ -619,13 +765,26 @@ class _FullScreenImageState extends State<FullScreenImage> {
                             child: _canDownload
                                 ? IconButton(
                                     icon: _isDownloading
-                                        ? const SizedBox(
-                                            width: 20,
-                                            height: 20,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                              color: Colors.white,
-                                            ),
+                                        ? SizedBox(
+                                            width: 32,
+                                            height: 24,
+                                            child: _downloadingUrl != null
+                                                ? ImageDownloadPlaceholder(
+                                                    url: _downloadingUrl!,
+                                                    original: true,
+                                                    tracker: _cache.downloads,
+                                                    color: Colors.white,
+                                                    backgroundColor:
+                                                        Colors.transparent,
+                                                  )
+                                                : const FittedBox(
+                                                    child: Text(
+                                                      '保存中',
+                                                      style: TextStyle(
+                                                        color: Colors.white,
+                                                      ),
+                                                    ),
+                                                  ),
                                           )
                                         : const Icon(
                                             Icons.download_rounded,
@@ -654,6 +813,15 @@ class _FullScreenImageState extends State<FullScreenImage> {
                 child: ImagePreviewChrome(
                   visible: _controlsVisible,
                   child: _buildLiveButton(),
+                ),
+              ),
+            if (_currentUrl != null && _cache.supportsPreviews(_currentUrl!))
+              Positioned(
+                right: 16,
+                bottom: MediaQuery.paddingOf(context).bottom + 24,
+                child: ImagePreviewChrome(
+                  visible: _controlsVisible,
+                  child: _buildOriginalButton(_currentUrl!),
                 ),
               ),
           ],

@@ -68,8 +68,11 @@ Future<void> _runPreloadWorker() async {
   );
   try {
     while (_pendingPreloadUrls.isNotEmpty) {
-      final currentBatch = _pendingPreloadUrls.toList();
-      _pendingPreloadUrls.clear();
+      // Do not put the whole diary ahead of a user's explicit original request.
+      final currentBatch = _pendingPreloadUrls
+          .take(PrivateImageCache.maxConcurrentDownloads)
+          .toList();
+      _pendingPreloadUrls.removeAll(currentBatch);
       _inFlightPreloadUrls.addAll(currentBatch);
 
       await lease.update(
@@ -79,7 +82,7 @@ Future<void> _runPreloadWorker() async {
         progress: _preloadDoneCount,
       );
 
-      // 完全并行并发下载当前批次所有图片
+      // 整批入队，PrivateImageCache 默认仅拉取预览图，最多 6 个并发。
       await Future.wait(
         currentBatch.map((url) async {
           try {

@@ -118,7 +118,7 @@ class _WallpaperSettingsScreenState
 
       // 5. 种子化磁盘缓存：刚上传的壁纸本地立即可用，无需重新下载
       try {
-        await PrivateImageCache().putFile(url, await file.readAsBytes());
+        await PrivateImageCache().cacheOriginal(url, file);
       } catch (_) {}
 
       // 6. 自动进入透明度预览页

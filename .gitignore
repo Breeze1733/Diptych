@@ -2,6 +2,9 @@
 /lib/constants/secrets.dart
 /lib/constants/api_config.dart
 
+# 本地后端备份
+/backend/
+
 # 临时文件
 /temp/
 /latest-apk/

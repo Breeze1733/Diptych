@@ -2,13 +2,13 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 
 import '../constants/app_theme.dart';
-import '../services/private_image_cache.dart';
 import '../utils/diptych_asset_picker.dart';
 import '../utils/motion_photo_helper.dart';
 import 'live_photo_badge.dart';
+import 'image_download_placeholder.dart';
+import 'private_network_image.dart';
 
 /// 图片上传状态：idle（空闲/未入队）、queued（排队中）、uploading（上传中）、success（成功）、failed（失败）
 enum PhotoUploadStatus { idle, queued, uploading, success, failed }
@@ -109,6 +109,11 @@ class PhotoGridPicker extends StatelessWidget {
         }
       } catch (e) {
         debugPrint('PhotoGridPicker.pickPhotos 异常: $e');
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('无法读取所选照片的原图，请确认照片已下载到本机后重试')),
+          );
+        }
       }
     }
   }
@@ -294,11 +299,10 @@ class PhotoGridPicker extends StatelessWidget {
     final progress = progressProvider?.call(entry);
     final image = entry.isLocal
         ? Image.file(entry.file!, fit: BoxFit.cover)
-        : CachedNetworkImage(
-            cacheManager: PrivateImageCache(),
+        : PrivateNetworkImage(
             imageUrl: entry.url!,
             fit: BoxFit.cover,
-            placeholder: (_, _) => Container(color: AppTheme.softSurface),
+            placeholder: (_, url) => ImageDownloadPlaceholder(url: url),
             errorWidget: (_, _, _) => const Icon(
               Icons.broken_image_outlined,
               color: AppTheme.textSecondary,

@@ -293,7 +293,14 @@ class MomentDraftStore {
     final sourceKey =
         '${image.path}:${stat.modified.microsecondsSinceEpoch}:${stat.size}';
     final names = _sourceNames.putIfAbsent(_key, () => {});
-    final name = ownName ?? names[sourceKey] ?? _newName('photo');
+    final sourceExtension = image.path.split('.').last.toLowerCase();
+    final extension =
+        RegExp(r'^(jpe?g|png|webp|heic|heif|avif|gif|tiff?|bmp)$')
+            .hasMatch(sourceExtension)
+        ? sourceExtension
+        : 'jpg';
+    final name =
+        ownName ?? names[sourceKey] ?? _newName('photo', extension: extension);
     final target = File('${dir.path}/$name');
     if (ownName == null && !await target.exists()) {
       final tmp = File('${target.path}.pending');
@@ -345,11 +352,7 @@ class MomentDraftStore {
         continue;
       }
       try {
-        await cache.putFile(
-          url,
-          await file.readAsBytes(),
-          fileExtension: 'jpg',
-        );
+        await cache.cacheOriginal(url, file);
       } on FileSystemException {
         // 缓存是可选优化，远端保存成功不应被本地缓存失败回滚。
       }
@@ -379,8 +382,8 @@ class MomentDraftStore {
     return map is Map ? map['$index'] : null;
   }
 
-  static String _newName(String prefix) =>
-      '${prefix}_${DateTime.now().microsecondsSinceEpoch}_${_random.nextInt(1 << 32)}.jpg';
+  static String _newName(String prefix, {String extension = 'jpg'}) =>
+      '${prefix}_${DateTime.now().microsecondsSinceEpoch}_${_random.nextInt(1 << 32)}.$extension';
 
   static bool _isFileName(String name) =>
       name.isNotEmpty &&

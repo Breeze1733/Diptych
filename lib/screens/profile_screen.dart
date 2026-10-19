@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_cropper/image_cropper.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 
 import '../constants/settings_theme.dart';
 import '../models/app_user.dart';
@@ -15,8 +14,9 @@ import '../services/network_diagnostics_service.dart';
 import '../services/cache_service.dart';
 import '../utils/cache_helper.dart';
 import '../services/transfer_keep_alive.dart';
-import '../services/private_image_cache.dart';
 import '../widgets/network_diagnostics_card.dart';
+import '../widgets/image_download_placeholder.dart';
+import '../widgets/private_network_image.dart';
 import 'wallpaper_settings_screen.dart';
 
 /// 个人设置页：修改用户信息 + 检查更新
@@ -605,13 +605,28 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           foregroundColor: SettingsTheme.ink,
                           backgroundImage: _avatarFile != null
                               ? FileImage(_avatarFile!)
-                              : user.avatarUrl.isNotEmpty
-                              ? CachedNetworkImageProvider(
-                                  user.avatarUrl,
-                                  cacheManager: PrivateImageCache(),
-                                )
                               : null,
-                          child: !hasAvatar
+                          child:
+                              _avatarFile == null && user.avatarUrl.isNotEmpty
+                              ? ClipOval(
+                                  child: PrivateNetworkImage(
+                                    imageUrl: user.avatarUrl,
+                                    width: 64,
+                                    height: 64,
+                                    fit: BoxFit.cover,
+                                    placeholder: (_, url) =>
+                                        ImageDownloadPlaceholder(
+                                          url: url,
+                                          backgroundColor:
+                                              SettingsTheme.softSurface,
+                                        ),
+                                    errorWidget: (_, _, _) => const Icon(
+                                      Icons.person_outline,
+                                      color: SettingsTheme.muted,
+                                    ),
+                                  ),
+                                )
+                              : !hasAvatar
                               ? Text(
                                   user.nickname.isNotEmpty
                                       ? user.nickname.characters.first

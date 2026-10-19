@@ -724,18 +724,19 @@ class DiptychAssetPicker {
 
     final entries = <PhotoEntry>[];
     for (final asset in assets) {
-      final file = await asset.originFile ?? await asset.file;
-      if (file != null) {
-        final isMotion = await MotionPhotoHelper.isMotionPhoto(file);
-        final isLiveSelected = delegate.liveAssetIds.contains(asset.id);
-        entries.add(
-          PhotoEntry.file(
-            file,
-            isMotion: isMotion,
-            uploadLive: isMotion && isLiveSelected,
-          ),
-        );
+      final file = await asset.originFile;
+      if (file == null) {
+        throw StateError('无法读取照片原文件，请先将照片下载到本机后重试');
       }
+      final isMotion = await MotionPhotoHelper.isMotionPhoto(file);
+      final isLiveSelected = delegate.liveAssetIds.contains(asset.id);
+      entries.add(
+        PhotoEntry.file(
+          file,
+          isMotion: isMotion,
+          uploadLive: isMotion && isLiveSelected,
+        ),
+      );
     }
 
     return entries;

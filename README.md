@@ -13,7 +13,7 @@
 [![Flutter](https://img.shields.io/badge/Flutter-3.47%2B-02569B?style=flat-square&logo=flutter&logoColor=white)]()
 [![Dart](https://img.shields.io/badge/Dart-3.13%2B-0175C2?style=flat-square&logo=dart&logoColor=white)]()
 [![Platform](https://img.shields.io/badge/Platform-Android-3DDC84?style=flat-square&logo=android&logoColor=white)]()
-[![Version](https://img.shields.io/badge/Version-1.2.3%2B40-4B8BBE?style=flat-square)]()
+[![Version](https://img.shields.io/badge/Version-1.2.4%2B41-4B8BBE?style=flat-square)]()
 [![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)]()
 [![Repo Size](https://img.shields.io/github/repo-size/Breeze1733/Diptych?style=flat-square&label=repo%20size)]()
 [![Last Commit](https://img.shields.io/github/last-commit/Breeze1733/Diptych?style=flat-square&label=last%20commit)]()
@@ -293,7 +293,7 @@ flutter build apk --release
 - **提交代码**：Fork 仓库 → 基于 `main` 分支新建特性分支 → 提交 PR，按改动需要运行 `flutter analyze` 静态检查或在设备上验证
 - **代码风格**：遵循 `analysis_options.yaml` 中的 `flutter_lints` 规则
 - **图片维护**：README 图片引用统一使用 `pic/` 路径；未引用的图片移入 `pic/ignore/`，应用运行及 APK 构建资源留在 `assets/` 或 Android 原生资源目录
-- **临时文件**：任务完成后清理临时脚本和部署副本；`temp/` 仅保留 `server.js` 与 `version.json` 两个本地快照，整个目录不提交到 Git。服务器代码及部署配置不放回本仓库
+- **后端备份**：`backend/` 仅保留后端运行源码和版本配置，整个目录不提交到 Git；不保存测试、说明文档、旧副本、安装依赖或临时文件
 
 ## License
 
