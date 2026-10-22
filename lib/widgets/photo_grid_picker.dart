@@ -301,6 +301,7 @@ class PhotoGridPicker extends StatelessWidget {
         ? Image.file(entry.file!, fit: BoxFit.cover)
         : PrivateNetworkImage(
             imageUrl: entry.url!,
+            usePreview: true,
             fit: BoxFit.cover,
             placeholder: (_, url) => ImageDownloadPlaceholder(url: url),
             errorWidget: (_, _, _) => const Icon(

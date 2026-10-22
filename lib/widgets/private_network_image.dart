@@ -8,6 +8,7 @@ class PrivateNetworkImage extends StatelessWidget {
   const PrivateNetworkImage({
     super.key,
     required this.imageUrl,
+    this.usePreview = false,
     this.width,
     this.height,
     this.fit,
@@ -15,6 +16,9 @@ class PrivateNetworkImage extends StatelessWidget {
     this.errorWidget,
   });
   final String imageUrl;
+
+  /// Only diary photo widgets opt into previews. Profile images use originals.
+  final bool usePreview;
   final double? width;
   final double? height;
   final BoxFit? fit;
@@ -49,7 +53,9 @@ class PrivateNetworkImage extends StatelessWidget {
           return CachedNetworkImage(
             cacheManager: cache,
             imageUrl: imageUrl,
-            cacheKey: cache.displayKey(imageUrl),
+            cacheKey: usePreview
+                ? cache.displayKey(imageUrl)
+                : cache.originalDisplayKey(imageUrl),
             width: width,
             height: height,
             memCacheWidth: decodeWidth,

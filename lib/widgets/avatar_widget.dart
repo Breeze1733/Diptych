@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../services/private_image_cache.dart';
 import 'image_download_placeholder.dart';
 import 'private_network_image.dart';
 
@@ -20,7 +21,7 @@ class AvatarWidget extends StatelessWidget {
           height: size,
           fit: BoxFit.cover,
           placeholder: (_, url) => ImageDownloadPlaceholder(
-            url: url,
+            url: PrivateImageCache().progressKey(url, original: true),
             backgroundColor: Colors.grey.shade300,
           ),
           errorWidget: (_, _, _) => _buildFallback(),

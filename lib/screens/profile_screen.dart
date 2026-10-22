@@ -12,6 +12,7 @@ import '../providers/wallpaper_provider.dart';
 import '../services/update_service.dart';
 import '../services/network_diagnostics_service.dart';
 import '../services/cache_service.dart';
+import '../services/private_image_cache.dart';
 import '../utils/cache_helper.dart';
 import '../services/transfer_keep_alive.dart';
 import '../widgets/network_diagnostics_card.dart';
@@ -126,6 +127,14 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         nickname: newNickname.isNotEmpty ? newNickname : null,
         avatarUrl: avatarUrl,
       );
+
+      if (avatarUrl != null && _avatarFile != null) {
+        try {
+          await PrivateImageCache().cacheOriginal(avatarUrl, _avatarFile!);
+        } catch (_) {
+          // The saved profile remains valid if optional local caching fails.
+        }
+      }
 
       // 更新记录确认成功后，才允许删除原头像；清理失败不影响保存结果。
       if (avatarUrl != null &&
@@ -616,7 +625,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                     fit: BoxFit.cover,
                                     placeholder: (_, url) =>
                                         ImageDownloadPlaceholder(
-                                          url: url,
+                                          url: PrivateImageCache().progressKey(
+                                            url,
+                                            original: true,
+                                          ),
                                           backgroundColor:
                                               SettingsTheme.softSurface,
                                         ),

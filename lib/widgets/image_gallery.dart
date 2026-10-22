@@ -149,6 +149,7 @@ class _GalleryGridItemState extends State<_GalleryGridItem> {
         children: [
           PrivateNetworkImage(
             imageUrl: widget.url,
+            usePreview: true,
             fit: BoxFit.cover,
             placeholder: (_, url) => ImageDownloadPlaceholder(
               url: url,

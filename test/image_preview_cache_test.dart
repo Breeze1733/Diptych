@@ -94,6 +94,36 @@ void main() {
     expect(originalRequests, 1);
   });
 
+  test(
+    'original image widgets bypass cached previews and reuse the original',
+    () async {
+      final requests = <Uri>[];
+      final cache = _cache((request) async {
+        requests.add(request.url);
+        return request.url.queryParameters['variant'] == 'preview'
+            ? http.Response.bytes(_preview, 200, headers: _headers)
+            : http.Response.bytes(
+                _original,
+                200,
+                headers: {'content-type': 'image/jpeg'},
+              );
+      });
+      await cache.getSingleFile(_url);
+      final responses = await cache
+          .getFileStream(_url, key: cache.originalDisplayKey(_url))
+          .toList();
+      final original = responses.whereType<FileInfo>().single;
+      expect(await original.file.readAsBytes(), _original);
+      expect(requests, hasLength(2));
+      expect(requests.last.toString(), _url);
+      expect(await cache.getFileFromCache('preview-v1:$_url'), isNull);
+      await cache
+          .getFileStream(_url, key: cache.originalDisplayKey(_url))
+          .toList();
+      expect(requests, hasLength(2));
+    },
+  );
+
   test('failed original retains the preview and can be retried', () async {
     var fail = true;
     final cache = _cache((request) async {

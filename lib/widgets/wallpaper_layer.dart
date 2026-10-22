@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../constants/app_theme.dart';
+import '../services/private_image_cache.dart';
 import 'image_download_placeholder.dart';
 import 'private_network_image.dart';
 
@@ -30,7 +31,7 @@ class WallpaperLayer extends StatelessWidget {
             imageUrl: url,
             fit: BoxFit.cover,
             placeholder: (_, url) => ImageDownloadPlaceholder(
-              url: url,
+              url: PrivateImageCache().progressKey(url, original: true),
               backgroundColor: AppTheme.backgroundColor,
             ),
             errorWidget: (_, _, _) =>

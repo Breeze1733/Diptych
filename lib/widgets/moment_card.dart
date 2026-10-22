@@ -551,6 +551,7 @@ class _MomentCardState extends State<MomentCard> {
             children: [
               PrivateNetworkImage(
                 imageUrl: urls.first,
+                usePreview: true,
                 fit: BoxFit.cover,
                 placeholder: (_, url) => ImageDownloadPlaceholder(url: url),
                 errorWidget: (_, _, _) => _imagePlaceholder(),

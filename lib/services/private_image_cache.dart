@@ -73,8 +73,9 @@ class PrivateImageCache extends CacheManager {
   bool supportsPreviews(String url) => _state.supportsPreviews(url);
   ImageMediaInfo? mediaInfo(String url) => _state.infos[url];
   bool isOriginalKnown(String url) => _state.originals.contains(url);
+  String originalDisplayKey(String url) => 'original:$url';
   String displayKey(String url) =>
-      '${isOriginalKnown(url) ? 'original' : 'preview-v1'}:$url';
+      isOriginalKnown(url) ? originalDisplayKey(url) : _previewKey(url);
   String progressKey(String url, {bool original = false}) =>
       original && supportsPreviews(url) ? 'original:$url' : url;
 
@@ -124,6 +125,15 @@ class PrivateImageCache extends CacheManager {
     Map<String, String>? headers,
     bool withProgress = false,
   }) async* {
+    // Avatars and wallpapers explicitly select the original decoded-image key.
+    // Bypass preview lookup entirely, including previously cached previews.
+    if (key == originalDisplayKey(url)) {
+      await getOriginalFile(url);
+      final original = await getOriginalFromCache(url);
+      if (original == null) throw StateError('原图缓存已失效，请重试');
+      yield original;
+      return;
+    }
     final original = supportsPreviews(url)
         ? await getOriginalFromCache(url)
         : null;
