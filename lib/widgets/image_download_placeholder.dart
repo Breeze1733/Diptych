@@ -68,12 +68,12 @@ class ImageDownloadPlaceholder extends StatelessWidget {
               }
               return Center(
                 child: Padding(
-                  padding: EdgeInsets.all(compact ? 2 : 12),
+                  padding: const EdgeInsets.all(12),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       text,
-                      if (!compact && percent != null) ...[
+                      if (percent != null) ...[
                         const SizedBox(height: 8),
                         SizedBox(
                           width: 96,

@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:diptych/services/private_image_cache.dart';
 import 'package:diptych/widgets/image_gallery.dart';
+import 'package:diptych/widgets/photo_grid_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file/file.dart' as cache_file;
@@ -108,6 +109,51 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );
+
+  testWidgets(
+    'remote editor entries use motion metadata; local still entries hide live controls',
+    (tester) async {
+      final harness = await _GalleryHarness.create(tester, isMotion: true);
+      final info = await tester.runAsync(() => harness.cache.getInfo(_url));
+      expect(info?.isMotion, isTrue);
+      const entry = PhotoEntry.url(_url);
+      expect(entry.isMotion, isFalse);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: FullScreenImage(
+            entries: const [entry],
+            cacheManager: harness.cache,
+          ),
+        ),
+      );
+      await _settle(
+        tester,
+        until: () => find.text('实况').evaluate().isNotEmpty,
+      );
+      expect(find.text('实况'), findsOneWidget);
+      expect(harness.originalRequests, 0);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+
+      final still = File(
+        '${harness.directory.path}${Platform.pathSeparator}still.png',
+      );
+      await tester.runAsync(() => still.writeAsBytes(_originalBytes));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: FullScreenImage(
+            entries: [PhotoEntry.file(still)],
+            cacheManager: harness.cache,
+          ),
+        ),
+      );
+      await _settle(tester);
+      expect(find.text('实况'), findsNothing);
+      expect(harness.originalRequests, 0);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
 }
 
 class _GalleryHarness {
@@ -116,7 +162,10 @@ class _GalleryHarness {
   late final PrivateImageCache cache;
   int originalRequests = 0;
 
-  static Future<_GalleryHarness> create(WidgetTester tester) async {
+  static Future<_GalleryHarness> create(
+    WidgetTester tester, {
+    bool isMotion = false,
+  }) async {
     final directory = await tester.runAsync(
       () => Directory('.dart_tool').createTemp('gallery-test-'),
     );
@@ -147,7 +196,7 @@ class _GalleryHarness {
             'original_bytes': _originalBytes.length,
             'width': 150,
             'height': 100,
-            'is_motion': false,
+            'is_motion': isMotion,
           };
           if (variant == 'info') {
             return http.Response(
@@ -163,7 +212,7 @@ class _GalleryHarness {
               headers: {
                 'content-type': 'image/png',
                 'x-image-variant': 'preview',
-                'x-image-motion': '0',
+                'x-image-motion': isMotion ? '1' : '0',
                 'x-original-size': '${_originalBytes.length}',
                 'x-image-width': '150',
                 'x-image-height': '100',

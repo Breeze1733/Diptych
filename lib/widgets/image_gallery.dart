@@ -234,7 +234,8 @@ class _FullScreenImageState extends State<FullScreenImage> {
 
   bool get _showLiveButton {
     if (widget.entries != null && _currentIndex < widget.entries!.length) {
-      return widget.entries![_currentIndex].isMotion;
+      final entry = widget.entries![_currentIndex];
+      if (entry.isLocal) return entry.isMotion;
     }
     return _isMotionPhoto;
   }

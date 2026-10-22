@@ -64,14 +64,4 @@ class Post {
       ),
     );
   }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'id': id,
-      'topic_id': topicId,
-      'author_id': authorId,
-      'content': content,
-      'created_at': DateHelper.toIsoString(createdAt),
-    };
-  }
 }

@@ -104,6 +104,28 @@ class MomentUploadController extends ChangeNotifier {
     }
   }
 
+  /// 预上传图片可能在草稿保存期间被服务器清理；发布前确认并补传。
+  Future<void> prepareForPublish() async {
+    for (final entry in photos().where((p) => p.isLocal).toList()) {
+      if (_disposed) throw const UploadCancelledException();
+      final path = entry.file!.path;
+      final url = uploadedUrls[path];
+      if (url == null) continue;
+      final exists = await storage.originalExists(url);
+      if (_disposed) throw const UploadCancelledException();
+      if (!exists && uploadedUrls[path] == url) {
+        uploadedUrls.remove(path);
+        uploadedIsLive.remove(path);
+        statuses.remove(path);
+        progress.remove(path);
+      }
+    }
+    if (_disposed) throw const UploadCancelledException();
+    enqueue(photos());
+    await waitForUploads();
+    if (_disposed) throw const UploadCancelledException();
+  }
+
   void _pump() {
     if (_disposed || _inFlight.isNotEmpty || _pending.isEmpty) return;
     final path = _pending.removeAt(0);

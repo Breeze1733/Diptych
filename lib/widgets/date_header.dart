@@ -5,8 +5,7 @@ import '../utils/date_helper.dart';
 
 /// A single, compact row for the selected date and day navigation.
 class DateHeader extends StatelessWidget {
-  final String dateText;
-  final DateTime? date;
+  final DateTime date;
   final VoidCallback onCalendarTap;
   final VoidCallback? onPreviousDay;
   final VoidCallback? onNextDay;
@@ -14,9 +13,8 @@ class DateHeader extends StatelessWidget {
 
   const DateHeader({
     super.key,
-    required this.dateText,
     required this.onCalendarTap,
-    this.date,
+    required this.date,
     this.onPreviousDay,
     this.onNextDay,
     required this.cardOpacity,
@@ -24,9 +22,7 @@ class DateHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final title = date == null
-        ? dateText.replaceFirst(RegExp(r'\s+星期.*$'), '')
-        : DateHelper.toDateStr(date!).replaceAll('-', '.');
+    final title = DateHelper.toDateStr(date).replaceAll('-', '.');
     return Material(
       color: AppTheme.surfaceColor.withValues(alpha: cardOpacity),
       child: Row(

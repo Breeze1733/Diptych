@@ -331,8 +331,7 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
       if (currentUser == null || currentUser.uid != _draftStore.userId) {
         throw StateError('登录账号已改变，请重新打开编辑页');
       }
-      _uploads.enqueue(_photos);
-      await _uploads.waitForUploads();
+      await _uploads.prepareForPublish();
       if (!mounted) return;
       if (_photos.any(
         (p) => p.isLocal && !_uploadedUrls.containsKey(p.file!.path),

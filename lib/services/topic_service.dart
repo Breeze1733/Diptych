@@ -5,8 +5,10 @@ import '../models/topic.dart';
 import '../constants/api_config.dart';
 
 class TopicService {
+  TopicService({HttpRequests? http}) : _http = http ?? HttpRequests();
+
   static const String _baseUrl = ApiConfig.apiBaseUrl;
-  final _http = HttpRequests();
+  final HttpRequests _http;
 
   Future<List<Topic>> getTopics() async {
     final res = await _http.get(Uri.parse('$_baseUrl/topics'));
@@ -57,6 +59,15 @@ class TopicService {
   }
 
   Future<void> deletePost(String topicId, String postId) async {
-    await _http.delete(Uri.parse('$_baseUrl/topics/$topicId/posts/$postId'));
+    final res = await _http.delete(
+      Uri.parse('$_baseUrl/topics/$topicId/posts/$postId'),
+    );
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw Exception('删除失败（${res.statusCode}）');
+    }
+    final Object? body = jsonDecode(res.body);
+    if (body is! Map<String, dynamic> || body['ok'] != true) {
+      throw Exception(body is Map ? body['error'] ?? '删除失败' : '删除失败');
+    }
   }
 }

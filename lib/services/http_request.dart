@@ -27,6 +27,9 @@ class HttpRequests {
   }) =>
       _request((client) => client.get(url, headers: headers), timeout: timeout);
 
+  Future<http.Response> head(Uri url, {Map<String, String>? headers}) =>
+      _request((client) => client.head(url, headers: headers));
+
   Future<http.Response> post(
     Uri url, {
     Map<String, String>? headers,

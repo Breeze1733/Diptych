@@ -166,7 +166,6 @@ class _WallpaperPreviewScreenState
         // 与日记页一致的日期顶栏（示例日期）
         DateHeader(
           cardOpacity: _cardOpacity,
-          dateText: DateHelper.toChineseDate(DateTime.now()),
           date: DateTime.now(),
           onCalendarTap: () {}, // 预览页日历不响应
         ),

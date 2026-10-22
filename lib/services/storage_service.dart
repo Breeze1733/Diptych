@@ -6,6 +6,7 @@ import 'dart:math' as math;
 import 'package:http/http.dart' as http;
 
 import '../utils/url_helper.dart';
+import '../utils/image_request_urls.dart';
 import '../constants/api_config.dart';
 import 'auth_session.dart';
 import 'http_request.dart';
@@ -51,8 +52,10 @@ class _ChunkMultipartRequestWithProgress extends http.MultipartRequest {
 /// 图片上传服务（分片拆包 + 显式合并引擎）
 class StorageService {
   static const String _baseUrl = ApiConfig.apiBaseUrl;
-  final _http = HttpRequests();
+  final HttpRequests _http;
   final _sessionRevision = AuthSession.revision;
+
+  StorageService({HttpRequests? http}) : _http = http ?? HttpRequests();
 
   void _ensureSession() {
     if (AuthSession.revision != _sessionRevision) {
@@ -68,6 +71,19 @@ class StorageService {
       final preview = body.length > 200 ? '${body.substring(0, 200)}...' : body;
       throw Exception('服务器返回非 JSON（状态 $statusCode）: $preview');
     }
+  }
+
+  /// 直接核实服务器原图，避免把本地缓存或已清理的预上传 URL 当作有效图片。
+  Future<bool> originalExists(String url) async {
+    _ensureSession();
+    final response = await _http.head(
+      Uri.parse(ImageRequestUrls.original(UrlHelper.normalize(url))),
+      headers: {'Cache-Control': 'no-cache'},
+    );
+    _ensureSession();
+    if (response.statusCode == 200) return true;
+    if (response.statusCode == 404 || response.statusCode == 410) return false;
+    throw Exception('核实原图失败（${response.statusCode}），请稍后重试');
   }
 
   /// 主动中止上传并清理服务端临时分片

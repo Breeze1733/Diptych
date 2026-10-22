@@ -12,7 +12,6 @@ import '../providers/notification_provider.dart';
 import '../providers/selected_date_provider.dart';
 import '../providers/wallpaper_provider.dart';
 import '../services/update_service.dart';
-import '../utils/date_helper.dart';
 import '../widgets/calendar_picker.dart';
 import '../widgets/date_header.dart';
 import '../widgets/day_split_view.dart';
@@ -215,7 +214,6 @@ class FeedScreen extends ConsumerWidget {
       children: [
         DateHeader(
           cardOpacity: ref.watch(wallpaperSettingsProvider).cardOpacity,
-          dateText: DateHelper.toChineseDate(selectedDate),
           date: selectedDate,
           onCalendarTap: () => _openCalendar(context, ref),
           onPreviousDay: _canChangeDay(selectedDate, -1)
