@@ -5,13 +5,25 @@ import 'package:http/http.dart' as http;
 import '../models/app_user.dart';
 import '../models/moment.dart';
 import '../models/app_notification.dart';
+import '../models/shared_moment.dart';
 import '../constants/api_config.dart';
 import 'http_request.dart';
+
+class SharedMomentConflictException implements Exception {
+  final SharedMoment latest;
+
+  const SharedMomentConflictException({required this.latest});
+
+  @override
+  String toString() => '共写日记已被对方更新，请基于最新版本继续修改';
+}
 
 /// 后端 API 服务 — 替换 Firebase Firestore
 class ApiService {
   static const String _baseUrl = ApiConfig.apiBaseUrl;
-  final _http = HttpRequests();
+  final HttpRequests _http;
+
+  ApiService({HttpRequests? http}) : _http = http ?? HttpRequests();
 
   // ─── 用户相关 ───
 
@@ -233,6 +245,137 @@ class ApiService {
     }
   }
 
+  // ─── 共写日记 ───
+
+  /// 获取某日共写日记。服务器用 data: null 表示该日期尚未切换模式。
+  Future<SharedMoment?> getSharedMoment(String dateStr) async {
+    final res = await _http.get(
+      Uri.parse('$_baseUrl/shared-moments')
+          .replace(queryParameters: {'date_str': dateStr}),
+      headers: const {
+        'Cache-Control': 'no-cache, no-store',
+        'Pragma': 'no-cache',
+      },
+    );
+    final body = _sharedMomentBody(res, 'GET /shared-moments');
+    final data = body['data'];
+    if (data == null) return null;
+    if (data is! Map) {
+      throw Exception('GET /shared-moments 响应缺少共写日记数据');
+    }
+    return SharedMoment.fromJson(Map<String, dynamic>.from(data));
+  }
+
+  /// 将某日切换为共记模式；可原子带入当前内容与当天旧双联。
+  /// 后端保证重复请求返回同一份记录。
+  Future<SharedMoment> activateSharedMoment(
+    String dateStr, {
+    List<SharedMomentBlock> blocks = const [],
+    bool importStandard = false,
+  }) async {
+    final res = await _http.post(
+      Uri.parse('$_baseUrl/shared-moments'),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'date_str': dateStr,
+        if (blocks.isNotEmpty)
+          'blocks': blocks.map((block) => block.toJson()).toList(),
+        'import_standard': importStandard,
+      }),
+    );
+    return _requiredSharedMoment(res, 'POST /shared-moments');
+  }
+
+  Future<SharedMoment> getSharedMomentById(String id) async {
+    final encodedId = Uri.encodeComponent(id);
+    final res = await _http.get(
+      Uri.parse('$_baseUrl/shared-moments/$encodedId'),
+      headers: const {
+        'Cache-Control': 'no-cache, no-store',
+        'Pragma': 'no-cache',
+      },
+    );
+    final result = _requiredSharedMoment(res, 'GET /shared-moments/$encodedId');
+    if (result.id != id) throw Exception('服务器返回了其他共写日记的数据');
+    return result;
+  }
+
+  /// 以 revision 乐观锁保存；冲突时抛出携带服务端最新版的专用异常。
+  Future<SharedMoment> updateSharedMoment({
+    required SharedMoment moment,
+    required List<SharedMomentBlock> blocks,
+    List<Map<String, dynamic>> splitForeignText = const [],
+  }) async {
+    final body = <String, dynamic>{
+      'base_revision': moment.revision,
+      'blocks': blocks.map((block) => block.toJson()).toList(),
+      if (splitForeignText.isNotEmpty) 'split_foreign_text': splitForeignText,
+    };
+    final encodedId = Uri.encodeComponent(moment.id);
+    final res = await _http.put(
+      Uri.parse('$_baseUrl/shared-moments/$encodedId'),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    );
+
+    if (res.statusCode == 409) {
+      final decoded = _safeDecode(res);
+      if (decoded is Map && decoded['code'] == 'revision_conflict') {
+        final rawData = decoded['data'];
+        final rawLatest = rawData is Map && rawData['latest'] is Map
+            ? rawData['latest']
+            : rawData;
+        if (rawLatest is Map) {
+          throw SharedMomentConflictException(
+            latest: SharedMoment.fromJson(Map<String, dynamic>.from(rawLatest)),
+          );
+        }
+      }
+      if (decoded is Map && decoded['error'] is String) {
+        throw Exception(decoded['error'] as String);
+      }
+      throw Exception('共写日记保存冲突，请刷新后重试');
+    }
+
+    return _requiredSharedMoment(res, 'PUT /shared-moments/$encodedId');
+  }
+
+  Future<List<String>> getSharedMomentDates() async {
+    final res = await _http.get(
+      Uri.parse('$_baseUrl/shared-moments/dates'),
+      headers: const {
+        'Cache-Control': 'no-cache, no-store',
+        'Pragma': 'no-cache',
+      },
+    );
+    final body = _sharedMomentBody(res, 'GET /shared-moments/dates');
+    final data = body['data'];
+    final rawDates = data is Map ? data['dates'] : data;
+    if (rawDates is! List) {
+      throw Exception('GET /shared-moments/dates 响应缺少日期列表');
+    }
+    return rawDates.map((value) => value.toString()).toList();
+  }
+
+  Map _sharedMomentBody(http.Response res, String operation) {
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw Exception('$operation 返回 ${res.statusCode}: ${res.body}');
+    }
+    final body = _safeDecode(res);
+    if (body is! Map || body['ok'] != true) {
+      final error = body is Map ? body['error'] : null;
+      throw Exception(error ?? '$operation 响应异常');
+    }
+    return body;
+  }
+
+  SharedMoment _requiredSharedMoment(http.Response res, String operation) {
+    final body = _sharedMomentBody(res, operation);
+    final data = body['data'];
+    if (data is! Map) throw Exception('$operation 响应缺少共写日记数据');
+    return SharedMoment.fromJson(Map<String, dynamic>.from(data));
+  }
+
   /// 搜索日记内容（从新到旧倒序扫描，支持断点游标续搜）
   Future<({List<Moment> items, bool hasMore, String? nextCursor})>
   searchMoments(
@@ -262,6 +405,40 @@ class ApiService {
     final items = rawList
         .whereType<Map<String, dynamic>>()
         .map((e) => Moment.fromJson(e))
+        .toList();
+    final hasMore = data['has_more'] as bool? ?? false;
+    final nextCursor = data['next_cursor']?.toString();
+    return (items: items, hasMore: hasMore, nextCursor: nextCursor);
+  }
+
+  /// 搜索共写日记文字块。与旧日记搜索保持独立游标和返回模型。
+  Future<({List<SharedMoment> items, bool hasMore, String? nextCursor})>
+  searchSharedMoments(String keyword, {int limit = 10, String? cursor}) async {
+    final params = <String, String>{
+      'keyword': keyword,
+      'limit': limit.toString(),
+      if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
+    };
+    final uri = Uri.parse('$_baseUrl/shared-moments/search')
+        .replace(queryParameters: params);
+    final res = await _http.get(uri);
+    if (res.statusCode != 200) {
+      throw Exception(
+        'GET /shared-moments/search 返回 ${res.statusCode}: ${res.body}',
+      );
+    }
+    final body = _safeDecode(res);
+    if (body is! Map || body['ok'] != true || body['data'] is! Map) {
+      throw Exception('GET /shared-moments/search 响应异常: ${res.body}');
+    }
+    final data = Map<String, dynamic>.from(body['data'] as Map);
+    final rawList = data['items'];
+    if (rawList is! List) {
+      throw Exception('GET /shared-moments/search 响应缺少结果列表');
+    }
+    final items = rawList
+        .whereType<Map>()
+        .map((item) => SharedMoment.fromJson(Map<String, dynamic>.from(item)))
         .toList();
     final hasMore = data['has_more'] as bool? ?? false;
     final nextCursor = data['next_cursor']?.toString();

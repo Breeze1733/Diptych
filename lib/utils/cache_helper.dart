@@ -14,6 +14,7 @@ class CacheHelper {
   // SharedPreferences 中以这些前缀开头的 key 视为缓存
   static const _cacheKeyPrefixes = [
     'cache_day_',
+    'cache_shared_',
     'cache_marked_',
     'cache_user_',
     'cache_all_dates_',

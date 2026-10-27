@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../constants/app_theme.dart';
 import '../models/app_notification.dart';
 import '../providers/notification_provider.dart';
+import '../providers/day_moment_provider.dart';
 import '../providers/selected_date_provider.dart';
 import '../providers/wallpaper_provider.dart';
 import '../utils/date_helper.dart';
@@ -97,6 +98,10 @@ class _NotificationScreenState extends ConsumerState<NotificationScreen> {
         try {
           final targetDate = DateHelper.parseDateStr(notif.dateStr!);
           ref.read(selectedDateProvider.notifier).setDate(targetDate);
+          ref.invalidate(dayMomentsProvider);
+          if (notif.sharedMomentId?.isNotEmpty == true) {
+            ref.invalidate(sharedMomentProvider(notif.dateStr!));
+          }
           Navigator.pop(context); // 回到日记主页
         } catch (_) {}
       }

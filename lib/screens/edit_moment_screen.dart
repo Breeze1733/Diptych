@@ -8,15 +8,22 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../constants/app_theme.dart';
 import '../constants/strings.dart';
 import '../models/moment.dart';
+import '../models/shared_moment.dart';
 import '../providers/auth_provider.dart';
+import '../providers/day_moment_provider.dart';
+import '../services/cache_service.dart';
 import '../services/draft_service.dart';
 import '../services/moment_save_service.dart';
+import '../services/api_service.dart';
 import '../controllers/moment_upload_controller.dart';
+import 'shared_diary_editor_screen.dart';
 import '../utils/date_helper.dart';
 import '../utils/motion_photo_helper.dart';
 import '../widgets/image_gallery.dart';
 
 import '../widgets/photo_grid_picker.dart';
+
+enum EditMomentResult { standardSaved, sharedActivated }
 
 /// 发布/编辑动态页
 class EditMomentScreen extends ConsumerStatefulWidget {
@@ -35,6 +42,7 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
   int? _mood;
   bool _isSaving = false;
   bool _isSavingDraft = false;
+  bool _isSwitchingShared = false;
 
   /// 快照：记录最近一次已保存/已恢复到草稿的状态，用于判定是否有尚未存草稿的修改
   _EditorSnapshot? _lastSavedDraftSnapshot;
@@ -383,7 +391,7 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
           backgroundColor: AppTheme.primaryColor,
         ),
       );
-      Navigator.pop(context, true);
+      Navigator.pop(context, EditMomentResult.standardSaved);
     } catch (error) {
       var draftSaved = false;
       try {
@@ -427,6 +435,196 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
     _lastSavedDraftSnapshot = null;
   }
 
+  Future<void> _handleSwitchToShared() async {
+    final hasTextOrPhotos =
+        _feelingController.text.trim().isNotEmpty || _photos.isNotEmpty;
+    final bringContent = await _showSwitchToSharedDialog(hasTextOrPhotos);
+    if (bringContent == null || !mounted) return;
+
+    setState(() => _isSwitchingShared = true);
+    _uploads.setPublishing(true);
+    try {
+      final currentUser = ref.read(currentUserProvider);
+      if (currentUser == null || currentUser.uid != _draftStore.userId) {
+        throw StateError('登录账号已改变，请重新打开编辑页');
+      }
+
+      // 在任何远端写入前先留下可恢复快照；只有共记确认成功后才清理。
+      await _saveDraftInternal();
+      if (!mounted) return;
+
+      final initialBlocks = <SharedMomentBlock>[];
+      if (bringContent) {
+        await _uploads.prepareForPublish();
+        if (!mounted) return;
+        if (_photos.any(
+          (photo) =>
+              photo.isLocal && !_uploadedUrls.containsKey(photo.file!.path),
+        )) {
+          throw StateError('部分图片上传失败，请点击图片重试后再转为共记');
+        }
+
+        final text = _feelingController.text.trim();
+        if (text.isNotEmpty) {
+          initialBlocks.add(
+            SharedMomentBlock.text(authorId: currentUser.uid, text: text),
+          );
+        }
+        for (final photo in _photos) {
+          final imageUrl = photo.isLocal
+              ? _uploadedUrls[photo.file!.path]
+              : photo.url;
+          if (imageUrl != null && imageUrl.isNotEmpty) {
+            initialBlocks.add(
+              SharedMomentBlock.image(
+                authorId: currentUser.uid,
+                imageUrl: imageUrl,
+              ),
+            );
+          }
+        }
+      }
+
+      final api = ref.read(apiServiceProvider);
+      var shared = await api.activateSharedMoment(
+        _dateStr,
+        blocks: initialBlocks,
+        importStandard: bringContent,
+      );
+
+      // 若对方恰好先一步完成激活，幂等 POST 会返回已有文档；把本地块
+      // 基于最新版追加进去，不能因竞态静默丢掉已经确认带入的内容。
+      final serverIds = shared.blocks.map((block) => block.id).toSet();
+      var missing = initialBlocks
+          .where((block) => !serverIds.contains(block.id))
+          .toList(growable: false);
+      if (missing.isNotEmpty) {
+        try {
+          shared = await api.updateSharedMoment(
+            moment: shared,
+            blocks: [...shared.blocks, ...missing],
+          );
+        } on SharedMomentConflictException catch (conflict) {
+          final latestIds = conflict.latest.blocks
+              .map((block) => block.id)
+              .toSet();
+          missing = missing
+              .where((block) => !latestIds.contains(block.id))
+              .toList(growable: false);
+          shared = missing.isEmpty
+              ? conflict.latest
+              : await api.updateSharedMoment(
+                  moment: conflict.latest,
+                  blocks: [...conflict.latest.blocks, ...missing],
+                );
+        }
+      }
+
+      _hasSavedSuccessfully = true;
+      if (bringContent) {
+        _uploads.setCommittedUrls(
+          shared.blocks
+              .where((block) => block.type == SharedMomentBlockType.image)
+              .map((block) => block.imageUrl),
+        );
+        try {
+          await _draftStore.clear();
+        } catch (error) {
+          debugPrint('共记已创建，清除普通草稿失败: $error');
+        }
+      } else {
+        await _discardDraftInternal();
+      }
+
+      await CacheService.saveSharedMoment(_dateStr, shared);
+      final cachedSharedDates = await CacheService.loadSharedMomentDates();
+      if (cachedSharedDates != null && !cachedSharedDates.contains(_dateStr)) {
+        await CacheService.saveSharedMomentDates(
+          ([...cachedSharedDates, _dateStr]..sort()),
+        );
+      }
+      ref.invalidate(sharedMomentProvider(_dateStr));
+      ref.invalidate(dayMomentsProvider);
+      ref.invalidate(markedDatesProvider);
+      if (!mounted) return;
+
+      Navigator.of(context).pushReplacement<SharedMoment, EditMomentResult>(
+        MaterialPageRoute<SharedMoment>(
+          builder: (_) => SharedDiaryEditorScreen(initialMoment: shared),
+        ),
+        result: EditMomentResult.sharedActivated,
+      );
+    } catch (error) {
+      debugPrint('切换共记失败: $error');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('切换失败，当前内容已保留为草稿：$error'),
+          backgroundColor: AppTheme.dangerColor,
+        ),
+      );
+    } finally {
+      _uploads.setPublishing(false);
+      if (mounted) setState(() => _isSwitchingShared = false);
+    }
+  }
+
+  Future<bool?> _showSwitchToSharedDialog(bool hasTextOrPhotos) {
+    var bringContent = true;
+    final displayDate = _dateStr.replaceAll('-', '.');
+    return showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('开启本日共记模式？'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('开启后，$displayDate 将转为双方在同一篇日记中共同记录，支持按蓝粉区分归属、自由穿插编辑。'),
+                const SizedBox(height: 12),
+                CheckboxListTile(
+                  value: bringContent,
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  title: Text(
+                    hasTextOrPhotos
+                        ? '带入当前文字和照片，并合并当天已发布的旧双联'
+                        : '带入当天已发布的旧双联内容（如有）',
+                  ),
+                  subtitle: !bringContent && _hasChanges
+                      ? const Text('未发布的当前修改将被放弃。')
+                      : null,
+                  onChanged: (value) =>
+                      setDialogState(() => bringContent = value ?? true),
+                ),
+                if (_mood != null)
+                  const Text(
+                    '提示：心情值不属于共记格式；已发布的普通日记仍会作为旧双联保留。',
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 12,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, bringContent),
+              child: const Text('确认开启'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   /// 存草稿
   Future<void> _handleSaveDraft() async {
     final hasContent =
@@ -464,7 +662,11 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
   }
 
   Future<void> _handleBackPress() async {
-    if (_isSaving || _isSavingDraft || _isLoadingDraft || _isImportingPhotos) {
+    if (_isSaving ||
+        _isSavingDraft ||
+        _isSwitchingShared ||
+        _isLoadingDraft ||
+        _isImportingPhotos) {
       return;
     }
     if (!_hasChanges) {
@@ -572,6 +774,35 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
           ),
           actions: [
             SizedBox(
+              width: 72,
+              child: TextButton.icon(
+                onPressed:
+                    _isSwitchingShared ||
+                        _isSavingDraft ||
+                        _isSaving ||
+                        _isLoadingDraft ||
+                        _isImportingPhotos
+                    ? null
+                    : _handleSwitchToShared,
+                style: TextButton.styleFrom(
+                  minimumSize: const Size(0, 44),
+                  padding: const EdgeInsets.symmetric(horizontal: 2),
+                  foregroundColor: AppTheme.primaryColor,
+                ),
+                icon: _isSwitchingShared
+                    ? const SizedBox(
+                        width: 15,
+                        height: 15,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.people_outline, size: 17),
+                label: Text(
+                  _isSwitchingShared ? '切换中' : '转共记',
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ),
+            ),
+            SizedBox(
               width: 56,
               child: TextButton(
                 onPressed:
@@ -636,7 +867,11 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
           ],
         ),
         body: AbsorbPointer(
-          absorbing: _isSaving || _isLoadingDraft || _isImportingPhotos,
+          absorbing:
+              _isSaving ||
+              _isSwitchingShared ||
+              _isLoadingDraft ||
+              _isImportingPhotos,
           child: SafeArea(
             top: false,
             child: LayoutBuilder(

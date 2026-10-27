@@ -179,9 +179,9 @@ class _DiaryReadingScreenState extends ConsumerState<DiaryReadingScreen> {
     if (!_canEdit) return;
     ++_loadVersion;
     setState(() => _editing = true);
-    bool? saved;
+    EditMomentResult? result;
     try {
-      saved = await Navigator.of(context).push<bool>(
+      result = await Navigator.of(context).push<EditMomentResult>(
         MaterialPageRoute(
           builder: (_) => EditMomentScreen(
             date: DateHelper.parseDateStr(_moment.dateStr),
@@ -192,7 +192,7 @@ class _DiaryReadingScreenState extends ConsumerState<DiaryReadingScreen> {
     } finally {
       if (mounted) setState(() => _editing = false);
     }
-    if (saved == true && mounted) await _refresh();
+    if (result == EditMomentResult.standardSaved && mounted) await _refresh();
   }
 
   Future<void> _deleteComment(Comment comment) async {

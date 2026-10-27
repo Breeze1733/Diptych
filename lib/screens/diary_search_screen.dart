@@ -4,25 +4,23 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../constants/app_theme.dart';
-import '../models/moment.dart';
 import '../providers/auth_provider.dart';
 import '../providers/selected_date_provider.dart';
 import '../utils/date_helper.dart';
+import '../utils/diary_search.dart';
 import '../widgets/avatar_widget.dart';
+import 'diary_reading_screen.dart';
+import 'shared_diary_reading_screen.dart';
 
-/// 搜索命中的单个摘要条目
-class _SearchHit {
-  final Moment moment;
-  final String sourceLabel; // "日记" 或 "评论"
-  final String content; // 包含关键词的正文
-  final String authorId; // 该内容的作者
-
-  const _SearchHit({
-    required this.moment,
-    required this.sourceLabel,
-    required this.content,
-    required this.authorId,
-  });
+Future<({T? value, Object? error})> _settleOptional<T>(
+  Future<T>? future,
+) async {
+  if (future == null) return (value: null, error: null);
+  try {
+    return (value: await future, error: null);
+  } catch (error) {
+    return (value: null, error: error);
+  }
 }
 
 /// 日记搜索页面。
@@ -34,6 +32,8 @@ class DiarySearchScreen extends ConsumerStatefulWidget {
 }
 
 class _DiarySearchScreenState extends ConsumerState<DiarySearchScreen> {
+  static const _pageSize = 10;
+
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _focusNode = FocusNode();
   final ScrollController _scrollController = ScrollController();
@@ -43,10 +43,18 @@ class _DiarySearchScreenState extends ConsumerState<DiarySearchScreen> {
   String _keyword = '';
   bool _isSearching = false;
   bool _isLoadingMore = false;
-  bool _hasMore = false;
-  String? _nextCursor;
+  bool _legacyHasMore = false;
+  bool _sharedHasMore = false;
+  String? _legacyNextCursor;
+  String? _sharedNextCursor;
   String? _errorMessage;
-  List<_SearchHit> _hits = [];
+  String? _partialErrorMessage;
+  List<DiarySearchHit> _allHits = [];
+  List<DiarySearchHit> _hits = [];
+  int _visibleCount = 0;
+
+  bool get _hasMore =>
+      _legacyHasMore || _sharedHasMore || _visibleCount < _allHits.length;
 
   @override
   void initState() {
@@ -63,7 +71,9 @@ class _DiarySearchScreenState extends ConsumerState<DiarySearchScreen> {
     _debounceTimer?.cancel();
     // 退出搜索界面彻底销毁缓存与游标
     _hits.clear();
-    _nextCursor = null;
+    _allHits.clear();
+    _legacyNextCursor = null;
+    _sharedNextCursor = null;
     super.dispose();
   }
 
@@ -111,11 +121,16 @@ class _DiarySearchScreenState extends ConsumerState<DiarySearchScreen> {
       setState(() {
         _keyword = '';
         _hits.clear();
+        _allHits.clear();
+        _visibleCount = 0;
         _isSearching = false;
         _isLoadingMore = false;
-        _hasMore = false;
-        _nextCursor = null;
+        _legacyHasMore = false;
+        _sharedHasMore = false;
+        _legacyNextCursor = null;
+        _sharedNextCursor = null;
         _errorMessage = null;
+        _partialErrorMessage = null;
       });
       return;
     }
@@ -124,11 +139,16 @@ class _DiarySearchScreenState extends ConsumerState<DiarySearchScreen> {
       setState(() {
         _keyword = trimmed;
         _hits.clear();
+        _allHits.clear();
+        _visibleCount = 0;
         _isSearching = true;
         _isLoadingMore = false;
-        _hasMore = false;
-        _nextCursor = null;
+        _legacyHasMore = false;
+        _sharedHasMore = false;
+        _legacyNextCursor = null;
+        _sharedNextCursor = null;
         _errorMessage = null;
+        _partialErrorMessage = null;
       });
     } else {
       if (_isLoadingMore || _isSearching || !_hasMore || trimmed != _keyword) {
@@ -146,55 +166,88 @@ class _DiarySearchScreenState extends ConsumerState<DiarySearchScreen> {
       ];
 
       final apiService = ref.read(apiServiceProvider);
-      final res = await apiService.searchMoments(
-        trimmed,
-        authorIds,
-        limit: 10,
-        cursor: isLoadMore ? _nextCursor : null,
-      );
+      // 两个后端资源维持独立游标；只为仍有下一页的资源继续请求。
+      final legacyFuture = !isLoadMore || _legacyHasMore
+          ? apiService.searchMoments(
+              trimmed,
+              authorIds,
+              limit: _pageSize,
+              cursor: isLoadMore ? _legacyNextCursor : null,
+            )
+          : null;
+      final sharedFuture = !isLoadMore || _sharedHasMore
+          ? apiService.searchSharedMoments(
+              trimmed,
+              limit: _pageSize,
+              cursor: isLoadMore ? _sharedNextCursor : null,
+            )
+          : null;
+
+      final (legacySettled, sharedSettled) = await (
+        _settleOptional(legacyFuture),
+        _settleOptional(sharedFuture),
+      ).wait;
 
       if (!mounted || requestGeneration != _searchGeneration) return;
 
-      final newHits = <_SearchHit>[];
-      final qLower = trimmed.toLowerCase();
-
-      for (final m in res.items) {
-        // 1. 日记正文匹配
-        if (m.feeling.toLowerCase().contains(qLower)) {
-          newHits.add(
-            _SearchHit(
-              moment: m,
-              sourceLabel: '日记',
-              content: m.feeling,
-              authorId: m.authorId,
-            ),
-          );
-        }
-        // 2. 评论匹配
-        for (final c in m.comments) {
-          if (c.content.toLowerCase().contains(qLower)) {
-            newHits.add(
-              _SearchHit(
-                moment: m,
-                sourceLabel: '评论',
-                content: c.content,
-                authorId: c.authorId,
-              ),
-            );
-          }
-        }
+      final requestedCount = [
+        legacyFuture,
+        sharedFuture,
+      ].where((future) => future != null).length;
+      final failedCount = [
+        legacySettled.error,
+        sharedSettled.error,
+      ].where((error) => error != null).length;
+      if (requestedCount > 0 &&
+          failedCount == requestedCount &&
+          (!isLoadMore || _allHits.isEmpty)) {
+        throw StateError('所有搜索源都不可用');
       }
 
+      final legacyResult = legacySettled.value;
+      final sharedResult = sharedSettled.value;
+
+      final newHits = mergeDiarySearchHits(
+        legacyResult == null
+            ? const <DiarySearchHit>[]
+            : buildLegacyMomentSearchHits(legacyResult.items, trimmed),
+        sharedResult == null
+            ? const <DiarySearchHit>[]
+            : buildSharedMomentSearchHits(sharedResult.items, trimmed),
+      );
+
       setState(() {
-        if (!isLoadMore) {
-          _hits = newHits;
-        } else {
-          _hits.addAll(newHits);
+        _allHits = mergeDiarySearchHits(
+          isLoadMore ? _allHits : const <DiarySearchHit>[],
+          newHits,
+        );
+        if (legacyResult != null) {
+          _legacyHasMore = legacyResult.hasMore;
+          _legacyNextCursor = legacyResult.nextCursor;
         }
-        _hasMore = res.hasMore;
-        _nextCursor = res.nextCursor;
+        if (sharedResult != null) {
+          _sharedHasMore = sharedResult.hasMore;
+          _sharedNextCursor = sharedResult.nextCursor;
+        }
+        if (legacySettled.error != null) {
+          _legacyHasMore = false;
+          _legacyNextCursor = null;
+        }
+        if (sharedSettled.error != null) {
+          _sharedHasMore = false;
+          _sharedNextCursor = null;
+        }
+        _visibleCount = (isLoadMore ? _visibleCount + _pageSize : _pageSize)
+            .clamp(0, _allHits.length);
+        _hits = _allHits.take(_visibleCount).toList(growable: false);
         _isSearching = false;
         _isLoadingMore = false;
+        _errorMessage = null;
+        _partialErrorMessage = failedCount == 0
+            ? null
+            : legacySettled.error != null
+            ? '旧双联搜索暂时不可用，以下结果可能不完整'
+            : '共记搜索暂时不可用，以下结果可能不完整';
       });
     } catch (e) {
       if (!mounted || requestGeneration != _searchGeneration) return;
@@ -206,11 +259,24 @@ class _DiarySearchScreenState extends ConsumerState<DiarySearchScreen> {
     }
   }
 
-  void _navigateToDate(String dateStr) {
+  Future<void> _openHit(DiarySearchHit hit) async {
     try {
-      final targetDate = DateHelper.parseDateStr(dateStr);
+      final targetDate = DateHelper.parseDateStr(hit.dateStr);
       ref.read(selectedDateProvider.notifier).setDate(targetDate);
-      Navigator.pop(context);
+      final route = switch (hit.kind) {
+        DiarySearchHitKind.legacy when hit.legacyMoment != null =>
+          MaterialPageRoute<void>(
+            builder: (_) =>
+                DiaryReadingScreen(initialMoment: hit.legacyMoment!),
+          ),
+        DiarySearchHitKind.shared when hit.sharedMoment != null =>
+          MaterialPageRoute<void>(
+            builder: (_) =>
+                SharedDiaryReadingScreen(initialMoment: hit.sharedMoment!),
+          ),
+        _ => null,
+      };
+      if (route != null && mounted) await Navigator.push(context, route);
     } catch (e) {
       debugPrint('跳转日期失败: $e');
     }
@@ -338,7 +404,7 @@ class _DiarySearchScreenState extends ConsumerState<DiarySearchScreen> {
                     onSubmitted: (v) => _performSearch(v, isLoadMore: false),
                     style: const TextStyle(fontSize: 15),
                     decoration: InputDecoration(
-                      hintText: '搜索日记内容、感受或评论',
+                      hintText: '搜索日记、共记或评论',
                       hintStyle: const TextStyle(
                         fontSize: 14,
                         color: AppTheme.textSecondary,
@@ -432,7 +498,7 @@ class _DiarySearchScreenState extends ConsumerState<DiarySearchScreen> {
             const Icon(Icons.search, size: 54, color: AppTheme.textSecondary),
             const SizedBox(height: 12),
             const Text(
-              '搜索日记内容、感受或评论',
+              '搜索日记、共记或评论',
               style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
             ),
           ],
@@ -441,6 +507,9 @@ class _DiarySearchScreenState extends ConsumerState<DiarySearchScreen> {
     }
 
     if (_hits.isEmpty) {
+      if (_partialErrorMessage != null) {
+        return Center(child: _buildPartialError());
+      }
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -463,13 +532,18 @@ class _DiarySearchScreenState extends ConsumerState<DiarySearchScreen> {
       );
     }
 
+    final warningCount = _partialErrorMessage == null ? 0 : 1;
     return ListView.separated(
       controller: _scrollController,
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
-      itemCount: _hits.length + (_hasMore ? 1 : 0),
+      itemCount: warningCount + _hits.length + (_hasMore ? 1 : 0),
       separatorBuilder: (_, _) => const SizedBox(height: 12),
       itemBuilder: (context, index) {
-        if (index >= _hits.length) {
+        if (warningCount == 1 && index == 0) {
+          return _buildPartialError(compact: true);
+        }
+        final hitIndex = index - warningCount;
+        if (hitIndex >= _hits.length) {
           return const Padding(
             padding: EdgeInsets.symmetric(vertical: 16),
             child: Center(
@@ -482,7 +556,7 @@ class _DiarySearchScreenState extends ConsumerState<DiarySearchScreen> {
           );
         }
 
-        final hit = _hits[index];
+        final hit = _hits[hitIndex];
         final authorName = _getNickname(hit.authorId);
         final avatarUrl = _getAvatarUrl(hit.authorId);
 
@@ -491,7 +565,7 @@ class _DiarySearchScreenState extends ConsumerState<DiarySearchScreen> {
           borderRadius: BorderRadius.circular(20),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
-            onTap: () => _navigateToDate(hit.moment.dateStr),
+            onTap: () => _openHit(hit),
             child: Padding(
               padding: const EdgeInsets.all(18),
               child: Row(
@@ -537,7 +611,7 @@ class _DiarySearchScreenState extends ConsumerState<DiarySearchScreen> {
                             ),
                             const SizedBox(width: 10),
                             Text(
-                              hit.moment.dateStr,
+                              hit.dateStr,
                               style: const TextStyle(
                                 fontSize: 12,
                                 color: AppTheme.textSecondary,
@@ -556,6 +630,43 @@ class _DiarySearchScreenState extends ConsumerState<DiarySearchScreen> {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildPartialError({bool compact = false}) {
+    return Material(
+      color: AppTheme.accentSurface,
+      borderRadius: BorderRadius.circular(14),
+      child: Padding(
+        padding: EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: compact ? 8 : 14,
+        ),
+        child: Row(
+          mainAxisSize: compact ? MainAxisSize.max : MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.warning_amber_rounded,
+              size: 20,
+              color: AppTheme.accentColor,
+            ),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                _partialErrorMessage!,
+                style: const TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+            TextButton(
+              onPressed: () => _performSearch(_keyword, isLoadMore: false),
+              child: const Text('重试'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

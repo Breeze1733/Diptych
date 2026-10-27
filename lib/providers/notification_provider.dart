@@ -1,7 +1,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/app_notification.dart';
 import '../services/notification_service.dart';
+import '../utils/date_helper.dart';
 import 'auth_provider.dart';
+import 'day_moment_provider.dart';
+import 'selected_date_provider.dart';
 
 /// 通知列表状态管理 Notifier
 class NotificationListNotifier extends Notifier<List<AppNotification>> {
@@ -33,8 +36,26 @@ class NotificationListNotifier extends Notifier<List<AppNotification>> {
     }
     final api = ref.read(apiServiceProvider);
     try {
+      final knownIds = state.map((item) => item.id).toSet();
       final updated = await NotificationService.sync(role, api);
       state = updated;
+      final selectedDate = DateHelper.toDateStr(
+        ref.read(selectedDateProvider),
+      );
+      for (final notification in updated) {
+        if (knownIds.contains(notification.id) ||
+            notification.dateStr == null) {
+          continue;
+        }
+        if (notification.dateStr == selectedDate &&
+            (notification.type == AppNotificationType.moment ||
+                notification.type == AppNotificationType.momentComment)) {
+          ref.invalidate(dayMomentsProvider);
+        }
+        if (notification.sharedMomentId?.isNotEmpty == true) {
+          ref.invalidate(sharedMomentProvider(notification.dateStr!));
+        }
+      }
     } catch (_) {
     } finally {
       _isSyncing = false;

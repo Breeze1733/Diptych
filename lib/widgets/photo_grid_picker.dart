@@ -46,6 +46,10 @@ class PhotoGridPicker extends StatelessWidget {
   final double? Function(PhotoEntry entry)? progressProvider;
   final ValueChanged<int>? onRetry;
   final ValueChanged<int>? onTap;
+  final Color? Function(int index)? borderColorProvider;
+  final String? Function(int index)? badgeLabelProvider;
+  final bool Function(int index)? canRemove;
+  final bool reorderEnabled;
 
   /// When bounded, show this many rows and scroll additional photos internally.
   final int? visibleRows;
@@ -60,6 +64,10 @@ class PhotoGridPicker extends StatelessWidget {
     this.progressProvider,
     this.onRetry,
     this.onTap,
+    this.borderColorProvider,
+    this.badgeLabelProvider,
+    this.canRemove,
+    this.reorderEnabled = true,
     this.visibleRows,
   });
 
@@ -241,7 +249,29 @@ class PhotoGridPicker extends StatelessWidget {
         onAcceptWithDetails: (details) => onReordered(details.data, index),
         builder: (context, candidateData, rejectedData) {
           final isDragTarget = candidateData.any((source) => source != index);
-
+          final child = GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: handleTap,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                _buildPhotoContent(index, status),
+                if (isDragTarget)
+                  IgnorePointer(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: Theme.of(context).colorScheme.primary,
+                          width: 3,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          );
+          if (!reorderEnabled) return child;
           return LongPressDraggable<int>(
             data: index,
             feedback: Material(
@@ -262,28 +292,7 @@ class PhotoGridPicker extends StatelessWidget {
               opacity: 0.25,
               child: _buildPhotoContent(index, status),
             ),
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: handleTap,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  _buildPhotoContent(index, status),
-                  if (isDragTarget)
-                    IgnorePointer(
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(
-                            color: Theme.of(context).colorScheme.primary,
-                            width: 3,
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
+            child: child,
           );
         },
       ),
@@ -297,6 +306,8 @@ class PhotoGridPicker extends StatelessWidget {
   }) {
     final entry = entries[index];
     final progress = progressProvider?.call(entry);
+    final borderColor = borderColorProvider?.call(index);
+    final badgeLabel = badgeLabelProvider?.call(index);
     final image = entry.isLocal
         ? Image.file(entry.file!, fit: BoxFit.cover)
         : PrivateNetworkImage(
@@ -311,142 +322,163 @@ class PhotoGridPicker extends StatelessWidget {
           );
 
     return Container(
-      decoration: BoxDecoration(borderRadius: BorderRadius.circular(14)),
-      clipBehavior: Clip.antiAlias,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          image,
-          // 上传中半透明遮罩与圆圈进度显示
-          if (status == PhotoUploadStatus.uploading)
-            Container(
-              color: Colors.black45,
-              alignment: Alignment.center,
-              child: Stack(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        border: borderColor == null
+            ? null
+            : Border.all(color: borderColor, width: 3),
+      ),
+      padding: borderColor == null ? EdgeInsets.zero : const EdgeInsets.all(2),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(borderColor == null ? 14 : 10),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            image,
+            // 上传中半透明遮罩与圆圈进度显示
+            if (status == PhotoUploadStatus.uploading)
+              Container(
+                color: Colors.black45,
                 alignment: Alignment.center,
-                children: [
-                  SizedBox(
-                    width: 36,
-                    height: 36,
-                    child: CircularProgressIndicator(
-                      value: progress,
-                      strokeWidth: 3.0,
-                      backgroundColor: Colors.white24,
-                      valueColor: const AlwaysStoppedAnimation<Color>(
-                        Colors.white,
-                      ),
-                    ),
-                  ),
-                  if (progress != null)
-                    Text(
-                      '${(progress * 100).clamp(0, 100).toInt()}%',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          // 排队中状态：右下角展示“排队中”角标
-          if (status == PhotoUploadStatus.queued)
-            Positioned(
-              right: 4,
-              bottom: 4,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.black.withAlpha(160),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.white38, width: 0.8),
-                ),
-                child: const Text(
-                  '排队中',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 9.5,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ),
-            ),
-          // 上传失败半透明遮罩与轻点重试提示
-          if (status == PhotoUploadStatus.failed)
-            Container(
-              color: Colors.black54,
-              alignment: Alignment.center,
-              child: LayoutBuilder(
-                builder: (context, constraints) => Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
+                child: Stack(
+                  alignment: Alignment.center,
                   children: [
-                    Icon(
-                      Icons.refresh,
-                      color: Colors.white,
-                      size: (constraints.maxHeight * .6).clamp(0.0, 24.0),
-                    ),
-                    if (constraints.maxHeight >= 48) ...[
-                      const SizedBox(height: 3),
-                      const Text(
-                        '轻点重试',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w500,
+                    SizedBox(
+                      width: 36,
+                      height: 36,
+                      child: CircularProgressIndicator(
+                        value: progress,
+                        strokeWidth: 3.0,
+                        backgroundColor: Colors.white24,
+                        valueColor: const AlwaysStoppedAnimation<Color>(
+                          Colors.white,
                         ),
                       ),
-                    ],
+                    ),
+                    if (progress != null)
+                      Text(
+                        '${(progress * 100).clamp(0, 100).toInt()}%',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                   ],
                 ),
               ),
-            ),
-          // 封面标记（第一张）
-          if (index == 0)
-            Positioned(
-              left: 0,
-              top: 0,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: const BoxDecoration(
-                  color: Colors.black54,
-                  borderRadius: BorderRadius.only(
-                    bottomRight: Radius.circular(6),
+            // 排队中状态：右下角展示“排队中”角标
+            if (status == PhotoUploadStatus.queued)
+              Positioned(
+                right: 4,
+                bottom: 4,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 5,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withAlpha(160),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.white38, width: 0.8),
+                  ),
+                  child: const Text(
+                    '排队中',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                 ),
-                child: const Text(
-                  '封面',
-                  style: TextStyle(color: Colors.white, fontSize: 10),
+              ),
+            // 上传失败半透明遮罩与轻点重试提示
+            if (status == PhotoUploadStatus.failed)
+              Container(
+                color: Colors.black54,
+                alignment: Alignment.center,
+                child: LayoutBuilder(
+                  builder: (context, constraints) => Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.refresh,
+                        color: Colors.white,
+                        size: (constraints.maxHeight * .6).clamp(0.0, 24.0),
+                      ),
+                      if (constraints.maxHeight >= 48) ...[
+                        const SizedBox(height: 3),
+                        const Text(
+                          '轻点重试',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
               ),
-            ),
-          // 实况缩略图角标：如果是动态图且选择保留实况，在左下角显示「实况」角标
-          if (entry.isMotion && entry.uploadLive)
-            Positioned(
-              left: 4,
-              bottom: 4,
-              child: const LivePhotoBadge(isLiveSelected: true),
-            ),
-          // 删除角标
-          if (showDeleteButton)
-            Positioned(
-              top: 0,
-              right: 0,
-              child: IconButton(
-                onPressed: () => onRemoved(index),
-                tooltip: '删除照片',
-                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
-                padding: const EdgeInsets.all(8),
-                icon: Container(
-                  padding: const EdgeInsets.all(5),
+            // 封面标记（第一张）
+            if (badgeLabel != null || index == 0)
+              Positioned(
+                left: 0,
+                top: 0,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
                   decoration: const BoxDecoration(
                     color: Colors.black54,
-                    shape: BoxShape.circle,
+                    borderRadius: BorderRadius.only(
+                      bottomRight: Radius.circular(6),
+                    ),
                   ),
-                  child: const Icon(Icons.close, size: 14, color: Colors.white),
+                  child: Text(
+                    badgeLabel ?? '封面',
+                    style: const TextStyle(color: Colors.white, fontSize: 10),
+                  ),
                 ),
               ),
-            ),
-        ],
+            // 实况缩略图角标：如果是动态图且选择保留实况，在左下角显示「实况」角标
+            if (entry.isMotion && entry.uploadLive)
+              Positioned(
+                left: 4,
+                bottom: 4,
+                child: const LivePhotoBadge(isLiveSelected: true),
+              ),
+            // 删除角标
+            if (showDeleteButton && (canRemove?.call(index) ?? true))
+              Positioned(
+                top: 0,
+                right: 0,
+                child: IconButton(
+                  onPressed: () => onRemoved(index),
+                  tooltip: '删除照片',
+                  constraints: const BoxConstraints(
+                    minWidth: 44,
+                    minHeight: 44,
+                  ),
+                  padding: const EdgeInsets.all(8),
+                  icon: Container(
+                    padding: const EdgeInsets.all(5),
+                    decoration: const BoxDecoration(
+                      color: Colors.black54,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.close,
+                      size: 14,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
