@@ -2,13 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../constants/app_theme.dart';
-import '../models/app_user.dart';
 import '../models/shared_moment.dart';
 import '../providers/auth_provider.dart';
 import '../providers/day_moment_provider.dart';
 import '../services/cache_service.dart';
 import '../utils/date_helper.dart';
-import '../widgets/avatar_widget.dart';
 import '../widgets/shared_diary_document.dart';
 import 'shared_diary_editor_screen.dart';
 
@@ -86,10 +84,6 @@ class _SharedDiaryReadingScreenState
 
   @override
   Widget build(BuildContext context) {
-    final current = ref.watch(currentUserProvider);
-    final partner = ref.watch(partnerUserProvider);
-    final userA = _byId('A', current, partner);
-    final userB = _byId('B', current, partner);
     return Scaffold(
       appBar: AppBar(
         title: const Text('我们的共记'),
@@ -119,12 +113,10 @@ class _SharedDiaryReadingScreenState
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  _buildAuthors(userA, userB),
-                  const SizedBox(height: 18),
                   SharedDiaryDocument(moment: _moment),
                   const SizedBox(height: 20),
                   Text(
-                    '版本 ${_moment.revision} · ${DateHelper.toEditTime(_moment.updatedAt)}',
+                    DateHelper.toEditTime(_moment.updatedAt),
                     textAlign: TextAlign.right,
                     style: const TextStyle(
                       color: AppTheme.textSecondary,
@@ -149,57 +141,5 @@ class _SharedDiaryReadingScreenState
         ),
       ),
     );
-  }
-
-  Widget _buildAuthors(AppUser? userA, AppUser? userB) {
-    Widget author(String id, AppUser? user) {
-      final color = AppTheme.sharedAuthorColor(id);
-      return Expanded(
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(2),
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: color, width: 2),
-              ),
-              child: AvatarWidget(avatarUrl: user?.avatarUrl, size: 30),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                user?.nickname.trim().isNotEmpty == true
-                    ? user!.nickname
-                    : '用户$id',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: color, fontWeight: FontWeight.w600),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return Row(
-      children: [
-        author('A', userA),
-        const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 12),
-          child: Icon(
-            Icons.favorite_rounded,
-            size: 18,
-            color: AppTheme.accentColor,
-          ),
-        ),
-        author('B', userB),
-      ],
-    );
-  }
-
-  AppUser? _byId(String uid, AppUser? current, AppUser? partner) {
-    if (current?.uid == uid) return current;
-    if (partner?.uid == uid) return partner;
-    return null;
   }
 }

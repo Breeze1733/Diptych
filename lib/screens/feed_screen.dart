@@ -262,17 +262,11 @@ class FeedScreen extends ConsumerWidget {
 
     final sharedMoment = sharedMomentAsync.value;
     if (sharedMoment != null) {
-      final userA = currentUser.uid == 'A' ? currentUser : partner;
-      final userB = currentUser.uid == 'B' ? currentUser : partner;
       final legacyMoments = dayMomentsAsync.value;
       final myLegacy = legacyMoments?['myMoment'];
       final partnerLegacy = legacyMoments?['partnerMoment'];
       return SharedDayView(
         moment: sharedMoment,
-        userAName: userA.nickname,
-        userBName: userB.nickname,
-        userAAvatarUrl: userA.avatarUrl,
-        userBAvatarUrl: userB.avatarUrl,
         cardOpacity: ref.watch(wallpaperSettingsProvider).cardOpacity,
         onOpenReading: () => _openSharedReading(context, sharedMoment),
         onEdit: () => _openSharedEditor(ref, context, sharedMoment),

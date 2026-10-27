@@ -168,50 +168,19 @@ class _SharedImageGridState extends State<_SharedImageGrid> {
                       ),
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(9),
-                        child: Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            PrivateNetworkImage(
-                              imageUrl: block.imageUrl,
-                              usePreview: true,
-                              fit: BoxFit.cover,
-                              placeholder: (_, url) =>
-                                  ImageDownloadPlaceholder(url: url),
-                              errorWidget: (_, _, _) => const ColoredBox(
-                                color: AppTheme.softSurface,
-                                child: Icon(
-                                  Icons.broken_image_outlined,
-                                  color: AppTheme.textSecondary,
-                                ),
-                              ),
+                        child: PrivateNetworkImage(
+                          imageUrl: block.imageUrl,
+                          usePreview: true,
+                          fit: BoxFit.cover,
+                          placeholder: (_, url) =>
+                              ImageDownloadPlaceholder(url: url),
+                          errorWidget: (_, _, _) => const ColoredBox(
+                            color: AppTheme.softSurface,
+                            child: Icon(
+                              Icons.broken_image_outlined,
+                              color: AppTheme.textSecondary,
                             ),
-                            Positioned(
-                              left: 0,
-                              top: 0,
-                              child: DecoratedBox(
-                                decoration: BoxDecoration(
-                                  color: color,
-                                  borderRadius: const BorderRadius.only(
-                                    bottomRight: Radius.circular(7),
-                                  ),
-                                ),
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 7,
-                                    vertical: 3,
-                                  ),
-                                  child: Text(
-                                    block.authorId,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
+                          ),
                         ),
                       ),
                     ),
