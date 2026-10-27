@@ -5,22 +5,28 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../constants/app_theme.dart';
 import '../constants/strings.dart';
+import '../models/app_user.dart';
 import '../models/moment.dart';
+import '../models/shared_moment.dart';
 import '../providers/auth_provider.dart';
 import '../providers/day_moment_provider.dart';
 import '../providers/notification_provider.dart';
 import '../providers/selected_date_provider.dart';
 import '../providers/wallpaper_provider.dart';
 import '../services/update_service.dart';
+import '../utils/date_helper.dart';
 import '../widgets/calendar_picker.dart';
 import '../widgets/date_header.dart';
 import '../widgets/day_split_view.dart';
+import '../widgets/shared_day_view.dart';
 import '../widgets/wallpaper_layer.dart';
 import 'edit_moment_screen.dart';
 import 'diary_reading_screen.dart';
 import 'notification_screen.dart';
 import 'profile_screen.dart';
 import 'diary_search_screen.dart';
+import 'shared_diary_editor_screen.dart';
+import 'shared_diary_reading_screen.dart';
 
 /// 是否已静默检查过更新（仅触发一次）
 class AutoUpdateCheckedNotifier extends Notifier<bool> {
@@ -49,7 +55,10 @@ class FeedScreen extends ConsumerWidget {
     ref.watch(initWallpaperProvider);
     final wallpaper = ref.watch(wallpaperSettingsProvider);
     final unreadNotificationCount = ref.watch(unreadNotificationCountProvider);
-    final isLoading = ref.watch(dayMomentsProvider).isLoading;
+    final dateStr = DateHelper.toDateStr(selectedDate);
+    final sharedMomentAsync = ref.watch(sharedMomentProvider(dateStr));
+    final isLoading =
+        ref.watch(dayMomentsProvider).isLoading || sharedMomentAsync.isLoading;
     final screenSize = MediaQuery.sizeOf(context);
     final scale = math
         .min(screenSize.width / 375, screenSize.height / 700)
@@ -137,6 +146,7 @@ class FeedScreen extends ConsumerWidget {
                     ? null
                     : () {
                         ref.invalidate(dayMomentsProvider);
+                        ref.invalidate(sharedMomentProvider(dateStr));
                         syncCalendarMarkedDatesFromNetwork(ref);
                         ref.read(notificationListProvider.notifier).sync();
                       },
@@ -170,8 +180,8 @@ class FeedScreen extends ConsumerWidget {
   Widget _buildBody(
     WidgetRef ref,
     AsyncValue<void> loadUsersAsync,
-    currentUser,
-    partner,
+    AppUser? currentUser,
+    AppUser? partner,
     DateTime selectedDate,
     BuildContext context,
   ) {
@@ -242,11 +252,83 @@ class FeedScreen extends ConsumerWidget {
   /// 构建日视图
   Widget _buildDayView(
     WidgetRef ref,
-    currentUser,
-    partner,
+    AppUser currentUser,
+    AppUser partner,
     BuildContext context,
   ) {
     final dayMomentsAsync = ref.watch(dayMomentsProvider);
+    final dateStr = DateHelper.toDateStr(ref.watch(selectedDateProvider));
+    final sharedMomentAsync = ref.watch(sharedMomentProvider(dateStr));
+
+    final sharedMoment = sharedMomentAsync.value;
+    if (sharedMoment != null) {
+      final userA = currentUser.uid == 'A' ? currentUser : partner;
+      final userB = currentUser.uid == 'B' ? currentUser : partner;
+      final legacyMoments = dayMomentsAsync.value;
+      final myLegacy = legacyMoments?['myMoment'];
+      final partnerLegacy = legacyMoments?['partnerMoment'];
+      return SharedDayView(
+        moment: sharedMoment,
+        userAName: userA.nickname,
+        userBName: userB.nickname,
+        userAAvatarUrl: userA.avatarUrl,
+        userBAvatarUrl: userB.avatarUrl,
+        cardOpacity: ref.watch(wallpaperSettingsProvider).cardOpacity,
+        onOpenReading: () => _openSharedReading(context, sharedMoment),
+        onEdit: () => _openSharedEditor(ref, context, sharedMoment),
+        onOpenLegacy: myLegacy != null || partnerLegacy != null
+            ? () => _openLegacyArchive(
+                context,
+                myLegacy,
+                partnerLegacy,
+                currentUser,
+                partner,
+              )
+            : null,
+      );
+    }
+    if (sharedMomentAsync.isLoading) {
+      return Expanded(child: _paperArea(ref));
+    }
+    if (sharedMomentAsync.hasError) {
+      debugPrint('加载共记状态失败: ${sharedMomentAsync.error}');
+      return Expanded(
+        child: _paperArea(
+          ref,
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(28),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.cloud_off,
+                    size: 48,
+                    color: AppTheme.textSecondary,
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    '暂时无法确认当天是否为共记模式\n为避免覆盖内容，请联网后重试',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 15,
+                      height: 1.5,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  OutlinedButton(
+                    onPressed: () =>
+                        ref.invalidate(sharedMomentProvider(dateStr)),
+                    child: const Text('重试'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
 
     return dayMomentsAsync.when(
       skipLoadingOnRefresh: true,
@@ -303,6 +385,83 @@ class FeedScreen extends ConsumerWidget {
     );
   }
 
+  Future<void> _openLegacyArchive(
+    BuildContext context,
+    Moment? myMoment,
+    Moment? partnerMoment,
+    AppUser currentUser,
+    AppUser partner,
+  ) async {
+    final entries = <({Moment moment, String nickname})>[
+      if (myMoment != null) (moment: myMoment, nickname: currentUser.nickname),
+      if (partnerMoment != null)
+        (moment: partnerMoment, nickname: partner.nickname),
+    ];
+    if (entries.isEmpty) return;
+
+    Moment? selected;
+    if (entries.length == 1) {
+      selected = entries.single.moment;
+    } else {
+      selected = await showModalBottomSheet<Moment>(
+        context: context,
+        showDragHandle: true,
+        builder: (sheetContext) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const ListTile(
+                  title: Text('保留的旧双联日记'),
+                  subtitle: Text('共记启用前的两份记录仍独立保留'),
+                ),
+                for (final entry in entries)
+                  ListTile(
+                    leading: Icon(
+                      Icons.menu_book_outlined,
+                      color: AppTheme.sharedAuthorColor(entry.moment.authorId),
+                    ),
+                    title: Text(entry.nickname),
+                    subtitle: Text(
+                      entry.moment.feeling.isEmpty
+                          ? '仅照片记录'
+                          : entry.moment.feeling,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    onTap: () => Navigator.pop(sheetContext, entry.moment),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+    if (selected != null && context.mounted) _openReading(context, selected);
+  }
+
+  void _openSharedReading(BuildContext context, SharedMoment moment) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => SharedDiaryReadingScreen(initialMoment: moment),
+      ),
+    );
+  }
+
+  Future<void> _openSharedEditor(
+    WidgetRef ref,
+    BuildContext context,
+    SharedMoment moment,
+  ) async {
+    final saved = await Navigator.of(context).push<SharedMoment>(
+      MaterialPageRoute(
+        builder: (_) => SharedDiaryEditorScreen(initialMoment: moment),
+      ),
+    );
+    if (saved != null && context.mounted) _refresh(ref);
+  }
+
   bool _canChangeDay(DateTime selected, int delta) {
     final next = DateTime(selected.year, selected.month, selected.day + delta);
     return !next.isBefore(CalendarPicker.firstDate) &&
@@ -331,19 +490,23 @@ class FeedScreen extends ConsumerWidget {
   /// 打开新建编辑页
   Future<void> _openCreateEditor(WidgetRef ref, BuildContext context) async {
     final date = ref.read(selectedDateProvider);
-    final result = await Navigator.push<bool>(
+    final result = await Navigator.push<EditMomentResult>(
       context,
       MaterialPageRoute(builder: (_) => EditMomentScreen(date: date)),
     );
-    if (result == true) {
+    if (result == EditMomentResult.standardSaved) {
+      _refresh(ref, legacySaved: true);
+    } else if (result == EditMomentResult.sharedActivated) {
       _refresh(ref);
     }
   }
 
   /// 刷新数据（清除 Provider 缓存强制重读 + 更新日历圆点 + 同步信箱）
-  void _refresh(WidgetRef ref) {
+  void _refresh(WidgetRef ref, {bool legacySaved = false}) {
     ref.invalidate(dayMomentsProvider);
-    updateMarkedDateCache(ref);
+    final dateStr = DateHelper.toDateStr(ref.read(selectedDateProvider));
+    ref.invalidate(sharedMomentProvider(dateStr));
+    if (legacySaved) updateMarkedDateCache(ref);
     syncCalendarMarkedDatesFromNetwork(ref);
     ref.read(notificationListProvider.notifier).sync();
   }

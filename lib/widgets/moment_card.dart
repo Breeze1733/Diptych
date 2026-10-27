@@ -256,7 +256,7 @@ class _MomentCardState extends State<MomentCard> {
           ),
           if (moment.imageUrls.isNotEmpty) ...[
             const SizedBox(height: 16),
-            _buildCoverBox(context),
+            _buildReadingPhotoGrid(context),
           ],
           if (moment.feeling.isNotEmpty) ...[
             const SizedBox(height: 16),
@@ -594,6 +594,52 @@ class _MomentCardState extends State<MomentCard> {
           ),
         ),
       ),
+    );
+  }
+
+  /// 详情页沿用编辑器的三列照片节奏，但让外层阅读页负责整页滚动。
+  ///
+  /// `shrinkWrap` 会把所有行完整展开，禁用自身滚动则避免照片区与正文争抢
+  /// 手势；超过六张时自然增加第三行及后续行。
+  Widget _buildReadingPhotoGrid(BuildContext context) {
+    final urls = moment.imageUrls;
+    return GridView.builder(
+      key: const ValueKey('diary-reading-photo-grid'),
+      shrinkWrap: true,
+      primary: false,
+      physics: const NeverScrollableScrollPhysics(),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 3,
+        mainAxisSpacing: 8,
+        crossAxisSpacing: 8,
+      ),
+      itemCount: urls.length,
+      itemBuilder: (context, index) {
+        final url = urls[index];
+        return GestureDetector(
+          key: ValueKey('diary-reading-photo-$index'),
+          behavior: HitTestBehavior.opaque,
+          onTap: () =>
+              showFullScreenPreview(context, urls: urls, initialIndex: index),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                PrivateNetworkImage(
+                  imageUrl: url,
+                  usePreview: true,
+                  fit: BoxFit.cover,
+                  placeholder: (_, imageUrl) =>
+                      ImageDownloadPlaceholder(url: imageUrl),
+                  errorWidget: (_, _, _) => _imagePlaceholder(),
+                ),
+                _MomentCoverLiveBadge(url: url),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 

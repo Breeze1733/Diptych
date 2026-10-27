@@ -16,6 +16,7 @@ class AppNotification {
   final String title;
   final String content;
   final String? dateStr; // 日记日期（YYYY-MM-DD，用于跳转）
+  final String? sharedMomentId; // 非空表示该 moment 通知来自共记文档
   final String? topicId; // 话题 ID（用于跳转）
   final String? topicTitle; // 话题标题
   final DateTime createdAt;
@@ -28,6 +29,7 @@ class AppNotification {
     required this.title,
     required this.content,
     this.dateStr,
+    this.sharedMomentId,
     this.topicId,
     this.topicTitle,
     required this.createdAt,
@@ -57,6 +59,7 @@ class AppNotification {
       title: json['title'] as String? ?? '',
       content: json['content'] as String? ?? '',
       dateStr: json['date_str'] as String?,
+      sharedMomentId: json['shared_moment_id']?.toString(),
       topicId: json['topic_id'] as String?,
       topicTitle: json['topic_title'] as String?,
       createdAt: DateHelper.tryParseDateTime(json['created_at'] as String? ?? ''),
@@ -86,6 +89,7 @@ class AppNotification {
       'title': title,
       'content': content,
       if (dateStr != null) 'date_str': dateStr,
+      if (sharedMomentId != null) 'shared_moment_id': sharedMomentId,
       if (topicId != null) 'topic_id': topicId,
       if (topicTitle != null) 'topic_title': topicTitle,
       'created_at': DateHelper.toIsoString(createdAt),
@@ -100,6 +104,7 @@ class AppNotification {
     String? title,
     String? content,
     String? dateStr,
+    String? sharedMomentId,
     String? topicId,
     String? topicTitle,
     DateTime? createdAt,
@@ -112,6 +117,7 @@ class AppNotification {
       title: title ?? this.title,
       content: content ?? this.content,
       dateStr: dateStr ?? this.dateStr,
+      sharedMomentId: sharedMomentId ?? this.sharedMomentId,
       topicId: topicId ?? this.topicId,
       topicTitle: topicTitle ?? this.topicTitle,
       createdAt: createdAt ?? this.createdAt,

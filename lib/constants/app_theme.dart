@@ -16,6 +16,12 @@ class AppTheme {
   static const Color dangerColor = Color(0xFFB6534E);
   static const Color selfColor = Color(0xFF526E87);
   static const Color partnerColor = accentColor;
+  static const Color sharedUserAColor = Color(0xFF4F7FAE);
+  static const Color sharedUserBColor = Color(0xFFD47C9B);
+
+  /// 共记模式始终按账号固定配色，确保双方设备看到的归属一致。
+  static Color sharedAuthorColor(String authorId) =>
+      authorId == 'B' ? sharedUserBColor : sharedUserAColor;
 
   /// 马卡龙色阶：雾紫、粉蓝、中性灰、薄荷，7–10 分逐级偏暖粉。
   static const _moodColors = [

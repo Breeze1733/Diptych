@@ -13,7 +13,7 @@
 [![Flutter](https://img.shields.io/badge/Flutter-3.47%2B-02569B?style=flat-square&logo=flutter&logoColor=white)]()
 [![Dart](https://img.shields.io/badge/Dart-3.13%2B-0175C2?style=flat-square&logo=dart&logoColor=white)]()
 [![Platform](https://img.shields.io/badge/Platform-Android-3DDC84?style=flat-square&logo=android&logoColor=white)]()
-[![Version](https://img.shields.io/badge/Version-1.2.4%2B41-4B8BBE?style=flat-square)]()
+[![Version](https://img.shields.io/badge/Version-1.2.6%2B43-4B8BBE?style=flat-square)]()
 [![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)]()
 [![Repo Size](https://img.shields.io/github/repo-size/Breeze1733/Diptych?style=flat-square&label=repo%20size)]()
 [![Last Commit](https://img.shields.io/github/last-commit/Breeze1733/Diptych?style=flat-square&label=last%20commit)]()
@@ -71,6 +71,7 @@
 
 - 🔐 **密钥登录** — 双方各持独立口令，由自托管后端验证并签发会话；私有 API 与照片请求携带会话凭据，口令不再编译进 APK
 - 🖼️ **每日双联** — 每人每天一条日记，支持多图照片、可选心情分（1–10）与文字感受；默认查看日期以本机时间早上 6:00 为界，凌晨 0:00–5:59 算前一天
+- ✍️ **共记模式** — 在具体日期的编辑页可切换为双方共同书写的单页日记，并选择带入当前内容与当天旧双联；A/B 的文字和照片使用固定蓝/粉标识，在对方文字中插入时会无损拆分原段。共记文档与普通日记统一存于 `moments.json`，只有共记记录携带 `type: "shared"`；独立 revision 与乐观锁保证同时提交不会静默覆盖，原双联记录与旧版接口始终保留
 - ↔️ **左右分屏** — 主界面同时呈现两人当日内容，随时回看对方的记录
 - 💬 **互动评论** — 在对方（或自己）的日记下留言、回复，支持多级嵌套；按单条追加，重试复用评论 ID。发布页等待服务端确认和读回新评论后再关闭，保留阅读位置并展开定位新留言；详情右上角可单独刷新正文与评论
 - 📸 **实况照片** — 识别 Android 多厂商 JPEG 中内嵌的 MP4，支持提取、播放与保存时的厂商元数据适配；定制相册多选器提供单张实况开关，开启时上传完整动态图，关闭时提取静态图。当前仓库提供 Android 平台工程
@@ -125,6 +126,7 @@ lib/
 │   ├── calendar_marked_dates.dart # 日历双人记录状态模型（单人/双人同记）
 │   ├── network_diagnostics.dart # 网络检测结果、失败类型及响应耗时分档
 │   ├── moment.dart            # 日记与评论模型（图片 URL、心情、正文、回复关系）
+│   ├── shared_moment.dart     # 共记文档与带作者归属的文字/图片块、revision
 │   └── topic.dart             # 话题 / 帖子模型
 ├── providers/
 │   ├── auth_provider.dart     # 认证状态、用户数据加载
@@ -137,7 +139,9 @@ lib/
 │   ├── home_screen.dart       # 底部导航（日记 / 话题 / 我的，保留已访问页面状态）
 │   ├── feed_screen.dart       # 双联日记（日期切换、展开阅读、顶栏搜索 / 信箱 / 刷新）
 │   ├── diary_search_screen.dart # 日记/评论搜索（高亮摘要、游标分页、日期跳转）
-│   ├── edit_moment_screen.dart # 日记编辑（串行预上传、实况开关、草稿恢复、缓存转移）
+│   ├── shared_diary_editor_screen.dart # 共记块式编辑、原文拆分插入与冲突二次合并
+│   ├── shared_diary_reading_screen.dart # 共记单页整页阅读与刷新
+│   ├── edit_moment_screen.dart # 日记编辑（草稿/预上传、按日转共记并安全带入内容）
 │   ├── notification_screen.dart # 信箱与通知列表（未读标记、跳转上下文、一键已读）
 │   ├── profile_screen.dart    # 个人中心（设置 / 网络检测 / 更新 / 缓存清理）
 │   ├── topics_screen.dart     # 话题列表
@@ -180,6 +184,8 @@ lib/
     ├── image_preview_chrome.dart # 可隐藏的图片操作层与磨砂玻璃面板
     ├── live_photo_badge.dart  # 实况照片动态徽标与开关角标
     ├── moment_card.dart       # 单条日记卡片（含实况角标与评论树）
+    ├── shared_day_view.dart   # 共记模式的单联日视图
+    ├── shared_diary_document.dart # A/B 固定配色的共记文字与三列图片渲染
     ├── network_diagnostics_card.dart # 手动网络检测、响应分档、详情及冷却状态
     ├── photo_grid_picker.dart # 九宫格图片选择器（串行上传状态、实况角标切换与拖拽排序）
     └── wallpaper_layer.dart   # 全局/局部壁纸背景渲染层
@@ -204,6 +210,7 @@ lib/
 | 登录 | `POST /auth/login` |
 | 用户 | `POST /users/ensure`、`GET /users/:uid`、`PUT /users/:uid` |
 | 日记 | `GET /moments?date_str=…&author_ids=A,B`、`POST /moments`、`PUT /moments/:id` |
+| 共记日记 | `GET/POST /shared-moments`、`GET/PUT /shared-moments/:id`、`GET /shared-moments/dates`、`GET /shared-moments/search` |
 | 日记详情与评论 | `GET /moments/:id`、`POST /moments/:id/comments`、`DELETE /moments/:id/comments/:commentId` |
 | 搜索与日历 | `GET /moments/search`、`GET /moments/calendar/dates` |
 | 图片 | `POST /upload/chunk`、`POST /upload/merge`、`POST /upload/abort`、`POST /upload/delete` |
