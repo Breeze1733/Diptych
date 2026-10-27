@@ -424,9 +424,9 @@ class _SharedDiaryEditorScreenState
                 _baseMoment.dateStr.replaceAll('-', '.'),
                 style: const TextStyle(fontSize: 16),
               ),
-              Text(
-                '共记 · 基于版本 ${_baseMoment.revision}',
-                style: const TextStyle(
+              const Text(
+                '共记',
+                style: TextStyle(
                   fontSize: 11,
                   color: AppTheme.textSecondary,
                   fontWeight: FontWeight.w400,
@@ -460,7 +460,7 @@ class _SharedDiaryEditorScreenState
               const _SectionTitle(
                 icon: Icons.photo_library_outlined,
                 title: '共同照片',
-                subtitle: '蓝框属于 A，粉框属于 B；长按自己的照片可拖动排序',
+                subtitle: '长按自己的照片可拖动排序',
               ),
               const SizedBox(height: 10),
               LayoutBuilder(
@@ -497,8 +497,7 @@ class _SharedDiaryEditorScreenState
                           AppTheme.sharedAuthorColor(
                             _photoMetas[index].authorId,
                           ),
-                      badgeLabelProvider: (index) =>
-                          _photoMetas[index].authorId,
+                      showCoverBadge: false,
                       canRemove: (index) =>
                           _photoMetas[index].authorId == _userId,
                     ),
@@ -542,8 +541,6 @@ class _SharedDiaryEditorScreenState
                   ),
                 ),
               ),
-              const SizedBox(height: 10),
-              const _AuthorColorLegend(),
             ],
           ),
         ),
@@ -610,7 +607,7 @@ class SharedDiaryConflictScreen extends StatelessWidget {
           const SizedBox(height: 12),
           ExpansionTile(
             initiallyExpanded: true,
-            title: Text('服务器最新版 · v${latest.revision}'),
+            title: const Text('服务器最新版'),
             childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
             children: [SharedDiaryDocument(moment: latest, compact: true)],
           ),
@@ -708,34 +705,6 @@ class _SectionTitle extends StatelessWidget {
         ),
       ],
     );
-  }
-}
-
-class _AuthorColorLegend extends StatelessWidget {
-  const _AuthorColorLegend();
-
-  @override
-  Widget build(BuildContext context) {
-    Widget item(String authorId) => Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 9,
-          height: 9,
-          decoration: BoxDecoration(
-            color: AppTheme.sharedAuthorColor(authorId),
-            shape: BoxShape.circle,
-          ),
-        ),
-        const SizedBox(width: 5),
-        Text(
-          '$authorId 的文字',
-          style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-        ),
-      ],
-    );
-
-    return Row(children: [item('A'), const SizedBox(width: 18), item('B')]);
   }
 }
 

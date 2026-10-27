@@ -51,6 +51,7 @@ class PhotoGridPicker extends StatelessWidget {
   final bool Function(int index)? canRemove;
   final bool Function(int index)? canReorder;
   final bool reorderEnabled;
+  final bool showCoverBadge;
 
   /// When bounded, show this many rows and scroll additional photos internally.
   final int? visibleRows;
@@ -70,6 +71,7 @@ class PhotoGridPicker extends StatelessWidget {
     this.canRemove,
     this.canReorder,
     this.reorderEnabled = true,
+    this.showCoverBadge = true,
     this.visibleRows,
   });
 
@@ -424,7 +426,7 @@ class PhotoGridPicker extends StatelessWidget {
                 ),
               ),
             // 封面标记（第一张）
-            if (badgeLabel != null || index == 0)
+            if (badgeLabel != null || (showCoverBadge && index == 0))
               Positioned(
                 left: 0,
                 top: 0,

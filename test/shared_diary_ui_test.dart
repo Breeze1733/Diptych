@@ -12,7 +12,10 @@ import 'package:diptych/providers/day_moment_provider.dart';
 import 'package:diptych/providers/wallpaper_provider.dart';
 import 'package:diptych/screens/feed_screen.dart';
 import 'package:diptych/screens/shared_diary_editor_screen.dart';
+import 'package:diptych/screens/shared_diary_reading_screen.dart';
 import 'package:diptych/services/api_service.dart';
+import 'package:diptych/widgets/avatar_widget.dart';
+import 'package:diptych/widgets/photo_grid_picker.dart';
 import 'package:diptych/widgets/shared_day_view.dart';
 import 'package:diptych/widgets/shared_diary_document.dart';
 import 'package:flutter/material.dart';
@@ -77,6 +80,14 @@ BoxDecoration _decoration(WidgetTester tester, Finder finder) =>
     tester.widget<Container>(finder).decoration! as BoxDecoration;
 
 Border _border(BoxDecoration decoration) => decoration.border! as Border;
+
+class _ReadingApiService extends ApiService {
+  final SharedMoment moment;
+  _ReadingApiService(this.moment);
+
+  @override
+  Future<SharedMoment> getSharedMomentById(String id) async => moment;
+}
 
 class _ImageConflictApiService extends ApiService {
   final SharedMoment latest;
@@ -258,6 +269,14 @@ void main() {
         _border(_decoration(tester, imageBContainer)).top.color,
         AppTheme.sharedUserBColor,
       );
+      expect(
+        find.descendant(of: imageA, matching: find.text('A')),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: imageB, matching: find.text('B')),
+        findsNothing,
+      );
 
       final grid = tester.widget<GridView>(
         find.descendant(
@@ -352,6 +371,32 @@ void main() {
         description: 'only the signed-in author photo is draggable',
       ),
       findsOneWidget,
+    );
+    expect(find.text('封面'), findsNothing);
+    expect(find.text('A'), findsNothing);
+    expect(find.text('B'), findsNothing);
+    expect(find.textContaining('版本'), findsNothing);
+    expect(find.text('A 的文字'), findsNothing);
+    expect(find.text('B 的文字'), findsNothing);
+    final photoA = find.byKey(const ValueKey('photo-slot-0'));
+    final photoB = find.byKey(const ValueKey('photo-slot-1'));
+    expect(
+      _border(
+        _decoration(
+          tester,
+          find.descendant(of: photoA, matching: find.byType(Container)).first,
+        ),
+      ).top.color,
+      AppTheme.sharedUserAColor,
+    );
+    expect(
+      _border(
+        _decoration(
+          tester,
+          find.descendant(of: photoB, matching: find.byType(Container)).first,
+        ),
+      ).top.color,
+      AppTheme.sharedUserBColor,
     );
     await tester.dragUntilVisible(
       find.byKey(const ValueKey('shared-continuous-text-editor')),
@@ -751,8 +796,6 @@ void main() {
             children: [
               SharedDayView(
                 moment: _sharedMoment(blocks: const []),
-                userAName: '名字很长的用户 Alice',
-                userBName: '名字同样很长的用户 Bob',
                 cardOpacity: 1,
                 onOpenReading: () {},
                 onEdit: () {},
@@ -778,6 +821,25 @@ void main() {
 
       expect(find.byKey(const ValueKey('shared-diary-page')), findsOneWidget);
       expect(find.byKey(const ValueKey('diary-split-page')), findsNothing);
+      final card = find.byKey(const ValueKey('shared-diary-page'));
+      expect(
+        find.descendant(of: card, matching: find.byType(AvatarWidget)),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: card, matching: find.text('Alice')),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: card, matching: find.text('Bob')),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: card, matching: find.textContaining('v3')),
+        findsNothing,
+      );
+      expect(find.descendant(of: card, matching: find.text('A')), findsNothing);
+      expect(find.descendant(of: card, matching: find.text('B')), findsNothing);
       expect(
         find.byKey(const ValueKey('shared-continuous-text')),
         findsOneWidget,
@@ -786,6 +848,72 @@ void main() {
       expect(find.text('查看保留的旧双联'), findsOneWidget);
     },
   );
+
+  testWidgets(
+    'reading and conflict pages omit identities and version numbers',
+    (tester) async {
+      final moment = _sharedMoment();
+      final container = ProviderContainer(
+        overrides: [
+          apiServiceProvider.overrideWithValue(_ReadingApiService(moment)),
+        ],
+      );
+      addTearDown(container.dispose);
+      container.read(currentUserProvider.notifier).setUser(_userA);
+      container.read(partnerUserProvider.notifier).setUser(_userB);
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            home: SharedDiaryReadingScreen(initialMoment: moment),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+      expect(find.byType(AvatarWidget), findsNothing);
+      expect(find.text('Alice'), findsNothing);
+      expect(find.text('Bob'), findsNothing);
+      expect(find.textContaining('版本 3'), findsNothing);
+      expect(find.text('A'), findsNothing);
+      expect(find.text('B'), findsNothing);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: SharedDiaryConflictScreen(
+            base: moment,
+            latest: moment,
+            localDraft: moment,
+            currentUserId: 'A',
+            splitForeignText: const [],
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.textContaining('v3'), findsNothing);
+      expect(find.text('A'), findsNothing);
+      expect(find.text('B'), findsNothing);
+    },
+  );
+
+  testWidgets('ordinary photo picker still marks its first photo as cover', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: PhotoGridPicker(
+            entries: const [PhotoEntry.url('https://images.invalid/cover.jpg')],
+            onAdded: (_) {},
+            onRemoved: (_) {},
+            onReordered: (_, _) {},
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.text('封面'), findsOneWidget);
+  });
 
   testWidgets('Feed does not treat an unknown shared state as legacy mode', (
     tester,
