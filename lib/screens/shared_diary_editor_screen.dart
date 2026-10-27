@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -192,13 +194,7 @@ class _SharedDiaryEditorScreenState
         if (url != null) resolved.add(block.copyWith(imageUrl: url));
         continue;
       }
-      if (block.text.trim().isEmpty) {
-        final splitInsertion = _splitForeignText.any(
-          (item) => item['inserted_block_id'] == block.id,
-        );
-        if (splitInsertion) {
-          throw StateError('插入到对方段落中的文字不能为空');
-        }
+      if (block.text.isEmpty) {
         continue;
       }
       resolved.add(block);
@@ -263,6 +259,9 @@ class _SharedDiaryEditorScreenState
             return;
           } on SharedMomentConflictException catch (next) {
             latest = next.latest;
+          } catch (error) {
+            if (mounted) _showSaveError(error);
+            return;
           }
         }
       }
@@ -282,12 +281,7 @@ class _SharedDiaryEditorScreenState
       if (saved != null && mounted) await _acceptSaved(saved);
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('共记保存失败：${_friendlyError(error)}'),
-          backgroundColor: AppTheme.dangerColor,
-        ),
-      );
+      _showSaveError(error);
     } finally {
       _uploads.setPublishing(false);
       if (mounted) setState(() => _saving = false);
@@ -389,7 +383,20 @@ class _SharedDiaryEditorScreenState
     if (mounted) Navigator.pop(context);
   }
 
+  void _showSaveError(Object error) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('共记保存失败：${_friendlyError(error)}'),
+        backgroundColor: AppTheme.dangerColor,
+      ),
+    );
+  }
+
   String _friendlyError(Object error) {
+    if (error is HandshakeException ||
+        error.toString().contains('HandshakeException')) {
+      return '安全连接未建立，当前编辑内容仍在。请检查手机时间或切换网络后重试';
+    }
     final value = error.toString();
     return value.startsWith('Exception: ') ? value.substring(11) : value;
   }
@@ -896,6 +903,15 @@ _RebaseResult _rebaseSharedDraft({
     final sourceId = split['source_block_id']?.toString() ?? '';
     final insertedId = split['inserted_block_id']?.toString() ?? '';
     final rightId = split['right_block_id']?.toString();
+    final fragmentIds = split['fragments'] is List
+        ? (split['fragments'] as List).map((id) => id.toString()).toList()
+        : <String>[
+            if ((split['left_text']?.toString() ?? '').isNotEmpty) sourceId,
+            if (insertedId.isNotEmpty) insertedId,
+            if (rightId != null && rightId.isNotEmpty) rightId,
+          ];
+    // 即使无法重放，也不能把同一组插入误当成普通新增块再次合并。
+    handled.addAll([sourceId, ...fragmentIds]);
     final baseSource = baseById[sourceId];
     final latestIndex = result.indexWhere((block) => block.id == sourceId);
     if (baseSource == null ||
@@ -904,19 +920,17 @@ _RebaseResult _rebaseSharedDraft({
       conflicts.add('对方修改了你准备插入的原段，请在最新版中重新选择插入位置。');
       continue;
     }
-    final rightBlock = rightId == null ? null : localById[rightId];
-    final replacement = <SharedMomentBlock>[
-      ?localById[sourceId],
-      ?localById[insertedId],
-      ?rightBlock,
-    ];
-    if (!replacement.any((block) => block.id == insertedId)) {
+    final replacement = fragmentIds.map((id) => localById[id]).toList();
+    if (fragmentIds.isEmpty || replacement.any((block) => block == null)) {
       conflicts.add('一处插入文字已经不存在，请在最新版中重新填写。');
       continue;
     }
-    result.replaceRange(latestIndex, latestIndex + 1, replacement);
+    result.replaceRange(
+      latestIndex,
+      latestIndex + 1,
+      replacement.cast<SharedMomentBlock>(),
+    );
     acceptedSplits.add(Map<String, dynamic>.from(split));
-    handled.addAll([sourceId, insertedId, ?rightId]);
   }
 
   for (final original in base.blocks) {

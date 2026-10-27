@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:diptych/constants/app_theme.dart';
 import 'package:diptych/controllers/shared_document_text_controller.dart';
@@ -97,6 +98,92 @@ class _ImageConflictApiService extends ApiService {
     lastBlocks = List.of(blocks);
     return latest.copyWith(revision: latest.revision + 1, blocks: lastBlocks);
   }
+}
+
+class _RecordingSaveApiService extends ApiService {
+  final SharedMoment? conflictLatest;
+  final bool failHandshake;
+  final requests =
+      <
+        ({
+          SharedMoment moment,
+          List<SharedMomentBlock> blocks,
+          List<Map<String, dynamic>> splits,
+        })
+      >[];
+
+  _RecordingSaveApiService({this.conflictLatest, this.failHandshake = false});
+
+  @override
+  Future<SharedMoment> updateSharedMoment({
+    required SharedMoment moment,
+    required List<SharedMomentBlock> blocks,
+    List<Map<String, dynamic>> splitForeignText = const [],
+  }) async {
+    requests.add((
+      moment: moment,
+      blocks: List.of(blocks),
+      splits: splitForeignText
+          .map(
+            (split) => {
+              ...split,
+              if (split['fragments'] is List)
+                'fragments': List.of(split['fragments'] as List),
+            },
+          )
+          .toList(),
+    ));
+    if (failHandshake) throw const HandshakeException('certificate failure');
+    if (requests.length == 1 && conflictLatest != null) {
+      throw SharedMomentConflictException(latest: conflictLatest!);
+    }
+    return moment.copyWith(revision: moment.revision + 1, blocks: blocks);
+  }
+}
+
+void _mockKeepAlive() {
+  const foreground = MethodChannel(
+    'com.splitmoments.split_moments/foreground_service',
+  );
+  const wakeLock = MethodChannel('com.splitmoments.split_moments/wakelock');
+  final messenger =
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+  messenger.setMockMethodCallHandler(foreground, (_) async => null);
+  messenger.setMockMethodCallHandler(wakeLock, (_) async => null);
+  addTearDown(() {
+    messenger.setMockMethodCallHandler(foreground, null);
+    messenger.setMockMethodCallHandler(wakeLock, null);
+  });
+}
+
+Future<SharedDocumentTextController> _showEditorText(
+  WidgetTester tester,
+) async {
+  final editor = find.byKey(const ValueKey('shared-continuous-text-editor'));
+  await tester.dragUntilVisible(
+    editor,
+    find.byType(ListView).last,
+    const Offset(0, -300),
+  );
+  return tester
+          .widget<TextField>(
+            find.descendant(of: editor, matching: find.byType(TextField)),
+          )
+          .controller!
+      as SharedDocumentTextController;
+}
+
+void _insertTwice(SharedDocumentTextController controller) {
+  controller.selection = const TextSelection.collapsed(offset: 1);
+  controller.value = const TextEditingValue(
+    text: 'aXbcd',
+    selection: TextSelection.collapsed(offset: 2),
+  );
+  controller.selection = const TextSelection.collapsed(offset: 4);
+  controller.value = const TextEditingValue(
+    text: 'aXbcYd',
+    selection: TextSelection.collapsed(offset: 5),
+  );
 }
 
 ProviderContainer _feedContainer({
@@ -424,6 +511,167 @@ void main() {
       ['base-a', 'local-a', 'latest-b'],
     );
     expect(find.text('处理同时修改'), findsNothing);
+  });
+
+  testWidgets(
+    'revision conflict replays every insertion when source is unchanged',
+    (tester) async {
+      _mockKeepAlive();
+      final source = SharedMomentBlock.text(
+        id: 'source',
+        authorId: 'B',
+        text: 'abcd',
+      );
+      final base = _sharedMoment(blocks: [source]);
+      final latest = base.copyWith(
+        revision: 4,
+        blocks: [
+          source,
+          SharedMomentBlock.text(id: 'other', authorId: 'B', text: '新内容'),
+        ],
+      );
+      final api = _RecordingSaveApiService(conflictLatest: latest);
+      final container = ProviderContainer(
+        overrides: [apiServiceProvider.overrideWithValue(api)],
+      );
+      addTearDown(container.dispose);
+      container.read(currentUserProvider.notifier).setUser(_userA);
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            home: SharedDiaryEditorScreen(initialMoment: base),
+          ),
+        ),
+      );
+      await tester.pump();
+      final controller = await _showEditorText(tester);
+      _insertTwice(controller);
+      await tester.pump();
+      await tester.tap(find.widgetWithText(FilledButton, '保存共记'));
+      await tester.pumpAndSettle();
+      expect(find.text('处理同时修改'), findsOneWidget);
+      await tester.ensureVisible(find.text('进入二次合并编辑'));
+      await tester.tap(find.text('进入二次合并编辑'));
+      await tester.pumpAndSettle();
+
+      final merged = await _showEditorText(tester);
+      expect(merged.text, 'aXbcYd新内容');
+      expect(merged.splitForeignText, hasLength(1));
+      final fragments = merged.splitForeignText.single['fragments'] as List;
+      expect(fragments, hasLength(5));
+      expect(fragments.first, 'source');
+      await tester.tap(find.widgetWithText(FilledButton, '保存共记'));
+      await tester.pumpAndSettle();
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      await tester.pump();
+      expect(api.requests, hasLength(2));
+      expect(api.requests.last.moment.revision, 4);
+      expect(api.requests.last.splits.single['fragments'], fragments);
+      expect(api.requests.last.blocks.map((block) => block.text), [
+        'a',
+        'X',
+        'bc',
+        'Y',
+        'd',
+        '新内容',
+      ]);
+    },
+  );
+
+  testWidgets('changed source keeps all insertions only in reference draft', (
+    tester,
+  ) async {
+    _mockKeepAlive();
+    final source = SharedMomentBlock.text(
+      id: 'source',
+      authorId: 'B',
+      text: 'abcd',
+    );
+    final base = _sharedMoment(blocks: [source]);
+    final latest = base.copyWith(
+      revision: 4,
+      blocks: [source.copyWith(text: '对方更新')],
+    );
+    final api = _RecordingSaveApiService(conflictLatest: latest);
+    final container = ProviderContainer(
+      overrides: [apiServiceProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+    container.read(currentUserProvider.notifier).setUser(_userA);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(home: SharedDiaryEditorScreen(initialMoment: base)),
+      ),
+    );
+    await tester.pump();
+    _insertTwice(await _showEditorText(tester));
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, '保存共记'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('对方修改了你准备插入的原段'), findsOneWidget);
+    await tester.ensureVisible(find.text('进入二次合并编辑'));
+    await tester.tap(find.text('进入二次合并编辑'));
+    await tester.pumpAndSettle();
+
+    final editor = tester.widget<SharedDiaryEditorScreen>(
+      find.byType(SharedDiaryEditorScreen).last,
+    );
+    expect(
+      editor.conflictReference!.blocks.map((block) => block.text).join(),
+      'aXbcYd',
+    );
+    final merged = await _showEditorText(tester);
+    expect(merged.text, '对方更新');
+    expect(merged.splitForeignText, isEmpty);
+    expect(merged.blocks.map((block) => block.id), ['source']);
+  });
+
+  testWidgets('handshake failure keeps the draft and gives a useful message', (
+    tester,
+  ) async {
+    _mockKeepAlive();
+    final source = SharedMomentBlock.text(
+      id: 'source',
+      authorId: 'B',
+      text: 'abcd',
+    );
+    final base = _sharedMoment(blocks: [source]);
+    final api = _RecordingSaveApiService(failHandshake: true);
+    final container = ProviderContainer(
+      overrides: [apiServiceProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+    container.read(currentUserProvider.notifier).setUser(_userA);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(home: SharedDiaryEditorScreen(initialMoment: base)),
+      ),
+    );
+    await tester.pump();
+    final controller = await _showEditorText(tester);
+    _insertTwice(controller);
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, '保存共记'));
+    await tester.pumpAndSettle();
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 20)),
+    );
+    await tester.pump();
+
+    expect(find.textContaining('安全连接未建立，当前编辑内容仍在'), findsOneWidget);
+    expect(controller.text, 'aXbcYd');
+    expect(controller.splitForeignText.single['fragments'], hasLength(5));
+    expect(
+      tester
+          .widget<FilledButton>(find.widgetWithText(FilledButton, '保存共记'))
+          .onPressed,
+      isNotNull,
+    );
   });
 
   testWidgets(
