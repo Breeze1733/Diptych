@@ -33,87 +33,104 @@ class SharedDayView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Expanded(
-      child: ColoredBox(
-        key: const ValueKey('shared-diary-page'),
-        color: AppTheme.surfaceColor.withValues(alpha: cardOpacity),
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
-              child: Row(
-                children: [
-                  _AuthorChip(
-                    authorId: 'A',
-                    name: userAName,
-                    avatarUrl: userAAvatarUrl,
-                  ),
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 10),
-                    child: Icon(
-                      Icons.auto_stories_outlined,
-                      size: 20,
-                      color: AppTheme.textSecondary,
-                    ),
-                  ),
-                  _AuthorChip(
-                    authorId: 'B',
-                    name: userBName,
-                    avatarUrl: userBAvatarUrl,
-                  ),
-                  const Spacer(),
-                  Text(
-                    '共记 · v${moment.revision}',
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: AppTheme.textSecondary,
-                    ),
-                  ),
-                ],
-              ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+        child: Container(
+          key: const ValueKey('shared-diary-page'),
+          clipBehavior: Clip.antiAlias,
+          decoration: BoxDecoration(
+            color: AppTheme.surfaceColor.withValues(
+              alpha: cardOpacity.clamp(.55, .88),
             ),
-            const Divider(height: 1),
-            Expanded(
-              child: SingleChildScrollView(
-                key: PageStorageKey('shared-overview-${moment.id}'),
-                padding: const EdgeInsets.all(16),
-                child: SharedDiaryDocument(moment: moment, compact: true),
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: Colors.white.withValues(alpha: .42)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: .08),
+                blurRadius: 18,
+                offset: const Offset(0, 7),
               ),
-            ),
-            if (onOpenLegacy != null)
-              SizedBox(
-                width: double.infinity,
-                child: TextButton.icon(
-                  onPressed: onOpenLegacy,
-                  icon: const Icon(Icons.history_rounded, size: 16),
-                  label: const Text('查看保留的旧双联'),
+            ],
+          ),
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+                child: Row(
+                  children: [
+                    _AuthorChip(
+                      authorId: 'A',
+                      name: userAName,
+                      avatarUrl: userAAvatarUrl,
+                    ),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 10),
+                      child: Icon(
+                        Icons.auto_stories_outlined,
+                        size: 20,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                    _AuthorChip(
+                      authorId: 'B',
+                      name: userBName,
+                      avatarUrl: userBAvatarUrl,
+                    ),
+                    const Spacer(),
+                    Text(
+                      '共记 · v${moment.revision}',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            Container(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
-              decoration: const BoxDecoration(
-                border: Border(top: BorderSide(color: AppTheme.dividerColor)),
+              const Divider(height: 1),
+              Expanded(
+                child: SingleChildScrollView(
+                  key: PageStorageKey('shared-overview-${moment.id}'),
+                  padding: const EdgeInsets.all(16),
+                  child: SharedDiaryDocument(moment: moment, compact: true),
+                ),
               ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: onOpenReading,
-                      icon: const Icon(Icons.open_in_full_rounded, size: 17),
-                      label: const Text('展开共记'),
-                    ),
+              if (onOpenLegacy != null)
+                SizedBox(
+                  width: double.infinity,
+                  child: TextButton.icon(
+                    onPressed: onOpenLegacy,
+                    icon: const Icon(Icons.history_rounded, size: 16),
+                    label: const Text('查看保留的旧双联'),
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: FilledButton.icon(
-                      onPressed: onEdit,
-                      icon: const Icon(Icons.edit_outlined, size: 17),
-                      label: Text(moment.blocks.isEmpty ? '开始共写' : '继续共写'),
+                ),
+              Container(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+                decoration: const BoxDecoration(
+                  border: Border(top: BorderSide(color: AppTheme.dividerColor)),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: onOpenReading,
+                        icon: const Icon(Icons.open_in_full_rounded, size: 17),
+                        label: const Text('展开共记'),
+                      ),
                     ),
-                  ),
-                ],
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: onEdit,
+                        icon: const Icon(Icons.edit_outlined, size: 17),
+                        label: Text(moment.blocks.isEmpty ? '开始共写' : '继续共写'),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

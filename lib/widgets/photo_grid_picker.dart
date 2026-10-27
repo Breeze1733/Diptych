@@ -49,6 +49,7 @@ class PhotoGridPicker extends StatelessWidget {
   final Color? Function(int index)? borderColorProvider;
   final String? Function(int index)? badgeLabelProvider;
   final bool Function(int index)? canRemove;
+  final bool Function(int index)? canReorder;
   final bool reorderEnabled;
 
   /// When bounded, show this many rows and scroll additional photos internally.
@@ -67,6 +68,7 @@ class PhotoGridPicker extends StatelessWidget {
     this.borderColorProvider,
     this.badgeLabelProvider,
     this.canRemove,
+    this.canReorder,
     this.reorderEnabled = true,
     this.visibleRows,
   });
@@ -271,7 +273,7 @@ class PhotoGridPicker extends StatelessWidget {
               ],
             ),
           );
-          if (!reorderEnabled) return child;
+          if (!reorderEnabled || canReorder?.call(index) == false) return child;
           return LongPressDraggable<int>(
             data: index,
             feedback: Material(

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../constants/app_theme.dart';
 import '../controllers/moment_upload_controller.dart';
+import '../controllers/shared_document_text_controller.dart';
 import '../models/shared_moment.dart';
 import '../providers/auth_provider.dart';
 import '../providers/day_moment_provider.dart';
@@ -39,7 +40,7 @@ class _SharedDiaryEditorScreenState
   late final List<SharedMomentBlock> _blocks;
   late final List<Map<String, dynamic>> _splitForeignText;
   late final MomentUploadController _uploads;
-  final Map<String, TextEditingController> _textControllers = {};
+  late final SharedDocumentTextController _textController;
   final List<PhotoEntry> _photos = [];
   final List<_SharedPhotoMeta> _photoMetas = [];
   bool _saving = false;
@@ -63,12 +64,15 @@ class _SharedDiaryEditorScreenState
     _splitForeignText = widget.initialSplitForeignText
         .map((item) => Map<String, dynamic>.from(item))
         .toList();
+    _textController = SharedDocumentTextController(
+      blocks: _blocks,
+      baseBlocks: _baseMoment.blocks,
+      splitForeignText: _splitForeignText,
+      currentUserId: _userId,
+      onEditRejected: _showProtectedEditMessage,
+    )..addListener(_onTextChanged);
     for (final block in _blocks) {
-      if (block.type == SharedMomentBlockType.text) {
-        if (block.authorId == _userId) {
-          _textControllers[block.id] = TextEditingController(text: block.text);
-        }
-      } else {
+      if (block.type == SharedMomentBlockType.image) {
         _photos.add(PhotoEntry.url(block.imageUrl));
         _photoMetas.add(
           _SharedPhotoMeta(blockId: block.id, authorId: block.authorId),
@@ -92,117 +96,27 @@ class _SharedDiaryEditorScreenState
     if (mounted) setState(() {});
   }
 
+  void _onTextChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _showProtectedEditMessage(String message) {
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
   @override
   void dispose() {
-    for (final controller in _textControllers.values) {
-      controller.dispose();
-    }
+    _textController
+      ..removeListener(_onTextChanged)
+      ..dispose();
     _uploads
       ..removeListener(_onUploadsChanged)
       ..dispose();
     super.dispose();
-  }
-
-  void _insertOwnText(int blockIndex) {
-    if (_isPendingSplitBoundary(blockIndex)) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('请先保存当前拆分，再在这两段之间继续添加')));
-      return;
-    }
-    final block = SharedMomentBlock.text(authorId: _userId, text: '');
-    setState(() {
-      _blocks.insert(blockIndex.clamp(0, _blocks.length), block);
-      _textControllers[block.id] = TextEditingController();
-    });
-  }
-
-  bool _isSplitInsertion(String blockId) =>
-      _splitForeignText.any((item) => item['inserted_block_id'] == blockId);
-
-  /// 后端要求一次尚未保存的“左段 / 我的插入 / 右段”原子且连续。
-  /// 通用插入按钮不能出现在这个序列内部，否则会产生永远无法提交的草稿。
-  bool _isPendingSplitBoundary(int insertionIndex) {
-    if (insertionIndex <= 0 || insertionIndex >= _blocks.length) return false;
-    final beforeId = _blocks[insertionIndex - 1].id;
-    final afterId = _blocks[insertionIndex].id;
-    for (final split in _splitForeignText) {
-      final sequence = <String>[
-        if ((split['left_text']?.toString() ?? '').isNotEmpty)
-          split['source_block_id']?.toString() ?? '',
-        split['inserted_block_id']?.toString() ?? '',
-        if ((split['right_text']?.toString() ?? '').isNotEmpty)
-          split['right_block_id']?.toString() ?? '',
-      ].where((id) => id.isNotEmpty).toList(growable: false);
-      for (var index = 1; index < sequence.length; index++) {
-        if (sequence[index - 1] == beforeId && sequence[index] == afterId) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }
-
-  void _deleteOwnText(SharedMomentBlock block) {
-    if (_isSplitInsertion(block.id)) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('拆分插入的段落请先保存；若要撤销，可退出且不保存')));
-      return;
-    }
-    setState(() {
-      _blocks.removeWhere((item) => item.id == block.id);
-      _textControllers.remove(block.id)?.dispose();
-    });
-  }
-
-  Future<void> _insertInsideForeignText(SharedMomentBlock block) async {
-    final alreadySplit = _splitForeignText.any(
-      (item) =>
-          item['source_block_id'] == block.id ||
-          item['right_block_id'] == block.id,
-    );
-    final belongsToBase = _baseMoment.blocks.any((item) => item.id == block.id);
-    if (alreadySplit || !belongsToBase) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('同一原段一次保存只能拆分一次，请先保存后再继续插入')),
-      );
-      return;
-    }
-    final insertion = await showDialog<_SplitInsertion>(
-      context: context,
-      builder: (_) => _SplitTextDialog(block: block),
-    );
-    if (insertion == null || !mounted) return;
-    final index = _blocks.indexWhere((item) => item.id == block.id);
-    if (index < 0) return;
-    final offset = insertion.offset.clamp(0, block.text.length);
-    final left = block.text.substring(0, offset);
-    final right = block.text.substring(offset);
-    final inserted = SharedMomentBlock.text(
-      authorId: _userId,
-      text: insertion.text,
-    );
-    final rightBlock = right.isEmpty
-        ? null
-        : SharedMomentBlock.text(authorId: block.authorId, text: right);
-    final replacement = <SharedMomentBlock>[
-      if (left.isNotEmpty) block.copyWith(text: left),
-      inserted,
-      ?rightBlock,
-    ];
-    setState(() {
-      _blocks.replaceRange(index, index + 1, replacement);
-      _textControllers[inserted.id] = TextEditingController(
-        text: insertion.text,
-      );
-      _splitForeignText.add({
-        'source_block_id': block.id,
-        'left_text': left,
-        'inserted_block_id': inserted.id,
-        'right_block_id': rightBlock?.id,
-        'right_text': right,
-      });
-    });
   }
 
   void _addPhotos(List<PhotoEntry> entries) {
@@ -233,6 +147,26 @@ class _SharedDiaryEditorScreenState
     });
   }
 
+  void _reorderPhoto(int oldIndex, int newIndex) {
+    if (oldIndex < 0 ||
+        oldIndex >= _photos.length ||
+        newIndex < 0 ||
+        newIndex >= _photos.length ||
+        oldIndex == newIndex) {
+      return;
+    }
+    if (_photoMetas[oldIndex].authorId != _userId) {
+      _showProtectedEditMessage('只能拖动自己加入的照片；对方照片的位置会作为排序锚点保留');
+      return;
+    }
+    setState(() {
+      final photo = _photos.removeAt(oldIndex);
+      final meta = _photoMetas.removeAt(oldIndex);
+      _photos.insert(newIndex, photo);
+      _photoMetas.insert(newIndex, meta);
+    });
+  }
+
   void _retryPhoto(int index) {
     if (index >= 0 && index < _photos.length) {
       _uploads.enqueue([_photos[index]]);
@@ -251,35 +185,38 @@ class _SharedDiaryEditorScreenState
       imageUrlsById[_photoMetas[index].blockId] = url;
     }
 
-    final result = <SharedMomentBlock>[];
+    final resolved = <SharedMomentBlock>[];
     for (final block in _blocks) {
       if (block.type == SharedMomentBlockType.image) {
         final url = imageUrlsById[block.id];
-        if (url != null) result.add(block.copyWith(imageUrl: url));
+        if (url != null) resolved.add(block.copyWith(imageUrl: url));
         continue;
       }
-      if (block.authorId != _userId) {
-        result.add(block);
-        continue;
-      }
-      final text = (_textControllers[block.id]?.text ?? block.text).trim();
-      if (text.isEmpty) {
-        if (_isSplitInsertion(block.id)) {
+      if (block.text.trim().isEmpty) {
+        final splitInsertion = _splitForeignText.any(
+          (item) => item['inserted_block_id'] == block.id,
+        );
+        if (splitInsertion) {
           throw StateError('插入到对方段落中的文字不能为空');
         }
         continue;
       }
-      result.add(block.copyWith(text: text));
+      resolved.add(block);
     }
-    return result;
+    return _applySharedImageOrder(
+      blocks: resolved,
+      desiredImageIds: _photoMetas.map((meta) => meta.blockId).toList(),
+      actorId: _userId,
+    );
   }
 
   Future<void> _save() async {
     if (_saving) return;
     setState(() => _saving = true);
     _uploads.setPublishing(true);
+    late final List<SharedMomentBlock> draftBlocks;
     try {
-      final draftBlocks = await _resolveBlocks();
+      draftBlocks = await _resolveBlocks();
       if (!mounted) return;
       final saved = await ref
           .read(apiServiceProvider)
@@ -291,14 +228,51 @@ class _SharedDiaryEditorScreenState
       await _acceptSaved(saved);
     } on SharedMomentConflictException catch (error) {
       if (!mounted) return;
-      final draftBlocks = await _resolveBlocks();
+      var latest = error.latest;
+      if (_textProjectionUnchanged(_baseMoment.blocks, draftBlocks) &&
+          _splitForeignText.isEmpty) {
+        final rebased = _rebaseSharedDraft(
+          base: _baseMoment,
+          local: _baseMoment.copyWith(blocks: draftBlocks),
+          latest: latest,
+          currentUserId: _userId,
+          splits: const [],
+        );
+        if (rebased.conflicts.isEmpty) {
+          final desiredImageIds = draftBlocks
+              .where((block) => block.type == SharedMomentBlockType.image)
+              .map((block) => block.id)
+              .toList(growable: true);
+          for (final block in latest.blocks) {
+            if (block.type == SharedMomentBlockType.image &&
+                !desiredImageIds.contains(block.id)) {
+              // 图片不需要人工解决并发冲突：另一端新加入的照片自然追加。
+              desiredImageIds.add(block.id);
+            }
+          }
+          final merged = _applySharedImageOrder(
+            blocks: rebased.blocks,
+            desiredImageIds: desiredImageIds,
+            actorId: _userId,
+          );
+          try {
+            final saved = await ref
+                .read(apiServiceProvider)
+                .updateSharedMoment(moment: latest, blocks: merged);
+            await _acceptSaved(saved);
+            return;
+          } on SharedMomentConflictException catch (next) {
+            latest = next.latest;
+          }
+        }
+      }
       if (!mounted) return;
       final localDraft = _baseMoment.copyWith(blocks: draftBlocks);
       final saved = await Navigator.of(context).push<SharedMoment>(
         MaterialPageRoute(
           builder: (_) => SharedDiaryConflictScreen(
             base: _baseMoment,
-            latest: error.latest,
+            latest: latest,
             localDraft: localDraft,
             currentUserId: _userId,
             splitForeignText: _splitForeignText,
@@ -357,17 +331,11 @@ class _SharedDiaryEditorScreenState
   bool get _hasChanges {
     if (_savedSuccessfully) return false;
     if (_photos.any((entry) => entry.isLocal)) return true;
-    final current = <SharedMomentBlock>[];
-    for (final block in _blocks) {
-      if (block.type == SharedMomentBlockType.text &&
-          block.authorId == _userId) {
-        current.add(
-          block.copyWith(text: _textControllers[block.id]?.text ?? block.text),
-        );
-      } else {
-        current.add(block);
-      }
-    }
+    final current = _applySharedImageOrder(
+      blocks: _blocks,
+      desiredImageIds: _photoMetas.map((meta) => meta.blockId).toList(),
+      actorId: _userId,
+    );
     if (current.length != _baseMoment.blocks.length) return true;
     for (var index = 0; index < current.length; index++) {
       if (!_sameSharedBlock(current[index], _baseMoment.blocks[index])) {
@@ -435,11 +403,6 @@ class _SharedDiaryEditorScreenState
               entry.isLocal && _uploadedUrls.containsKey(entry.file!.path),
         )
         .length;
-    final textEntries = <({int index, SharedMomentBlock block})>[
-      for (var index = 0; index < _blocks.length; index++)
-        if (_blocks[index].type == SharedMomentBlockType.text)
-          (index: index, block: _blocks[index]),
-    ];
     return PopScope(
       canPop: _savedSuccessfully,
       onPopInvokedWithResult: (didPop, _) async {
@@ -488,127 +451,95 @@ class _SharedDiaryEditorScreenState
               if (widget.conflictReference != null)
                 _ConflictReferenceCard(moment: widget.conflictReference!),
               const _SectionTitle(
-                icon: Icons.notes_rounded,
-                title: '共同文字',
-                subtitle: '自己的段落可直接编辑；可在对方文字的任意光标位置插入',
-              ),
-              TextButton.icon(
-                onPressed: () => _insertOwnText(
-                  textEntries.isEmpty ? 0 : textEntries.first.index,
-                ),
-                icon: const Icon(Icons.add_rounded),
-                label: const Text('在开头写一段'),
-              ),
-              for (final entry in textEntries) ...[
-                _buildTextEditor(entry.block),
-                if (!_isPendingSplitBoundary(entry.index + 1))
-                  TextButton.icon(
-                    onPressed: () => _insertOwnText(entry.index + 1),
-                    icon: const Icon(Icons.add_rounded, size: 17),
-                    label: const Text('在这里接着写'),
-                  ),
-              ],
-              const SizedBox(height: 12),
-              const _SectionTitle(
                 icon: Icons.photo_library_outlined,
                 title: '共同照片',
-                subtitle: '蓝框属于 A，粉框属于 B；只能移除自己加入的照片',
+                subtitle: '蓝框属于 A，粉框属于 B；长按自己的照片可拖动排序',
               ),
               const SizedBox(height: 10),
-              PhotoGridPicker(
-                entries: _photos,
-                statusProvider: (entry) {
-                  if (!entry.isLocal) return PhotoUploadStatus.success;
-                  return _uploadStatuses[entry.file!.path] ??
-                      (_uploadedUrls.containsKey(entry.file!.path)
-                          ? PhotoUploadStatus.success
-                          : PhotoUploadStatus.idle);
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  const gap = 8.0;
+                  final tile = (constraints.maxWidth - gap * 2) / 3;
+                  return SizedBox(
+                    height: tile * 2 + gap,
+                    child: PhotoGridPicker(
+                      entries: _photos,
+                      visibleRows: 2,
+                      statusProvider: (entry) {
+                        if (!entry.isLocal) return PhotoUploadStatus.success;
+                        return _uploadStatuses[entry.file!.path] ??
+                            (_uploadedUrls.containsKey(entry.file!.path)
+                                ? PhotoUploadStatus.success
+                                : PhotoUploadStatus.idle);
+                      },
+                      progressProvider: (entry) => entry.isLocal
+                          ? _uploadProgress[entry.file!.path]
+                          : null,
+                      onRetry: _retryPhoto,
+                      onTap: (index) => showFullScreenPreview(
+                        context,
+                        entries: _photos,
+                        initialIndex: index,
+                      ),
+                      onAdded: _addPhotos,
+                      onRemoved: _removePhoto,
+                      onReordered: _reorderPhoto,
+                      canReorder: (index) =>
+                          _photoMetas[index].authorId == _userId,
+                      borderColorProvider: (index) =>
+                          AppTheme.sharedAuthorColor(
+                            _photoMetas[index].authorId,
+                          ),
+                      badgeLabelProvider: (index) =>
+                          _photoMetas[index].authorId,
+                      canRemove: (index) =>
+                          _photoMetas[index].authorId == _userId,
+                    ),
+                  );
                 },
-                progressProvider: (entry) =>
-                    entry.isLocal ? _uploadProgress[entry.file!.path] : null,
-                onRetry: _retryPhoto,
-                onTap: (index) => showFullScreenPreview(
-                  context,
-                  entries: _photos,
-                  initialIndex: index,
-                ),
-                onAdded: _addPhotos,
-                onRemoved: _removePhoto,
-                onReordered: (_, _) {},
-                reorderEnabled: false,
-                borderColorProvider: (index) =>
-                    AppTheme.sharedAuthorColor(_photoMetas[index].authorId),
-                badgeLabelProvider: (index) => _photoMetas[index].authorId,
-                canRemove: (index) => _photoMetas[index].authorId == _userId,
               ),
+              const SizedBox(height: 22),
+              const _SectionTitle(
+                icon: Icons.notes_rounded,
+                title: '共同正文',
+                subtitle: '这是一篇连续文档；对方文字不可改写，但可以在任意光标位置插入',
+              ),
+              const SizedBox(height: 10),
+              Container(
+                key: const ValueKey('shared-continuous-text-editor'),
+                padding: const EdgeInsets.fromLTRB(14, 8, 14, 12),
+                decoration: BoxDecoration(
+                  color: AppTheme.surfaceColor.withValues(alpha: .78),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppTheme.dividerColor),
+                ),
+                child: TextField(
+                  controller: _textController,
+                  minLines: 10,
+                  maxLines: null,
+                  keyboardType: TextInputType.multiline,
+                  textInputAction: TextInputAction.newline,
+                  cursorColor: AppTheme.sharedAuthorColor(_userId),
+                  style: const TextStyle(
+                    fontSize: 16,
+                    height: 1.75,
+                    color: AppTheme.textPrimary,
+                  ),
+                  decoration: const InputDecoration(
+                    hintText: '从这里开始共同记录…\n按回车可以自然分段',
+                    filled: false,
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              const _AuthorColorLegend(),
             ],
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildTextEditor(SharedMomentBlock block) {
-    final color = AppTheme.sharedAuthorColor(block.authorId);
-    final own = block.authorId == _userId;
-    return Container(
-      key: ValueKey('shared-editor-text-${block.id}'),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: .08),
-        borderRadius: BorderRadius.circular(14),
-        border: Border(left: BorderSide(color: color, width: 4)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Text(
-                '${block.authorId} · ${own ? '我的段落' : '对方段落'}',
-                style: TextStyle(
-                  color: color,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const Spacer(),
-              if (own)
-                IconButton(
-                  onPressed: () => _deleteOwnText(block),
-                  tooltip: '删除这段',
-                  icon: const Icon(Icons.delete_outline_rounded, size: 19),
-                  color: AppTheme.textSecondary,
-                ),
-            ],
-          ),
-          if (own)
-            TextField(
-              controller: _textControllers[block.id],
-              minLines: 2,
-              maxLines: null,
-              decoration: const InputDecoration(
-                hintText: '写下这一段…',
-                fillColor: Colors.white70,
-              ),
-              style: TextStyle(color: color, height: 1.6),
-            )
-          else ...[
-            SelectableText(
-              block.text,
-              style: TextStyle(color: color, fontSize: 15, height: 1.7),
-            ),
-            const SizedBox(height: 8),
-            Align(
-              alignment: Alignment.centerRight,
-              child: OutlinedButton.icon(
-                onPressed: () => _insertInsideForeignText(block),
-                icon: const Icon(Icons.vertical_align_center_rounded, size: 17),
-                label: const Text('在这段中插入'),
-              ),
-            ),
-          ],
-        ],
       ),
     );
   }
@@ -707,93 +638,6 @@ class SharedDiaryConflictScreen extends StatelessWidget {
   }
 }
 
-class _SplitTextDialog extends StatefulWidget {
-  final SharedMomentBlock block;
-
-  const _SplitTextDialog({required this.block});
-
-  @override
-  State<_SplitTextDialog> createState() => _SplitTextDialogState();
-}
-
-class _SplitTextDialogState extends State<_SplitTextDialog> {
-  late final TextEditingController _source = TextEditingController(
-    text: widget.block.text,
-  )..selection = TextSelection.collapsed(offset: widget.block.text.length);
-  final _insertion = TextEditingController();
-
-  @override
-  void dispose() {
-    _source.dispose();
-    _insertion.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final color = AppTheme.sharedAuthorColor(widget.block.authorId);
-    return AlertDialog(
-      title: const Text('插入我的一段话'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text(
-              '先在对方文字中点一下放置光标；保存时会把原段无损拆成前后两段，并在中间标记你的文字。',
-              style: TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: 13,
-                height: 1.5,
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _source,
-              readOnly: true,
-              showCursor: true,
-              minLines: 3,
-              maxLines: 8,
-              style: TextStyle(color: color, height: 1.6),
-              decoration: InputDecoration(
-                labelText: '${widget.block.authorId} 的原文（点选插入位置）',
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _insertion,
-              autofocus: true,
-              minLines: 2,
-              maxLines: 6,
-              decoration: const InputDecoration(labelText: '我要插入的文字'),
-            ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('取消'),
-        ),
-        FilledButton(
-          onPressed: () {
-            final text = _insertion.text.trim();
-            if (text.isEmpty) return;
-            Navigator.pop(
-              context,
-              _SplitInsertion(
-                offset: _source.selection.extentOffset,
-                text: text,
-              ),
-            );
-          },
-          child: const Text('插入'),
-        ),
-      ],
-    );
-  }
-}
-
 class _ConflictReferenceCard extends StatelessWidget {
   final SharedMoment moment;
 
@@ -860,6 +704,34 @@ class _SectionTitle extends StatelessWidget {
   }
 }
 
+class _AuthorColorLegend extends StatelessWidget {
+  const _AuthorColorLegend();
+
+  @override
+  Widget build(BuildContext context) {
+    Widget item(String authorId) => Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 9,
+          height: 9,
+          decoration: BoxDecoration(
+            color: AppTheme.sharedAuthorColor(authorId),
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(width: 5),
+        Text(
+          '$authorId 的文字',
+          style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+        ),
+      ],
+    );
+
+    return Row(children: [item('A'), const SizedBox(width: 18), item('B')]);
+  }
+}
+
 class _SharedPhotoMeta {
   final String blockId;
   final String authorId;
@@ -867,11 +739,131 @@ class _SharedPhotoMeta {
   const _SharedPhotoMeta({required this.blockId, required this.authorId});
 }
 
-class _SplitInsertion {
-  final int offset;
-  final String text;
+/// 只移动当前用户的图片 block；所有对方 block 的相对顺序保持不变，
+/// 因而既能保存图片拖动结果，也不会触发后端的 foreign-order 保护。
+List<SharedMomentBlock> _applySharedImageOrder({
+  required Iterable<SharedMomentBlock> blocks,
+  required List<String> desiredImageIds,
+  required String actorId,
+}) {
+  final source = List<SharedMomentBlock>.of(blocks);
+  final byId = {for (final block in source) block.id: block};
+  final foreignImageIds = source
+      .where(
+        (block) =>
+            block.type == SharedMomentBlockType.image &&
+            block.authorId != actorId,
+      )
+      .map((block) => block.id)
+      .toList(growable: false);
+  final actorImageIds = source
+      .where(
+        (block) =>
+            block.type == SharedMomentBlockType.image &&
+            block.authorId == actorId,
+      )
+      .map((block) => block.id)
+      .toSet();
+  final desired = desiredImageIds
+      .where((id) => byId[id]?.type == SharedMomentBlockType.image)
+      .toList(growable: true);
+  for (final id in actorImageIds) {
+    if (!desired.contains(id)) desired.add(id);
+  }
 
-  const _SplitInsertion({required this.offset, required this.text});
+  final desiredForeign = desired
+      .where((id) => !actorImageIds.contains(id))
+      .toList(growable: false);
+  if (!_sameStringList(desiredForeign, foreignImageIds)) {
+    // 防御性回退：理论上 UI 不允许拖动对方照片；若外部草稿破坏了
+    // 该约束，则采用服务端认可的对方顺序，并把自己的照片正常追加。
+    desired
+      ..removeWhere((id) => !actorImageIds.contains(id))
+      ..addAll(foreignImageIds);
+  }
+
+  final actorBuckets = List.generate(
+    foreignImageIds.length + 1,
+    (_) => <SharedMomentBlock>[],
+  );
+  var foreignCursor = 0;
+  for (final id in desired) {
+    final block = byId[id];
+    if (block == null || block.type != SharedMomentBlockType.image) continue;
+    if (block.authorId == actorId) {
+      actorBuckets[foreignCursor].add(block);
+    } else if (foreignCursor < foreignImageIds.length &&
+        foreignImageIds[foreignCursor] == id) {
+      foreignCursor++;
+    }
+  }
+
+  final skeleton = source
+      .where(
+        (block) =>
+            block.type != SharedMomentBlockType.image ||
+            block.authorId != actorId,
+      )
+      .toList(growable: true);
+  if (foreignImageIds.isEmpty) {
+    final firstImage = source.indexWhere(
+      (block) => block.type == SharedMomentBlockType.image,
+    );
+    final insertionIndex = firstImage < 0
+        ? 0
+        : source
+              .take(firstImage)
+              .where(
+                (block) =>
+                    block.type != SharedMomentBlockType.image ||
+                    block.authorId != actorId,
+              )
+              .length;
+    skeleton.insertAll(insertionIndex, actorBuckets.single);
+    return skeleton;
+  }
+
+  final result = <SharedMomentBlock>[];
+  var seenForeignImages = 0;
+  for (final block in skeleton) {
+    if (block.type == SharedMomentBlockType.image &&
+        block.authorId != actorId) {
+      result.addAll(actorBuckets[seenForeignImages]);
+      result.add(block);
+      seenForeignImages++;
+      if (seenForeignImages == foreignImageIds.length) {
+        result.addAll(actorBuckets[seenForeignImages]);
+      }
+    } else {
+      result.add(block);
+    }
+  }
+  return result;
+}
+
+bool _sameStringList(List<String> left, List<String> right) {
+  if (left.length != right.length) return false;
+  for (var index = 0; index < left.length; index++) {
+    if (left[index] != right[index]) return false;
+  }
+  return true;
+}
+
+bool _textProjectionUnchanged(
+  Iterable<SharedMomentBlock> base,
+  Iterable<SharedMomentBlock> draft,
+) {
+  final baseText = base
+      .where((block) => block.type == SharedMomentBlockType.text)
+      .toList(growable: false);
+  final draftText = draft
+      .where((block) => block.type == SharedMomentBlockType.text)
+      .toList(growable: false);
+  if (baseText.length != draftText.length) return false;
+  for (var index = 0; index < baseText.length; index++) {
+    if (!_sameSharedBlock(baseText[index], draftText[index])) return false;
+  }
+  return true;
 }
 
 class _RebaseResult {

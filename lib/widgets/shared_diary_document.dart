@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../constants/app_theme.dart';
@@ -6,7 +8,7 @@ import 'image_download_placeholder.dart';
 import 'image_gallery.dart';
 import 'private_network_image.dart';
 
-/// 共记正文的只读渲染。文字与图片都按 A / B 的固定颜色标明作者。
+/// 共记的阅读投影：数据库仍按 block 保存，界面只呈现“图片 + 一篇连续正文”。
 class SharedDiaryDocument extends StatelessWidget {
   final SharedMoment moment;
   final bool compact;
@@ -19,7 +21,14 @@ class SharedDiaryDocument extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (moment.blocks.isEmpty) {
+    final images = moment.blocks
+        .where((block) => block.type == SharedMomentBlockType.image)
+        .toList(growable: false);
+    final textRuns = moment.blocks
+        .where((block) => block.type == SharedMomentBlockType.text)
+        .toList(growable: false);
+
+    if (images.isEmpty && textRuns.isEmpty) {
       return const Padding(
         padding: EdgeInsets.symmetric(vertical: 48, horizontal: 24),
         child: Column(
@@ -45,178 +54,170 @@ class SharedDiaryDocument extends StatelessWidget {
       );
     }
 
-    final children = <Widget>[];
-    var index = 0;
-    var imageGroup = 0;
-    while (index < moment.blocks.length) {
-      final block = moment.blocks[index];
-      if (block.type == SharedMomentBlockType.text) {
-        children.add(_TextBlock(block: block, compact: compact));
-        index++;
-      } else {
-        final images = <SharedMomentBlock>[];
-        while (index < moment.blocks.length &&
-            moment.blocks[index].type == SharedMomentBlockType.image) {
-          images.add(moment.blocks[index]);
-          index++;
-        }
-        children.add(
-          _ImageBlockGrid(
-            key: ValueKey('shared-image-grid-${imageGroup++}'),
-            images: images,
-            allImages: moment.blocks
-                .where((item) => item.type == SharedMomentBlockType.image)
-                .toList(growable: false),
-          ),
-        );
-      }
-      if (index < moment.blocks.length) {
-        children.add(SizedBox(height: compact ? 10 : 14));
-      }
-    }
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: children,
+      children: [
+        if (images.isNotEmpty)
+          _SharedImageGrid(
+            key: const ValueKey('shared-image-grid'),
+            images: images,
+            compact: compact,
+          ),
+        if (images.isNotEmpty && textRuns.isNotEmpty)
+          SizedBox(height: compact ? 12 : 20),
+        if (textRuns.isNotEmpty)
+          SelectableText.rich(
+            key: const ValueKey('shared-continuous-text'),
+            TextSpan(
+              children: [
+                for (final block in textRuns)
+                  TextSpan(
+                    text: block.text,
+                    style: TextStyle(
+                      color: AppTheme.sharedAuthorColor(block.authorId),
+                    ),
+                  ),
+              ],
+            ),
+            style: TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: compact ? 14 : 16,
+              height: compact ? 1.65 : 1.78,
+            ),
+          ),
+      ],
     );
   }
 }
 
-class _TextBlock extends StatelessWidget {
-  final SharedMomentBlock block;
+class _SharedImageGrid extends StatefulWidget {
+  final List<SharedMomentBlock> images;
   final bool compact;
 
-  const _TextBlock({required this.block, required this.compact});
-
-  @override
-  Widget build(BuildContext context) {
-    final color = AppTheme.sharedAuthorColor(block.authorId);
-    return Container(
-      key: ValueKey('shared-text-${block.id}'),
-      padding: EdgeInsets.fromLTRB(
-        compact ? 10 : 14,
-        compact ? 9 : 12,
-        compact ? 10 : 14,
-        compact ? 9 : 12,
-      ),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: .08),
-        borderRadius: BorderRadius.circular(14),
-        border: Border(left: BorderSide(color: color, width: 4)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            block.authorId,
-            style: TextStyle(
-              color: color,
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              letterSpacing: .5,
-            ),
-          ),
-          const SizedBox(height: 5),
-          SelectableText(
-            block.text,
-            style: TextStyle(
-              color: color,
-              fontSize: compact ? 14 : 16,
-              height: 1.7,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ImageBlockGrid extends StatelessWidget {
-  final List<SharedMomentBlock> images;
-  final List<SharedMomentBlock> allImages;
-
-  const _ImageBlockGrid({
+  const _SharedImageGrid({
     super.key,
     required this.images,
-    required this.allImages,
+    required this.compact,
   });
 
   @override
+  State<_SharedImageGrid> createState() => _SharedImageGridState();
+}
+
+class _SharedImageGridState extends State<_SharedImageGrid> {
+  final _scrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final urls = allImages.map((item) => item.imageUrl).toList(growable: false);
-    return GridView.builder(
-      primary: false,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
-        mainAxisSpacing: 8,
-        crossAxisSpacing: 8,
-      ),
-      itemCount: images.length,
-      itemBuilder: (context, index) {
-        final block = images[index];
-        final color = AppTheme.sharedAuthorColor(block.authorId);
-        final globalIndex = allImages.indexWhere((item) => item.id == block.id);
-        return GestureDetector(
-          key: ValueKey('shared-image-${block.id}'),
-          onTap: () => showFullScreenPreview(
-            context,
-            urls: urls,
-            initialIndex: globalIndex < 0 ? 0 : globalIndex,
-          ),
-          child: Container(
-            padding: const EdgeInsets.all(2),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(13),
-              border: Border.all(color: color, width: 3),
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(9),
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  PrivateNetworkImage(
-                    imageUrl: block.imageUrl,
-                    usePreview: true,
-                    fit: BoxFit.cover,
-                    placeholder: (_, url) => ImageDownloadPlaceholder(url: url),
-                    errorWidget: (_, _, _) => const ColoredBox(
-                      color: AppTheme.softSurface,
-                      child: Icon(
-                        Icons.broken_image_outlined,
-                        color: AppTheme.textSecondary,
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    left: 0,
-                    top: 0,
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: color,
-                        borderRadius: const BorderRadius.only(
-                          bottomRight: Radius.circular(7),
-                        ),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 7,
-                          vertical: 3,
-                        ),
-                        child: Text(
-                          block.authorId,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
+    final urls = widget.images
+        .map((item) => item.imageUrl)
+        .toList(growable: false);
+    final spacing = widget.compact ? 6.0 : 8.0;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final tileExtent = math.max(
+          .1,
+          (constraints.maxWidth - spacing * 2) / 3,
+        );
+        final rows = math.min(2, (widget.images.length / 3).ceil());
+        final height = tileExtent * rows + spacing * math.max(0, rows - 1);
+        final scrollable = widget.images.length > 6;
+        return SizedBox(
+          height: height,
+          child: Scrollbar(
+            controller: _scrollController,
+            thumbVisibility: scrollable,
+            child: GridView.builder(
+              controller: _scrollController,
+              primary: false,
+              padding: EdgeInsets.zero,
+              physics: scrollable
+                  ? const ClampingScrollPhysics()
+                  : const NeverScrollableScrollPhysics(),
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                mainAxisSpacing: spacing,
+                crossAxisSpacing: spacing,
+                mainAxisExtent: tileExtent,
               ),
+              itemCount: widget.images.length,
+              itemBuilder: (context, index) {
+                final block = widget.images[index];
+                final color = AppTheme.sharedAuthorColor(block.authorId);
+                return GestureDetector(
+                  key: ValueKey('shared-image-${block.id}'),
+                  onTap: () => showFullScreenPreview(
+                    context,
+                    urls: urls,
+                    initialIndex: index,
+                  ),
+                  child: Semantics(
+                    label: '${block.authorId} 添加的照片',
+                    button: true,
+                    child: Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(13),
+                        border: Border.all(color: color, width: 3),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(9),
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            PrivateNetworkImage(
+                              imageUrl: block.imageUrl,
+                              usePreview: true,
+                              fit: BoxFit.cover,
+                              placeholder: (_, url) =>
+                                  ImageDownloadPlaceholder(url: url),
+                              errorWidget: (_, _, _) => const ColoredBox(
+                                color: AppTheme.softSurface,
+                                child: Icon(
+                                  Icons.broken_image_outlined,
+                                  color: AppTheme.textSecondary,
+                                ),
+                              ),
+                            ),
+                            Positioned(
+                              left: 0,
+                              top: 0,
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  color: color,
+                                  borderRadius: const BorderRadius.only(
+                                    bottomRight: Radius.circular(7),
+                                  ),
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 7,
+                                    vertical: 3,
+                                  ),
+                                  child: Text(
+                                    block.authorId,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
             ),
           ),
         );
