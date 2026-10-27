@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:diptych/constants/app_theme.dart';
+import 'package:diptych/controllers/shared_document_text_controller.dart';
 import 'package:diptych/models/app_user.dart';
 import 'package:diptych/models/calendar_marked_dates.dart';
 import 'package:diptych/models/moment.dart';
@@ -10,9 +11,11 @@ import 'package:diptych/providers/day_moment_provider.dart';
 import 'package:diptych/providers/wallpaper_provider.dart';
 import 'package:diptych/screens/feed_screen.dart';
 import 'package:diptych/screens/shared_diary_editor_screen.dart';
+import 'package:diptych/services/api_service.dart';
 import 'package:diptych/widgets/shared_day_view.dart';
 import 'package:diptych/widgets/shared_diary_document.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -74,6 +77,28 @@ BoxDecoration _decoration(WidgetTester tester, Finder finder) =>
 
 Border _border(BoxDecoration decoration) => decoration.border! as Border;
 
+class _ImageConflictApiService extends ApiService {
+  final SharedMoment latest;
+  int calls = 0;
+  List<SharedMomentBlock> lastBlocks = const [];
+
+  _ImageConflictApiService(this.latest);
+
+  @override
+  Future<SharedMoment> updateSharedMoment({
+    required SharedMoment moment,
+    required List<SharedMomentBlock> blocks,
+    List<Map<String, dynamic>> splitForeignText = const [],
+  }) async {
+    calls++;
+    if (calls == 1) {
+      throw SharedMomentConflictException(latest: latest);
+    }
+    lastBlocks = List.of(blocks);
+    return latest.copyWith(revision: latest.revision + 1, blocks: lastBlocks);
+  }
+}
+
 ProviderContainer _feedContainer({
   required Future<SharedMoment?> Function() loadShared,
 }) {
@@ -109,7 +134,7 @@ Future<void> _pumpFeed(WidgetTester tester, ProviderContainer container) async {
 
 void main() {
   testWidgets(
-    'document keeps A blue and B pink with a static three-column grid',
+    'document renders photos first and one continuous two-color text flow',
     (tester) async {
       await tester.pumpWidget(
         MaterialApp(
@@ -122,16 +147,13 @@ void main() {
       );
       await tester.pump();
 
-      final textADecoration = _decoration(
-        tester,
-        find.byKey(const ValueKey('shared-text-text-a')),
-      );
-      final textBDecoration = _decoration(
-        tester,
-        find.byKey(const ValueKey('shared-text-text-b')),
-      );
-      expect(_border(textADecoration).left.color, AppTheme.sharedUserAColor);
-      expect(_border(textBDecoration).left.color, AppTheme.sharedUserBColor);
+      final continuous = find.byKey(const ValueKey('shared-continuous-text'));
+      expect(continuous, findsOneWidget);
+      final selectable = tester.widget<SelectableText>(continuous);
+      final spans = selectable.textSpan!.children!.cast<TextSpan>().toList();
+      expect(spans.map((span) => span.text), ['A 的文字', 'B 的文字']);
+      expect(spans[0].style!.color, AppTheme.sharedUserAColor);
+      expect(spans[1].style!.color, AppTheme.sharedUserBColor);
 
       final imageA = find.byKey(const ValueKey('shared-image-image-a-1'));
       final imageB = find.byKey(const ValueKey('shared-image-image-b-1'));
@@ -152,73 +174,120 @@ void main() {
 
       final grid = tester.widget<GridView>(
         find.descendant(
-          of: find.byKey(const ValueKey('shared-image-grid-0')),
+          of: find.byKey(const ValueKey('shared-image-grid')),
           matching: find.byType(GridView),
         ),
       );
       final delegate =
           grid.gridDelegate as SliverGridDelegateWithFixedCrossAxisCount;
       expect(delegate.crossAxisCount, 3);
-      expect(grid.shrinkWrap, isTrue);
+      expect(grid.shrinkWrap, isFalse);
       expect(grid.physics, isA<NeverScrollableScrollPhysics>());
       expect(grid.childrenDelegate.estimatedChildCount, 4);
       expect(
-        tester
-            .getTopLeft(find.byKey(const ValueKey('shared-image-image-b-2')))
-            .dy,
-        greaterThan(
-          tester
-              .getTopLeft(find.byKey(const ValueKey('shared-image-image-a-1')))
-              .dy,
-        ),
+        tester.getTopLeft(imageA).dy,
+        lessThan(tester.getTopLeft(continuous).dy),
       );
     },
   );
 
-  testWidgets(
-    'editor exposes editing and deletion only for the signed-in author',
-    (tester) async {
-      final container = ProviderContainer();
-      addTearDown(container.dispose);
-      container.read(currentUserProvider.notifier).setUser(_userA);
-      final moment = _sharedMoment(
-        blocks: [
-          SharedMomentBlock.text(id: 'own', authorId: 'A', text: '自己的'),
-          SharedMomentBlock.text(id: 'foreign', authorId: 'B', text: '对方的'),
-        ],
-      );
-
-      await tester.pumpWidget(
-        UncontrolledProviderScope(
-          container: container,
-          child: MaterialApp(
-            home: SharedDiaryEditorScreen(initialMoment: moment),
+  testWidgets('document image area stays at two rows and scrolls after six', (
+    tester,
+  ) async {
+    final blocks = <SharedMomentBlock>[
+      for (var index = 0; index < 7; index++)
+        SharedMomentBlock.image(
+          id: 'image-$index',
+          authorId: index.isEven ? 'A' : 'B',
+          imageUrl: 'https://images.invalid/$index.jpg',
+        ),
+      SharedMomentBlock.text(id: 'text', authorId: 'A', text: '正文'),
+    ];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 360,
+            child: SharedDiaryDocument(moment: _sharedMoment(blocks: blocks)),
           ),
         ),
-      );
-      await tester.pump();
+      ),
+    );
+    await tester.pump();
 
-      final own = find.byKey(const ValueKey('shared-editor-text-own'));
-      final foreign = find.byKey(const ValueKey('shared-editor-text-foreign'));
-      expect(
-        find.descendant(of: own, matching: find.byType(TextField)),
-        findsOne,
-      );
-      expect(
-        find.descendant(of: foreign, matching: find.byType(TextField)),
-        findsNothing,
-      );
-      expect(
-        find.descendant(of: own, matching: find.byTooltip('删除这段')),
-        findsOne,
-      );
-      expect(
-        find.descendant(of: foreign, matching: find.byTooltip('删除这段')),
-        findsNothing,
-      );
-      expect(find.text('在这段中插入'), findsOneWidget);
-    },
-  );
+    final grid = tester.widget<GridView>(
+      find.descendant(
+        of: find.byKey(const ValueKey('shared-image-grid')),
+        matching: find.byType(GridView),
+      ),
+    );
+    expect(grid.physics, isA<ClampingScrollPhysics>());
+    expect(grid.childrenDelegate.estimatedChildCount, 7);
+    expect(tester.getSize(find.byType(GridView)).height, lessThan(250));
+  });
+
+  testWidgets('editor exposes one continuous two-color editing surface', (
+    tester,
+  ) async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    container.read(currentUserProvider.notifier).setUser(_userA);
+    final moment = _sharedMoment(
+      blocks: [
+        SharedMomentBlock.text(id: 'own', authorId: 'A', text: '自己的'),
+        SharedMomentBlock.text(id: 'foreign', authorId: 'B', text: '对方的'),
+        SharedMomentBlock.image(
+          id: 'own-image',
+          authorId: 'A',
+          imageUrl: 'https://images.invalid/own.jpg',
+        ),
+        SharedMomentBlock.image(
+          id: 'foreign-image',
+          authorId: 'B',
+          imageUrl: 'https://images.invalid/foreign.jpg',
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          home: SharedDiaryEditorScreen(initialMoment: moment),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(
+      find.byWidgetPredicate(
+        (widget) => widget is LongPressDraggable<int>,
+        description: 'only the signed-in author photo is draggable',
+      ),
+      findsOneWidget,
+    );
+    await tester.dragUntilVisible(
+      find.byKey(const ValueKey('shared-continuous-text-editor')),
+      find.byType(ListView),
+      const Offset(0, -300),
+    );
+    final editor = find.byKey(const ValueKey('shared-continuous-text-editor'));
+    final field = tester.widget<TextField>(
+      find.descendant(of: editor, matching: find.byType(TextField)),
+    );
+    final controller = field.controller! as SharedDocumentTextController;
+    expect(controller.text, '自己的对方的');
+    final span = controller.buildTextSpan(
+      context: tester.element(editor),
+      style: const TextStyle(),
+      withComposing: false,
+    );
+    final runs = span.children!.cast<TextSpan>().toList();
+    expect(runs, hasLength(2));
+    expect(runs[0].style!.color, AppTheme.sharedUserAColor);
+    expect(runs[1].style!.color, AppTheme.sharedUserBColor);
+    expect(find.byType(TextField), findsOneWidget);
+  });
 
   testWidgets('pending split keeps its three blocks contiguous in the editor', (
     tester,
@@ -271,7 +340,90 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('在这里接着写'), findsOneWidget);
+    await tester.dragUntilVisible(
+      find.byKey(const ValueKey('shared-continuous-text-editor')),
+      find.byType(ListView),
+      const Offset(0, -300),
+    );
+    final field = tester.widget<TextField>(find.byType(TextField));
+    expect(field.controller!.text, '前半中间后半');
+  });
+
+  testWidgets('image-only revision conflicts append both sides automatically', (
+    tester,
+  ) async {
+    const foregroundChannel = MethodChannel(
+      'com.splitmoments.split_moments/foreground_service',
+    );
+    const wakeLockChannel = MethodChannel(
+      'com.splitmoments.split_moments/wakelock',
+    );
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(foregroundChannel, (_) async => null);
+    messenger.setMockMethodCallHandler(wakeLockChannel, (_) async => null);
+    addTearDown(() async {
+      messenger.setMockMethodCallHandler(foregroundChannel, null);
+      messenger.setMockMethodCallHandler(wakeLockChannel, null);
+    });
+    final base = _sharedMoment(
+      blocks: [
+        SharedMomentBlock.text(id: 'text-a', authorId: 'A', text: '正文'),
+        SharedMomentBlock.image(
+          id: 'base-a',
+          authorId: 'A',
+          imageUrl: 'https://images.invalid/base-a.jpg',
+        ),
+      ],
+    );
+    final localImage = SharedMomentBlock.image(
+      id: 'local-a',
+      authorId: 'A',
+      imageUrl: 'https://images.invalid/local-a.jpg',
+    );
+    final partnerImage = SharedMomentBlock.image(
+      id: 'latest-b',
+      authorId: 'B',
+      imageUrl: 'https://images.invalid/latest-b.jpg',
+    );
+    final latest = base.copyWith(
+      revision: 4,
+      blocks: [...base.blocks, partnerImage],
+    );
+    final api = _ImageConflictApiService(latest);
+    final container = ProviderContainer(
+      overrides: [apiServiceProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+    container.read(currentUserProvider.notifier).setUser(_userA);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          home: SharedDiaryEditorScreen(
+            initialMoment: base,
+            initialBlocks: [...base.blocks, localImage],
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, '保存共记'));
+    await tester.pumpAndSettle();
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 20)),
+    );
+    await tester.pump();
+
+    expect(api.calls, 2);
+    expect(
+      api.lastBlocks
+          .where((block) => block.type == SharedMomentBlockType.image)
+          .map((block) => block.id),
+      ['base-a', 'local-a', 'latest-b'],
+    );
+    expect(find.text('处理同时修改'), findsNothing);
   });
 
   testWidgets(
@@ -326,14 +478,13 @@ void main() {
       await tester.tap(find.text('进入二次合并编辑'));
       await tester.pumpAndSettle();
 
-      expect(
-        find.byKey(const ValueKey('shared-editor-text-partner-insert')),
-        findsOneWidget,
+      await tester.dragUntilVisible(
+        find.byKey(const ValueKey('shared-continuous-text-editor')),
+        find.byType(ListView).last,
+        const Offset(0, -300),
       );
-      expect(
-        find.byKey(const ValueKey('shared-editor-text-own-source-right')),
-        findsOneWidget,
-      );
+      final field = tester.widget<TextField>(find.byType(TextField));
+      expect(field.controller!.text, '对方插入原文');
     },
   );
 
@@ -379,7 +530,10 @@ void main() {
 
       expect(find.byKey(const ValueKey('shared-diary-page')), findsOneWidget);
       expect(find.byKey(const ValueKey('diary-split-page')), findsNothing);
-      expect(find.text('A 的文字'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('shared-continuous-text')),
+        findsOneWidget,
+      );
       expect(find.text('这段旧双联内容不应显示'), findsNothing);
       expect(find.text('查看保留的旧双联'), findsOneWidget);
     },
