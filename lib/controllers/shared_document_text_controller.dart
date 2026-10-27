@@ -23,7 +23,9 @@ class SharedDocumentTextController extends TextEditingController {
     required this.splitForeignText,
     required this.currentUserId,
     this.onEditRejected,
-  }) : super(text: _flatten(blocks));
+  }) : super(text: _flatten(blocks)) {
+    _upgradeLegacySplits();
+  }
 
   List<SharedMomentBlock> get textRuns => blocks
       .where((block) => block.type == SharedMomentBlockType.text)
@@ -37,10 +39,10 @@ class SharedDocumentTextController extends TextEditingController {
     }
 
     final old = super.value;
-    final change = _TextChange.between(old.text, next.text);
+    final change = _TextChange.between(old, next);
     final beforeBlocks = List<SharedMomentBlock>.of(blocks);
     final beforeSplits = splitForeignText
-        .map((item) => Map<String, dynamic>.from(item))
+        .map(_copySplit)
         .toList(growable: false);
 
     if (_touchesForeignText(change.removedStart, change.removedEnd)) {
@@ -49,7 +51,7 @@ class SharedDocumentTextController extends TextEditingController {
     }
 
     _removeOwnText(change.removedStart, change.removedEnd);
-    _restoreCanceledSplits();
+    _normalizeSplits();
     if (change.inserted.isNotEmpty &&
         !_insertOwnText(change.removedStart, change.inserted)) {
       blocks
@@ -58,7 +60,7 @@ class SharedDocumentTextController extends TextEditingController {
       splitForeignText
         ..clear()
         ..addAll(beforeSplits);
-      _reject(old, '同一段对方文字一次保存只能插入一次，请先保存后继续');
+      _reject(old, '无法安全地插入这段文字，请重试');
       return;
     }
 
@@ -171,13 +173,14 @@ class SharedDocumentTextController extends TextEditingController {
 
   bool _splitForeignRun(_RunRange range, int offset, String inserted) {
     final block = range.block;
-    final alreadySplit = splitForeignText.any(
-      (item) =>
-          item['source_block_id'] == block.id ||
-          item['right_block_id'] == block.id,
-    );
-    final base = _findById(baseBlocks, block.id);
-    if (alreadySplit || base == null) return false;
+    Map<String, dynamic>? group;
+    for (final split in splitForeignText) {
+      if (_fragmentIds(split).contains(block.id)) {
+        group = split;
+        break;
+      }
+    }
+    if (group == null && _findById(baseBlocks, block.id) == null) return false;
 
     final left = block.text.substring(0, offset);
     final right = block.text.substring(offset);
@@ -190,41 +193,107 @@ class SharedDocumentTextController extends TextEditingController {
       own,
       ?rightBlock,
     ]);
-    splitForeignText.add({
-      'source_block_id': block.id,
-      'left_text': left,
-      'inserted_block_id': own.id,
-      'right_block_id': rightBlock?.id,
-      'right_text': right,
-    });
+    if (group == null) {
+      splitForeignText.add({
+        'source_block_id': block.id,
+        'fragments': [block.id, own.id, if (rightBlock != null) rightBlock.id],
+      });
+    } else {
+      final ids = _fragmentIds(group);
+      final index = ids.indexOf(block.id);
+      if (index < 0) return false;
+      ids.replaceRange(index, index + 1, [
+        block.id,
+        own.id,
+        if (rightBlock != null) rightBlock.id,
+      ]);
+      group['fragments'] = ids;
+    }
     return true;
   }
 
-  void _restoreCanceledSplits() {
-    final canceled = <Map<String, dynamic>>[];
+  /// Normalize old conflict drafts to the multi-fragment protocol.
+  void _upgradeLegacySplits() {
     for (final split in splitForeignText) {
-      final insertedId = split['inserted_block_id']?.toString() ?? '';
-      if (blocks.any((block) => block.id == insertedId)) continue;
-      canceled.add(split);
-    }
-    for (final split in canceled) {
+      if (split['fragments'] is List) continue;
       final sourceId = split['source_block_id']?.toString() ?? '';
+      final insertedId = split['inserted_block_id']?.toString() ?? '';
       final rightId = split['right_block_id']?.toString();
-      final original = _findById(baseBlocks, sourceId);
-      if (original == null) continue;
-      final ids = {sourceId, ?rightId};
-      final positions = <int>[
-        for (var index = 0; index < blocks.length; index++)
-          if (ids.contains(blocks[index].id)) index,
+      final leftText = split['left_text']?.toString() ?? '';
+      final rightText = split['right_text']?.toString() ?? '';
+      final ids = <String>[
+        if (leftText.isNotEmpty) sourceId,
+        insertedId,
+        if (rightText.isNotEmpty && rightId != null) rightId,
       ];
-      final insertionIndex = positions.isEmpty
-          ? blocks.length
-          : positions.reduce((a, b) => a < b ? a : b);
-      blocks.removeWhere((block) => ids.contains(block.id));
-      blocks.insert(insertionIndex.clamp(0, blocks.length), original);
-      splitForeignText.remove(split);
+      if (leftText.isEmpty && rightText.isNotEmpty && rightId != null) {
+        final index = blocks.indexWhere((block) => block.id == rightId);
+        if (index >= 0) {
+          final original = _findById(baseBlocks, sourceId);
+          blocks[index] = blocks[index].copyWith(
+            id: sourceId,
+            createdAt: original?.createdAt,
+          );
+          ids[ids.indexOf(rightId)] = sourceId;
+        }
+      }
+      split
+        ..clear()
+        ..addAll({'source_block_id': sourceId, 'fragments': ids});
     }
   }
+
+  /// Removing an insertion merges only its neighboring foreign fragments;
+  /// other insertions into the same original passage remain untouched.
+  void _normalizeSplits() {
+    for (final split in List<Map<String, dynamic>>.of(splitForeignText)) {
+      final sourceId = split['source_block_id']?.toString() ?? '';
+      final original = _findById(baseBlocks, sourceId);
+      if (original == null) continue;
+      final ids = _fragmentIds(split)
+          .where((id) => blocks.any((block) => block.id == id))
+          .toList(growable: true);
+      var index = 0;
+      while (index + 1 < ids.length) {
+        final leftIndex = blocks.indexWhere((block) => block.id == ids[index]);
+        final rightIndex = blocks.indexWhere(
+          (block) => block.id == ids[index + 1],
+        );
+        if (leftIndex >= 0 &&
+            rightIndex == leftIndex + 1 &&
+            blocks[leftIndex].authorId == original.authorId &&
+            blocks[rightIndex].authorId == original.authorId) {
+          blocks[leftIndex] = blocks[leftIndex].copyWith(
+            text: blocks[leftIndex].text + blocks[rightIndex].text,
+          );
+          blocks.removeAt(rightIndex);
+          ids.removeAt(index + 1);
+        } else {
+          index++;
+        }
+      }
+      final hasInsertion = ids.any((id) {
+        final block = _findById(blocks, id);
+        return block != null && block.authorId == currentUserId;
+      });
+      if (!hasInsertion) {
+        final sourceIndex = blocks.indexWhere((block) => block.id == sourceId);
+        if (sourceIndex >= 0) blocks[sourceIndex] = original;
+        splitForeignText.remove(split);
+      } else {
+        split['fragments'] = ids;
+      }
+    }
+  }
+
+  static List<String> _fragmentIds(Map<String, dynamic> split) =>
+      (split['fragments'] as List).map((id) => id.toString()).toList();
+
+  static Map<String, dynamic> _copySplit(Map<String, dynamic> split) => {
+    ...split,
+    if (split['fragments'] is List)
+      'fragments': List<String>.of(_fragmentIds(split)),
+  };
 
   List<_RunRange> _ranges() {
     final result = <_RunRange>[];
@@ -340,7 +409,53 @@ class _TextChange {
     required this.inserted,
   });
 
-  factory _TextChange.between(String oldText, String newText) {
+  factory _TextChange.between(TextEditingValue old, TextEditingValue next) {
+    final oldText = old.text;
+    final newText = next.text;
+
+    _TextChange? replacing(int start, int end) {
+      if (start < 0 || end < start || end > oldText.length) return null;
+      final insertedLength = newText.length - (oldText.length - (end - start));
+      if (insertedLength < 0 || start + insertedLength > newText.length) {
+        return null;
+      }
+      final inserted = newText.substring(start, start + insertedLength);
+      if (oldText.replaceRange(start, end, inserted) != newText) return null;
+      return _TextChange(
+        removedStart: start,
+        removedEnd: end,
+        inserted: inserted,
+      );
+    }
+
+    final selection = old.selection;
+    if (selection.isValid && !selection.isCollapsed) {
+      final selected = replacing(selection.start, selection.end);
+      if (selected != null) return selected;
+    }
+    if (selection.isValid && selection.isCollapsed) {
+      final caret = selection.start;
+      if (newText.length >= oldText.length) {
+        final insertion = replacing(caret, caret);
+        if (insertion != null) return insertion;
+      } else if (next.selection.isValid && next.selection.isCollapsed) {
+        final deleted = oldText.length - newText.length;
+        final nextCaret = next.selection.start;
+        if (nextCaret == caret - deleted) {
+          final backspace = replacing(nextCaret, caret);
+          if (backspace != null) return backspace;
+        } else if (nextCaret == caret) {
+          final forwardDelete = replacing(caret, caret + deleted);
+          if (forwardDelete != null) return forwardDelete;
+        }
+      }
+    }
+    final composing = old.composing;
+    if (composing.isValid && !composing.isCollapsed) {
+      final composed = replacing(composing.start, composing.end);
+      if (composed != null) return composed;
+    }
+
     var prefix = 0;
     final shortest = oldText.length < newText.length
         ? oldText.length
