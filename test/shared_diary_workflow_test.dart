@@ -18,6 +18,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+String documentText(Iterable<SharedMomentBlock> blocks) => blocks
+    .where((b) => b.type == SharedMomentBlockType.text)
+    .map((b) => b.text)
+    .join();
+
 SharedMoment day() => SharedMoment(
   id: 'day',
   dateStr: '2026-10-29',
@@ -41,6 +46,7 @@ SharedMoment day() => SharedMoment(
 
 class MemoryDraft extends SharedDiaryDraftStore {
   SharedDiaryDraft? value;
+  SharedDiaryWorkingDraft? working;
   int saves = 0;
   MemoryDraft() : super(userId: 'A', dateStr: '2026-10-29');
   @override
@@ -52,8 +58,23 @@ class MemoryDraft extends SharedDiaryDraftStore {
   }
 
   @override
+  Future<SharedDiaryWorkingDraft?> loadWorking() async => working;
+
+  @override
+  Future<void> saveWorking(
+    SharedDiaryDraft draft, {
+    required bool publishAfterConflict,
+  }) async {
+    working = SharedDiaryWorkingDraft(
+      draft: draft,
+      publishAfterConflict: publishAfterConflict,
+    );
+  }
+
+  @override
   Future<void> clear() async {
     value = null;
+    working = null;
   }
 
   @override
@@ -64,6 +85,7 @@ class PendingStorage extends StorageService {
   final pending = Completer<String>();
   int probes = 0;
   int uploads = 0;
+  Object? probeFailure;
   @override
   Future<String> uploadImage(
     File file,
@@ -79,6 +101,7 @@ class PendingStorage extends StorageService {
   @override
   Future<bool> originalExists(String url) async {
     probes++;
+    if (probeFailure != null) throw probeFailure!;
     return true;
   }
 }
@@ -86,6 +109,9 @@ class PendingStorage extends StorageService {
 class RecordingApi extends ApiService {
   final calls = <List<SharedMomentBlock>>[];
   SharedMoment? conflict;
+  Object? failure;
+  @override
+  Future<SharedMoment> getSharedMomentById(String id) async => day();
   @override
   Future<SharedMoment> updateSharedMoment({
     required SharedMoment moment,
@@ -98,6 +124,7 @@ class RecordingApi extends ApiService {
       conflict = null;
       throw SharedMomentConflictException(latest: latest);
     }
+    if (failure != null) throw failure!;
     return moment.copyWith(
       blocks: List.of(blocks),
       revision: moment.revision + 1,
@@ -128,8 +155,9 @@ void main() {
     WidgetTester tester,
     MemoryDraft draft,
     PendingStorage storage,
-    RecordingApi api,
-  ) async {
+    RecordingApi api, {
+    bool pushRoute = false,
+  }) async {
     final container = ProviderContainer(
       overrides: [
         sharedDiaryDraftStoreProvider.overrideWith((ref, scope) => draft),
@@ -144,10 +172,30 @@ void main() {
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: container,
-        child: MaterialApp(home: SharedDiaryEditorScreen(initialMoment: day())),
+        child: MaterialApp(
+          home: pushRoute
+              ? Builder(
+                  builder: (context) => Scaffold(
+                    body: TextButton(
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) =>
+                              SharedDiaryEditorScreen(initialMoment: day()),
+                        ),
+                      ),
+                      child: const Text('打开共记'),
+                    ),
+                  ),
+                )
+              : SharedDiaryEditorScreen(initialMoment: day()),
+        ),
       ),
     );
     await tester.pumpAndSettle();
+    if (pushRoute) {
+      await tester.tap(find.text('打开共记'));
+      await tester.pumpAndSettle();
+    }
   }
 
   Future<void> addPhoto(WidgetTester tester) async {
@@ -160,6 +208,28 @@ void main() {
     ]);
     await tester.pumpAndSettle();
   }
+
+  Future<TextEditingController> editorText(WidgetTester tester) async {
+    await tester.dragUntilVisible(
+      find.byKey(const ValueKey('shared-continuous-text-editor')),
+      find.byType(ListView).last,
+      const Offset(0, -300),
+    );
+    return tester.widget<TextField>(find.byType(TextField)).controller!;
+  }
+
+  Future<void> editText(WidgetTester tester, String text) async {
+    (await editorText(tester)).text = text;
+    await tester.pump();
+  }
+
+  SharedMoment remoteText(int revision, String text) => day().copyWith(
+    revision: revision,
+    blocks: [
+      day().blocks.first.copyWith(text: text),
+      ...day().blocks.skip(1),
+    ],
+  );
 
   testWidgets(
     'draft and text updates stay open and never wait for pending photos',
@@ -284,12 +354,27 @@ void main() {
       expect(storage.pending.isCompleted, isFalse);
       expect(draft.value!.photos.last.item.file!.path, 'motion-original.jpg');
       expect(
-        draft.value!.blocks
+        draft.working!.draft.blocks
             .where((b) => b.type == SharedMomentBlockType.text)
             .map((b) => b.text),
         ['原文', '新文字'],
       );
-      expect(draft.value!.base.revision, 3);
+      expect(draft.value!.base.revision, 2);
+      expect(
+        draft.value!.blocks
+            .where((b) => b.type == SharedMomentBlockType.text)
+            .map((b) => b.text),
+        ['原文'],
+      );
+      expect(draft.working!.draft.base.revision, 3);
+      expect(draft.working!.publishAfterConflict, isFalse);
+      expect(find.text('确认更新文字'), findsOneWidget);
+      await tester.tap(find.text('确认更新文字'));
+      await tester.pumpAndSettle();
+      expect(find.text('更新文字'), findsOneWidget);
+      expect(draft.value!.base.revision, 2);
+      expect(draft.working!.draft.base.revision, 4);
+      expect(storage.pending.isCompleted, isFalse);
       await tester.pumpWidget(const SizedBox());
       await tester.pumpAndSettle();
     },
@@ -315,6 +400,185 @@ void main() {
     expect(draft.value, isNull);
     expect(draft.saves, greaterThanOrEqualTo(3));
   });
+
+  testWidgets(
+    'repeated conflicting merges and text saves never replace the primary local original',
+    (tester) async {
+      final draft = MemoryDraft(),
+          storage = PendingStorage(),
+          api = RecordingApi();
+      await pumpEditor(tester, draft, storage, api);
+      await editText(tester, '原文本地原稿');
+      api.conflict = remoteText(3, '原文远端第一次修改');
+      await tester.tap(find.text('更新文字'));
+      await tester.pumpAndSettle();
+      final original = draft.value!;
+      final primarySaveCount = draft.saves;
+      await tester.tap(find.text('拉取最新并二次编辑'));
+      await tester.pumpAndSettle();
+      expect((await editorText(tester)).text, '原文远端第一次修改');
+      expect(identical(draft.value, original), isTrue);
+      expect(documentText(draft.working!.draft.reference!.blocks), '原文本地原稿');
+      await editText(tester, '原文二次编辑补充');
+      await tester.tap(find.text('存草稿'));
+      await tester.pumpAndSettle();
+      api.conflict = remoteText(4, '原文远端再次修改');
+      await tester.tap(find.text('确认更新文字'));
+      await tester.pumpAndSettle();
+      expect(find.text('更新文字'), findsOneWidget);
+      await tester.tap(find.text('拉取最新并二次编辑'));
+      await tester.pumpAndSettle();
+      expect(documentText(draft.working!.draft.reference!.blocks), '原文二次编辑补充');
+      await editText(tester, '原文核对完成');
+      await tester.tap(find.text('确认更新文字'));
+      await tester.pumpAndSettle();
+      expect(find.text('更新文字'), findsOneWidget);
+      expect(draft.saves, primarySaveCount);
+      expect(identical(draft.value, original), isTrue);
+      expect(documentText(draft.value!.blocks), '原文本地原稿');
+      expect(documentText(draft.working!.draft.blocks), '原文核对完成');
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      await pumpEditor(tester, draft, storage, api);
+      expect((await editorText(tester)).text, '原文本地原稿');
+      await tester.tap(find.text('继续上次二次编辑'));
+      await tester.pumpAndSettle();
+      expect((await editorText(tester)).text, '原文核对完成');
+      expect(find.text('确认更新文字'), findsOneWidget);
+      await tester.tap(find.text('返回编辑'));
+      await tester.pumpAndSettle();
+      expect(find.text('更新文字'), findsOneWidget);
+      expect(documentText(draft.value!.blocks), '原文本地原稿');
+    },
+  );
+
+  testWidgets(
+    'publication conflict confirmation clears both drafts and exits the entire editor',
+    (tester) async {
+      final draft = MemoryDraft(),
+          storage = PendingStorage(),
+          api = RecordingApi();
+      await pumpEditor(tester, draft, storage, api, pushRoute: true);
+      await editText(tester, '发布前的本地原稿');
+      await addPhoto(tester);
+      storage.pending.complete('https://images.invalid/new.jpg');
+      await tester.pumpAndSettle();
+      api.conflict = remoteText(3, '另一端改了文字');
+      await tester.tap(find.text('上传发布'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('拉取最新并二次编辑'));
+      await tester.pumpAndSettle();
+      expect(find.text('确认上传发布'), findsOneWidget);
+      expect(documentText(draft.value!.blocks), '发布前的本地原稿');
+      expect(draft.working!.publishAfterConflict, isTrue);
+      await editText(tester, '核对后发布');
+      await tester.tap(find.text('确认上传发布'));
+      await tester.pumpAndSettle();
+      expect(api.calls, hasLength(2));
+      expect(
+        api.calls.last.where((b) => b.type == SharedMomentBlockType.image),
+        hasLength(3),
+      );
+      expect(draft.value, isNull);
+      expect(draft.working, isNull);
+      expect(find.byType(SharedDiaryEditorScreen), findsNothing);
+      expect(find.text('打开共记'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'reopening and background uploads cannot overwrite an existing merge workspace',
+    (tester) async {
+      final draft = MemoryDraft(),
+          storage = PendingStorage(),
+          api = RecordingApi();
+      await pumpEditor(tester, draft, storage, api);
+      await addPhoto(tester);
+      api.conflict = remoteText(3, '原文对方补充');
+      await tester.tap(find.text('更新文字'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('拉取最新并二次编辑'));
+      await tester.pumpAndSettle();
+      await editText(tester, '原文二次编辑未提交');
+      await tester.tap(find.text('存草稿'));
+      await tester.pumpAndSettle();
+      final original = draft.value, working = draft.working;
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      final resumedStorage = PendingStorage();
+      await pumpEditor(tester, draft, resumedStorage, api);
+      expect((await editorText(tester)).text, '原文');
+      resumedStorage.pending.complete('https://images.invalid/resumed.jpg');
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('拉取最新共记'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('存草稿'));
+      await tester.pumpAndSettle();
+      expect(identical(draft.value, original), isTrue);
+      expect(identical(draft.working, working), isTrue);
+      await tester.tap(find.text('继续上次二次编辑'));
+      await tester.pumpAndSettle();
+      expect((await editorText(tester)).text, '原文二次编辑未提交');
+    },
+  );
+
+  for (final uploadFailure in [false, true]) {
+    testWidgets(
+      'second publication ${uploadFailure ? 'upload' : 'network'} failure returns to editing with original and working drafts intact',
+      (tester) async {
+        final draft = MemoryDraft(),
+            storage = PendingStorage(),
+            api = RecordingApi();
+        await pumpEditor(tester, draft, storage, api);
+        await editText(tester, '不能丢的本地原稿');
+        await addPhoto(tester);
+        storage.pending.complete('https://images.invalid/new.jpg');
+        await tester.pumpAndSettle();
+        api.conflict = remoteText(3, '远端文字');
+        await tester.tap(find.text('上传发布'));
+        await tester.pumpAndSettle();
+        final original = draft.value!;
+        await tester.tap(find.text('拉取最新并二次编辑'));
+        await tester.pumpAndSettle();
+        await editText(tester, '二次编辑后也不能丢');
+        if (uploadFailure) {
+          storage.probeFailure = StateError('照片暂时无法上传');
+        } else {
+          api.failure = const HandshakeException(
+            'Connection terminated during handshake',
+          );
+        }
+        await tester.tap(find.text('确认上传发布'));
+        await tester.pumpAndSettle();
+        expect(find.text('确认上传发布'), findsNothing);
+        expect(find.text('上传发布'), findsOneWidget);
+        expect(find.byType(SharedDiaryEditorScreen), findsOneWidget);
+        expect(identical(draft.value, original), isTrue);
+        expect(documentText(draft.value!.blocks), '不能丢的本地原稿');
+        expect(
+          draft.value!.photos.map((p) => p.blockId),
+          original.photos.map((p) => p.blockId),
+        );
+        expect(draft.value!.photos.last.item.uploadLive, isTrue);
+        expect(documentText(draft.working!.draft.blocks), '二次编辑后也不能丢');
+        expect(
+          draft.working!.draft.photos.last.item.uploadedUrl,
+          'https://images.invalid/new.jpg',
+        );
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpAndSettle();
+        await pumpEditor(tester, draft, storage, api);
+        expect((await editorText(tester)).text, '不能丢的本地原稿');
+        await tester.tap(find.text('继续上次二次编辑'));
+        await tester.pumpAndSettle();
+        expect(find.text('确认上传发布'), findsOneWidget);
+        expect((await editorText(tester)).text, '二次编辑后也不能丢');
+      },
+    );
+  }
 
   testWidgets('shared reading photos expand to all rows and collapse', (
     tester,

@@ -95,8 +95,44 @@ void main() {
       await SharedDiaryDraftStore(userId: 'B', dateStr: base.dateStr).load(),
       isNull,
     );
+    final prefs = await SharedPreferences.getInstance();
+    final primaryKey = prefs.getKeys().singleWhere(
+      (k) => k.startsWith('shared_draft_'),
+    );
+    final originalManifest = prefs.getString(primaryKey);
+    for (final publish in [true, false]) {
+      await store.saveWorking(
+        SharedDiaryDraft(
+          base: base.copyWith(revision: 10),
+          blocks: [
+            SharedMomentBlock.text(
+              id: 'text',
+              authorId: 'A',
+              text: '远端合并后的二次编辑',
+            ),
+          ],
+          splits: [],
+          photos: [],
+          reference: base,
+        ),
+        publishAfterConflict: publish,
+      );
+      final reopened = SharedDiaryDraftStore(
+        userId: 'A',
+        dateStr: base.dateStr,
+      );
+      final working = await reopened.loadWorking();
+      expect(working!.publishAfterConflict, publish);
+      expect(working.draft.blocks.single.text, '远端合并后的二次编辑');
+      expect(prefs.getString(primaryKey), originalManifest);
+      final original = (await reopened.load())!;
+      expect(original.blocks.single.text, '正文');
+      expect(original.photos.map((p) => p.blockId), ['local', 'remote']);
+      expect(await original.photos.first.item.file!.readAsBytes(), bytes);
+    }
     await store.clear();
     expect(await store.load(), isNull);
+    expect(await store.loadWorking(), isNull);
     expect((await normal.load())!.feeling, '普通日记草稿');
   });
 

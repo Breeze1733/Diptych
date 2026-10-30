@@ -475,13 +475,27 @@ class SharedDiaryDraftStore {
 
   Future<File> importImage(File image) => _files.importImage(image);
 
-  Future<void> save(SharedDiaryDraft draft) {
+  String get _workingKey => '${_files._key}_merge';
+
+  Future<void> save(SharedDiaryDraft draft) => _saveAt(_files._key, draft);
+
+  Future<void> saveWorking(
+    SharedDiaryDraft draft, {
+    required bool publishAfterConflict,
+  }) => _saveAt(_workingKey, draft, publishAfterConflict: publishAfterConflict);
+
+  Future<void> _saveAt(
+    String key,
+    SharedDiaryDraft draft, {
+    bool? publishAfterConflict,
+  }) {
     final snapshot = {
       'owner_id': _files.userId,
       'base': draft.base.toJson(),
       'blocks': draft.blocks.map((b) => b.toJson()).toList(),
       'splits': jsonDecode(jsonEncode(draft.splits)),
       if (draft.reference != null) 'reference': draft.reference!.toJson(),
+      'publish_after_conflict': ?publishAfterConflict,
     };
     final photos = List<SharedDraftPhoto>.of(draft.photos);
     return _files._serialized(() async {
@@ -504,7 +518,7 @@ class SharedDiaryDraftStore {
       }
       final prefs = await SharedPreferences.getInstance();
       if (!await prefs.setString(
-        _files._key,
+        key,
         jsonEncode({...snapshot, 'photos': serialized}),
       )) {
         throw StateError('无法保存共记草稿');
@@ -516,6 +530,22 @@ class SharedDiaryDraftStore {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_files._key);
     if (raw == null) return null;
+    return _decode(raw);
+  });
+
+  Future<SharedDiaryWorkingDraft?> loadWorking() =>
+      _files._serialized(() async {
+        final prefs = await SharedPreferences.getInstance();
+        final raw = prefs.getString(_workingKey);
+        if (raw == null) return null;
+        final data = jsonDecode(raw) as Map<String, dynamic>;
+        return SharedDiaryWorkingDraft(
+          draft: await _decode(raw),
+          publishAfterConflict: data['publish_after_conflict'] == true,
+        );
+      });
+
+  Future<SharedDiaryDraft> _decode(String raw) async {
     // Corrupt or missing local data must be reported rather than silently dropped.
     final data = jsonDecode(raw) as Map<String, dynamic>;
     if (data['owner_id'] != _files.userId) throw StateError('共记草稿账号不匹配');
@@ -563,10 +593,11 @@ class SharedDiaryDraftStore {
             )
           : null,
     );
-  });
+  }
 
   Future<void> clear() => _files._serialized(() async {
     final prefs = await SharedPreferences.getInstance();
+    if (!await prefs.remove(_workingKey)) throw StateError('无法清除共记合并副本');
     if (!await prefs.remove(_files._key)) throw StateError('无法清除共记草稿');
     MomentDraftStore._sourceNames.remove(_files._key);
     try {

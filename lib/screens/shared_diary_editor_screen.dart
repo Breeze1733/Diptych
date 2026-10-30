@@ -52,6 +52,10 @@ class _SharedDiaryEditorScreenState
   SharedMoment? _conflictLatest;
   SharedMoment? _reference;
   SharedMoment? _lastSavedMoment;
+  SharedDiaryDraft? _protectedOriginal;
+  SharedDiaryWorkingDraft? _recoveredWorking;
+  bool _reviewingConflict = false;
+  bool _conflictPublish = false;
   bool _initializing = true;
   bool _savingDraft = false;
   bool _importing = false;
@@ -109,6 +113,7 @@ class _SharedDiaryEditorScreenState
       photos: () => _photos,
       onUploaded: () {
         if (mounted) {
+          _updateCommittedUrls(_baseMoment);
           setState(() {});
           _draftTimer?.cancel();
           _draftTimer = Timer(const Duration(milliseconds: 350), () {
@@ -138,31 +143,20 @@ class _SharedDiaryEditorScreenState
         final draft = await _draftStore.load();
         if (!mounted) return;
         if (draft != null) {
-          _photos.clear();
-          _photoMetas.clear();
-          for (final photo in draft.photos) {
-            _photos.add(photo.entry);
-            _photoMetas.add(
-              _SharedPhotoMeta(
-                blockId: photo.blockId,
-                authorId: photo.authorId,
-              ),
-            );
-            final item = photo.item;
-            if (item.isLocal && item.uploadedUrl != null) {
-              _uploads.restore(
-                item.file!.path,
-                item.uploadedUrl!,
-                item.uploadedLive ?? false,
-              );
-            }
+          _loadSnapshot(draft);
+          // Reopening starts with the protected local original. A merge workspace
+          // is offered separately; remote content never replaces the draft box.
+          final working = await _draftStore.loadWorking();
+          if (!mounted) return;
+          if (working != null) {
+            _protectedOriginal = draft;
+            _recoveredWorking = working;
+            _conflictPublish = working.publishAfterConflict;
           }
-          _replaceText(draft.base, draft.blocks, draft.splits);
-          _reference = draft.reference;
           if (widget.initialMoment.revision != draft.base.revision) {
             _conflictLatest = widget.initialMoment;
           }
-          _uploads.setCommittedUrls(_imageUrls(_baseMoment));
+          _updateCommittedUrls(_baseMoment);
           _uploads.enqueue(_photos);
         }
       }
@@ -172,6 +166,27 @@ class _SharedDiaryEditorScreenState
     } finally {
       if (mounted) setState(() => _initializing = false);
     }
+  }
+
+  void _loadSnapshot(SharedDiaryDraft draft) {
+    _photos.clear();
+    _photoMetas.clear();
+    for (final photo in draft.photos) {
+      _photos.add(photo.entry);
+      _photoMetas.add(
+        _SharedPhotoMeta(blockId: photo.blockId, authorId: photo.authorId),
+      );
+      final item = photo.item;
+      if (item.isLocal && item.uploadedUrl != null) {
+        _uploads.restore(
+          item.file!.path,
+          item.uploadedUrl!,
+          item.uploadedLive ?? false,
+        );
+      }
+    }
+    _replaceText(draft.base, draft.blocks, draft.splits);
+    _reference = draft.reference;
   }
 
   void _replaceText(
@@ -188,7 +203,15 @@ class _SharedDiaryEditorScreenState
       ..addAll(blocks);
     _splitForeignText
       ..clear()
-      ..addAll(splits);
+      ..addAll(
+        splits.map(
+          (s) => <String, dynamic>{
+            ...s,
+            if (s['fragments'] is List)
+              'fragments': List.of(s['fragments'] as List),
+          },
+        ),
+      );
     _textController = SharedDocumentTextController(
       blocks: _blocks,
       baseBlocks: base.blocks,
@@ -202,37 +225,145 @@ class _SharedDiaryEditorScreenState
       .where((b) => b.type == SharedMomentBlockType.image)
       .map((b) => b.imageUrl);
 
-  Future<void> _persistDraft() {
+  SharedDiaryDraft _snapshotDraft() => SharedDiaryDraft(
+    base: _baseMoment,
+    blocks: List.of(_blocks),
+    splits: _splitForeignText
+        .map(
+          (s) => <String, dynamic>{
+            ...s,
+            if (s['fragments'] is List)
+              'fragments': List.of(s['fragments'] as List),
+          },
+        )
+        .toList(),
+    reference: _reference,
+    photos: [
+      for (var i = 0; i < _photos.length; i++)
+        SharedDraftPhoto(
+          blockId: _photoMetas[i].blockId,
+          authorId: _photoMetas[i].authorId,
+          item: DraftPhotoItem(
+            isLocal: _photos[i].isLocal,
+            file: _photos[i].file,
+            url: _photos[i].url,
+            isMotion: _photos[i].isMotion,
+            uploadLive: _photos[i].uploadLive,
+            uploadedUrl: _photos[i].isLocal
+                ? _uploadedUrls[_photos[i].file!.path]
+                : null,
+            uploadedLive: _photos[i].isLocal
+                ? _uploads.uploadedIsLive[_photos[i].file!.path]
+                : null,
+          ),
+        ),
+    ],
+  );
+
+  bool get _showingUnchangedOriginal {
+    final original = _protectedOriginal;
+    if (_recoveredWorking == null ||
+        original == null ||
+        _blocks.length != original.blocks.length ||
+        _photos.length != original.photos.length) {
+      return false;
+    }
+    for (var i = 0; i < _blocks.length; i++) {
+      if (!_sameSharedBlock(_blocks[i], original.blocks[i])) return false;
+    }
+    for (var i = 0; i < _photos.length; i++) {
+      final saved = original.photos[i];
+      final entry = _photos[i];
+      if (_photoMetas[i].blockId != saved.blockId ||
+          entry.isLocal != saved.item.isLocal ||
+          entry.file?.path != saved.item.file?.path ||
+          entry.url != saved.item.url ||
+          entry.isMotion != saved.item.isMotion ||
+          entry.uploadLive != saved.item.uploadLive) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  Future<void> _persistDraft() async {
     if (_draftBlocked) throw StateError('已有草稿未能完整恢复，请先检查本地存储，避免覆盖');
     _draftTimer?.cancel();
-    return _draftStore.save(
-      SharedDiaryDraft(
-        base: _baseMoment,
-        blocks: List.of(_blocks),
-        splits: _splitForeignText,
-        reference: _reference,
-        photos: [
-          for (var i = 0; i < _photos.length; i++)
-            SharedDraftPhoto(
-              blockId: _photoMetas[i].blockId,
-              authorId: _photoMetas[i].authorId,
-              item: DraftPhotoItem(
-                isLocal: _photos[i].isLocal,
-                file: _photos[i].file,
-                url: _photos[i].url,
-                isMotion: _photos[i].isMotion,
-                uploadLive: _photos[i].uploadLive,
-                uploadedUrl: _photos[i].isLocal
-                    ? _uploadedUrls[_photos[i].file!.path]
-                    : null,
-                uploadedLive: _photos[i].isLocal
-                    ? _uploads.uploadedIsLive[_photos[i].file!.path]
-                    : null,
-              ),
-            ),
-        ],
-      ),
-    );
+    // Merely viewing or refreshing the original must not replace a recoverable
+    // merge workspace, including when its background photo upload completes.
+    if (_showingUnchangedOriginal) return;
+    final snapshot = _snapshotDraft();
+    if (_protectedOriginal != null) {
+      await _draftStore.saveWorking(
+        snapshot,
+        publishAfterConflict: _conflictPublish,
+      );
+      if (mounted && _recoveredWorking != null) {
+        setState(() => _recoveredWorking = null);
+      }
+      return;
+    }
+    await _draftStore.save(snapshot);
+  }
+
+  Future<void> _protectLocalDraft({required bool publish}) async {
+    if (_draftBlocked) throw StateError('已有草稿未能完整恢复，已阻止覆盖');
+    if (_protectedOriginal == null) {
+      final original = _snapshotDraft();
+      await _draftStore.save(original);
+      _protectedOriginal = original;
+    }
+    _conflictPublish = publish;
+    await _persistDraft();
+    _updateCommittedUrls(_baseMoment);
+  }
+
+  void _updateCommittedUrls(SharedMoment latest) {
+    _uploads.setCommittedUrls({
+      ..._imageUrls(latest),
+      if (_protectedOriginal != null) ..._imageUrls(_protectedOriginal!.base),
+      for (final photo
+          in _protectedOriginal?.photos ?? <SharedDraftPhoto>[]) ...[
+        if (!photo.item.isLocal && photo.item.url != null) photo.item.url!,
+        if (photo.item.uploadedUrl != null) photo.item.uploadedUrl!,
+        if (photo.item.file != null &&
+            _uploadedUrls[photo.item.file!.path] != null)
+          _uploadedUrls[photo.item.file!.path]!,
+      ],
+    });
+  }
+
+  Future<void> _returnFromConflict() async {
+    setState(() => _savingDraft = true);
+    try {
+      await _persistDraft();
+    } catch (error) {
+      if (mounted) _showSaveError(error);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _reviewingConflict = false;
+          _savingDraft = false;
+        });
+      }
+    }
+  }
+
+  void _resumeWorkingCopy() {
+    final recovered = _recoveredWorking;
+    if (recovered == null) return;
+    setState(() {
+      _loadSnapshot(recovered.draft);
+      _reviewingConflict = true;
+      _conflictPublish = recovered.publishAfterConflict;
+      _reference ??= _protectedOriginal?.base.copyWith(
+        blocks: _protectedOriginal!.blocks,
+      );
+      _recoveredWorking = null;
+      _conflictLatest = null;
+    });
+    _updateCommittedUrls(_baseMoment);
+    _uploads.enqueue(_photos);
   }
 
   Future<void> _saveDraft() async {
@@ -241,8 +372,13 @@ class _SharedDiaryEditorScreenState
     try {
       await _persistDraft();
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('共记草稿已保存')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _protectedOriginal == null ? '共记草稿已保存' : '二次编辑已暂存，本地原稿保持不变',
+            ),
+          ),
+        );
       }
     } catch (error) {
       if (mounted) _showSaveError(error);
@@ -414,6 +550,7 @@ class _SharedDiaryEditorScreenState
 
   Future<void> _save({bool publish = true}) async {
     if (_saving || _savingDraft || _initializing || _importing) return;
+    _conflictPublish = publish;
     setState(() => _saving = true);
     if (publish) _uploads.setPublishing(true);
     late final List<SharedMomentBlock> draftBlocks;
@@ -431,6 +568,15 @@ class _SharedDiaryEditorScreenState
       await _acceptSaved(saved, publish: publish);
     } on SharedMomentConflictException catch (error) {
       if (!mounted) return;
+      try {
+        await _protectLocalDraft(publish: publish);
+      } catch (failure) {
+        if (mounted) {
+          setState(() => _reviewingConflict = false);
+          _showSaveError(failure);
+        }
+        return;
+      }
       var latest = error.latest;
       if (publish &&
           _textProjectionUnchanged(_baseMoment.blocks, draftBlocks) &&
@@ -468,19 +614,35 @@ class _SharedDiaryEditorScreenState
           } on SharedMomentConflictException catch (next) {
             latest = next.latest;
           } catch (error) {
-            if (mounted) _showSaveError(error);
+            if (mounted) {
+              setState(() => _reviewingConflict = false);
+              _showSaveError(error);
+            }
             return;
           }
         }
       }
       if (!mounted) return;
-      setState(() => _conflictLatest = latest);
+      setState(() {
+        _conflictLatest = latest;
+        _reviewingConflict = false;
+      });
       if (_pageScroll.hasClients) _pageScroll.jumpTo(0);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('对方已更新共记，请拉取最新内容后继续编辑；照片草稿已保留')),
       );
     } catch (error) {
       if (!mounted) return;
+      // A failed second submission returns to the main editor. The protected
+      // original stays untouched; the current working text remains recoverable.
+      if (_reviewingConflict) {
+        setState(() => _reviewingConflict = false);
+        try {
+          await _persistDraft();
+        } catch (_) {
+          /* Original remains intact. */
+        }
+      }
       _showSaveError(error);
     } finally {
       _uploads.setPublishing(false);
@@ -539,7 +701,7 @@ class _SharedDiaryEditorScreenState
       }
     }
     _replaceText(latest, combined, splits);
-    _uploads.setCommittedUrls(_imageUrls(latest));
+    _updateCommittedUrls(latest);
     _conflictLatest = null;
   }
 
@@ -567,7 +729,7 @@ class _SharedDiaryEditorScreenState
     if (latest == null || _saving || _savingDraft) return;
     setState(() => _saving = true);
     try {
-      await _persistDraft();
+      await _protectLocalDraft(publish: _conflictPublish);
       final localDraft = _baseMoment.copyWith(blocks: List.of(_blocks));
       final rebased = _rebaseSharedDraft(
         base: _baseMoment,
@@ -578,8 +740,12 @@ class _SharedDiaryEditorScreenState
       );
       if (!mounted) return;
       setState(() {
-        _reference = rebased.conflicts.isEmpty ? null : localDraft;
+        // Keep this attempt's local edits available for copying. The first
+        // original remains independently saved in the primary draft manifest.
+        _reference = localDraft;
         _adoptDocument(latest, rebased.blocks, rebased.splits);
+        _reviewingConflict = true;
+        _recoveredWorking = null;
       });
       await _persistDraft();
       if (mounted) {
@@ -587,8 +753,8 @@ class _SharedDiaryEditorScreenState
           SnackBar(
             content: Text(
               rebased.conflicts.isEmpty
-                  ? '已拉取最新内容，照片草稿已保留，请检查后保存'
-                  : '部分文字需要核对，原稿已保留供复制；照片草稿仍在',
+                  ? '已进入二次编辑，本地原稿保持不变，请检查后确认'
+                  : '部分文字需从本地原稿核对，原稿和照片草稿均已保护',
             ),
           ),
         );
@@ -609,7 +775,11 @@ class _SharedDiaryEditorScreenState
         .where((block) => block.type == SharedMomentBlockType.image)
         .map((block) => block.imageUrl)
         .toList();
-    _uploads.setCommittedUrls(savedUrls);
+    if (publish) {
+      _uploads.setCommittedUrls(savedUrls);
+    } else {
+      _updateCommittedUrls(saved);
+    }
     _lastSavedMoment = saved;
     if (publish) {
       for (final url in {...previousUrls, ..._uploadedUrls.values}) {
@@ -627,8 +797,9 @@ class _SharedDiaryEditorScreenState
     ref.invalidate(sharedMomentProvider(saved.dateStr));
     if (!publish) {
       setState(() {
-        _reference = null;
+        if (_protectedOriginal == null) _reference = null;
         _adoptDocument(saved, saved.blocks, const []);
+        _reviewingConflict = false;
       });
       await _persistDraft();
       if (mounted) {
@@ -645,6 +816,8 @@ class _SharedDiaryEditorScreenState
     });
     await _persistDraft();
     await _draftStore.clear();
+    _protectedOriginal = null;
+    _recoveredWorking = null;
     await _closeWithResult(saved);
   }
 
@@ -682,6 +855,10 @@ class _SharedDiaryEditorScreenState
         _importing ||
         _exitDialogOpen ||
         _savedSuccessfully) {
+      return;
+    }
+    if (_reviewingConflict) {
+      await _returnFromConflict();
       return;
     }
     if (!_hasChanges) {
@@ -786,9 +963,9 @@ class _SharedDiaryEditorScreenState
                 _baseMoment.dateStr.replaceAll('-', '.'),
                 style: const TextStyle(fontSize: 16),
               ),
-              const Text(
-                '共记',
-                style: TextStyle(
+              Text(
+                _reviewingConflict ? '共记 · 二次编辑' : '共记',
+                style: const TextStyle(
                   fontSize: 11,
                   color: AppTheme.textSecondary,
                   fontWeight: FontWeight.w400,
@@ -811,6 +988,12 @@ class _SharedDiaryEditorScreenState
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                if (_recoveredWorking != null)
+                  TextButton.icon(
+                    onPressed: busy ? null : _resumeWorkingCopy,
+                    icon: const Icon(Icons.restore_rounded),
+                    label: const Text('继续上次二次编辑'),
+                  ),
                 if (_conflictLatest != null)
                   Row(
                     children: [
@@ -826,34 +1009,63 @@ class _SharedDiaryEditorScreenState
                       ),
                     ],
                   ),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: busy ? null : _saveDraft,
-                        child: const Text('存草稿'),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: busy ? null : () => _save(publish: false),
-                        child: const Text('更新文字'),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: FilledButton(
-                        onPressed: busy ? null : () => _save(),
-                        child: Text(
-                          _saving && _uploads.isUploading
-                              ? '$doneCount/$localCount'
-                              : '上传发布',
+                if (_reviewingConflict) ...[
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: busy ? null : _saveDraft,
+                          child: const Text('存草稿'),
                         ),
                       ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: busy ? null : _returnFromConflict,
+                          child: const Text('返回编辑'),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      onPressed: busy
+                          ? null
+                          : () => _save(publish: _conflictPublish),
+                      child: Text(_conflictPublish ? '确认上传发布' : '确认更新文字'),
                     ),
-                  ],
-                ),
+                  ),
+                ] else
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: busy ? null : _saveDraft,
+                          child: const Text('存草稿'),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: busy ? null : () => _save(publish: false),
+                          child: const Text('更新文字'),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: FilledButton(
+                          onPressed: busy ? null : () => _save(),
+                          child: Text(
+                            _saving && _uploads.isUploading
+                                ? '$doneCount/$localCount'
+                                : '上传发布',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
               ],
             ),
           ),
@@ -1059,8 +1271,8 @@ class _ConflictReferenceCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 14),
       color: AppTheme.accentSurface,
       child: ExpansionTile(
-        title: const Text('我的未提交版本（核对用）'),
-        subtitle: const Text('自动合并不了的文字可从这里复制'),
+        title: const Text('本地内容（核对用）'),
+        subtitle: const Text('原稿仍保存在草稿箱，未合并的文字可从这里复制'),
         childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
         children: [SharedDiaryDocument(moment: moment, compact: true)],
       ),

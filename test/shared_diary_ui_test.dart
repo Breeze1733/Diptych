@@ -609,7 +609,7 @@ void main() {
       final fragments = merged.splitForeignText.single['fragments'] as List;
       expect(fragments, hasLength(5));
       expect(fragments.first, 'source');
-      await tester.tap(find.widgetWithText(FilledButton, '上传发布'));
+      await tester.tap(find.widgetWithText(FilledButton, '确认上传发布'));
       await tester.pumpAndSettle();
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 20)),
@@ -629,54 +629,60 @@ void main() {
     },
   );
 
-  testWidgets('changed source keeps all insertions only in reference draft', (
-    tester,
-  ) async {
-    _mockKeepAlive();
-    final source = SharedMomentBlock.text(
-      id: 'source',
-      authorId: 'B',
-      text: 'abcd',
-    );
-    final base = _sharedMoment(blocks: [source]);
-    final latest = base.copyWith(
-      revision: 4,
-      blocks: [source.copyWith(text: '对方更新')],
-    );
-    final api = _RecordingSaveApiService(conflictLatest: latest);
-    final container = ProviderContainer(
-      overrides: [apiServiceProvider.overrideWithValue(api)],
-    );
-    addTearDown(container.dispose);
-    container.read(currentUserProvider.notifier).setUser(_userA);
-    await tester.pumpWidget(
-      UncontrolledProviderScope(
-        container: container,
-        child: MaterialApp(home: SharedDiaryEditorScreen(initialMoment: base)),
-      ),
-    );
-    await tester.pump();
-    _insertTwice(await _showEditorText(tester));
-    await tester.pump();
-    await tester.tap(find.widgetWithText(FilledButton, '上传发布'));
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('拉取最新并二次编辑'));
-    await tester.tap(find.text('拉取最新并二次编辑'));
-    await tester.pumpAndSettle();
+  testWidgets(
+    'changed source preserves the primary draft as well as the working reference',
+    (tester) async {
+      _mockKeepAlive();
+      final source = SharedMomentBlock.text(
+        id: 'source',
+        authorId: 'B',
+        text: 'abcd',
+      );
+      final base = _sharedMoment(blocks: [source]);
+      final latest = base.copyWith(
+        revision: 4,
+        blocks: [source.copyWith(text: '对方更新')],
+      );
+      final api = _RecordingSaveApiService(conflictLatest: latest);
+      final container = ProviderContainer(
+        overrides: [apiServiceProvider.overrideWithValue(api)],
+      );
+      addTearDown(container.dispose);
+      container.read(currentUserProvider.notifier).setUser(_userA);
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            home: SharedDiaryEditorScreen(initialMoment: base),
+          ),
+        ),
+      );
+      await tester.pump();
+      _insertTwice(await _showEditorText(tester));
+      await tester.pump();
+      await tester.tap(find.widgetWithText(FilledButton, '上传发布'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('拉取最新并二次编辑'));
+      await tester.tap(find.text('拉取最新并二次编辑'));
+      await tester.pumpAndSettle();
 
-    final draft = await SharedDiaryDraftStore(
-      userId: 'A',
-      dateStr: base.dateStr,
-    ).load();
-    expect(
-      draft!.reference!.blocks.map((block) => block.text).join(),
-      'aXbcYd',
-    );
-    final merged = await _showEditorText(tester);
-    expect(merged.text, '对方更新');
-    expect(merged.splitForeignText, isEmpty);
-    expect(merged.blocks.map((block) => block.id), ['source']);
-  });
+      final store = SharedDiaryDraftStore(userId: 'A', dateStr: base.dateStr);
+      final draft = await store.load();
+      final working = await store.loadWorking();
+      expect(draft!.blocks.map((block) => block.text).join(), 'aXbcYd');
+      expect(draft.base.revision, base.revision);
+      expect(draft.splits.single['fragments'], hasLength(5));
+      expect(
+        working!.draft.reference!.blocks.map((b) => b.text).join(),
+        'aXbcYd',
+      );
+      expect(working.publishAfterConflict, isTrue);
+      final merged = await _showEditorText(tester);
+      expect(merged.text, '对方更新');
+      expect(merged.splitForeignText, isEmpty);
+      expect(merged.blocks.map((block) => block.id), ['source']);
+    },
+  );
 
   testWidgets('handshake failure keeps the draft and gives a useful message', (
     tester,

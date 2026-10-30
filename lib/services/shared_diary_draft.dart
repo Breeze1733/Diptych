@@ -41,3 +41,14 @@ class SharedDiaryDraft {
     this.reference,
   });
 }
+
+/// A merge session is disposable working state. It never replaces the original draft.
+class SharedDiaryWorkingDraft {
+  final SharedDiaryDraft draft;
+  final bool publishAfterConflict;
+
+  const SharedDiaryWorkingDraft({
+    required this.draft,
+    required this.publishAfterConflict,
+  });
+}
