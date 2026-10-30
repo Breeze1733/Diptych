@@ -25,6 +25,7 @@ class _SharedDiaryReadingScreenState
   late SharedMoment _moment = widget.initialMoment;
   bool _refreshing = false;
   bool _editing = false;
+  bool _photosExpanded = false;
   int _loadVersion = 0;
 
   @override
@@ -88,6 +89,21 @@ class _SharedDiaryReadingScreenState
       appBar: AppBar(
         title: const Text('我们的共记'),
         actions: [
+          if (_moment.blocks
+                  .where((b) => b.type == SharedMomentBlockType.image)
+                  .length >
+              6)
+            IconButton(
+              tooltip: _photosExpanded ? '收起图片列表' : '展开图片列表',
+              onPressed: _refreshing || _editing
+                  ? null
+                  : () => setState(() => _photosExpanded = !_photosExpanded),
+              icon: Icon(
+                _photosExpanded
+                    ? Icons.unfold_less_rounded
+                    : Icons.unfold_more_rounded,
+              ),
+            ),
           IconButton(
             tooltip: '刷新共记',
             onPressed: _refreshing || _editing ? null : _refresh,
@@ -113,7 +129,10 @@ class _SharedDiaryReadingScreenState
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  SharedDiaryDocument(moment: _moment),
+                  SharedDiaryDocument(
+                    moment: _moment,
+                    photosExpanded: _photosExpanded,
+                  ),
                   const SizedBox(height: 20),
                   Text(
                     DateHelper.toEditTime(_moment.updatedAt),

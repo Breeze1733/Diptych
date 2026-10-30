@@ -337,8 +337,18 @@ class _CalendarPickerState extends ConsumerState<CalendarPicker> {
               ),
               const SizedBox(height: 16),
               Row(
-                mainAxisAlignment: MainAxisAlignment.end,
                 children: [
+                  TextButton(
+                    onPressed: () {
+                      final today = CalendarPicker.lastDate;
+                      setState(() {
+                        _selectedDay = today;
+                        _focusedDay = today;
+                      });
+                    },
+                    child: const Text('回到今日'),
+                  ),
+                  const Spacer(),
                   TextButton(
                     onPressed: () => Navigator.pop(context),
                     child: Text(AppStrings.cancel),

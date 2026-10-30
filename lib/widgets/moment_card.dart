@@ -8,6 +8,7 @@ import '../constants/strings.dart';
 import '../models/moment.dart';
 import '../utils/date_helper.dart';
 import 'avatar_widget.dart';
+import 'expandable_photo_panel.dart';
 import 'image_gallery.dart';
 import 'image_download_placeholder.dart';
 import 'private_network_image.dart';
@@ -25,6 +26,7 @@ class MomentCard extends StatefulWidget {
   final void Function(Comment comment)? onDeleteComment;
   final void Function(Comment? parentComment)? onReplyComment;
   final bool expandedReading;
+  final bool photosExpanded;
   final String? focusCommentId;
   final ValueChanged<String>? onCommentRevealed;
   final bool showInlineAction;
@@ -42,6 +44,7 @@ class MomentCard extends StatefulWidget {
     this.onDeleteComment,
     this.onReplyComment,
     this.expandedReading = false,
+    this.photosExpanded = false,
     this.focusCommentId,
     this.onCommentRevealed,
     this.showInlineAction = true,
@@ -54,6 +57,7 @@ class MomentCard extends StatefulWidget {
 class _MomentCardState extends State<MomentCard> {
   late bool _commentsExpanded;
   final _commentKeys = <String, GlobalKey>{};
+  final _photoScrollController = ScrollController();
 
   Moment get moment => widget.moment;
   String get _displayName =>
@@ -63,6 +67,12 @@ class _MomentCardState extends State<MomentCard> {
   void initState() {
     super.initState();
     _commentsExpanded = widget.expandedReading;
+  }
+
+  @override
+  void dispose() {
+    _photoScrollController.dispose();
+    super.dispose();
   }
 
   @override
@@ -323,28 +333,48 @@ class _MomentCardState extends State<MomentCard> {
     ),
   );
   void _openReading(BuildContext context) {
+    var photosExpanded = false;
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (readingContext) {
-          return Scaffold(
-            appBar: AppBar(title: Text('$_displayName 的日记')),
-            body: SafeArea(
-              top: false,
-              child: SingleChildScrollView(
-                child: Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 680),
-                    child: MomentCard(
-                      moment: moment,
-                      nickname: widget.nickname,
-                      avatarUrl: widget.avatarUrl,
-                      partnerNickname: widget.partnerNickname,
-                      isSelf: widget.isSelf,
-                      expandedReading: true,
-                      onEdit: widget.onEdit,
-                      onComment: widget.onComment,
-                      onDeleteComment: widget.onDeleteComment,
-                      onReplyComment: widget.onReplyComment,
+          return StatefulBuilder(
+            builder: (context, setReadingState) => Scaffold(
+              appBar: AppBar(
+                title: Text('$_displayName 的日记'),
+                actions: [
+                  if (moment.imageUrls.length > 6)
+                    IconButton(
+                      tooltip: photosExpanded ? '收起图片列表' : '展开图片列表',
+                      onPressed: () => setReadingState(
+                        () => photosExpanded = !photosExpanded,
+                      ),
+                      icon: Icon(
+                        photosExpanded
+                            ? Icons.unfold_less_rounded
+                            : Icons.unfold_more_rounded,
+                      ),
+                    ),
+                ],
+              ),
+              body: SafeArea(
+                top: false,
+                child: SingleChildScrollView(
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 680),
+                      child: MomentCard(
+                        moment: moment,
+                        nickname: widget.nickname,
+                        avatarUrl: widget.avatarUrl,
+                        partnerNickname: widget.partnerNickname,
+                        isSelf: widget.isSelf,
+                        expandedReading: true,
+                        photosExpanded: photosExpanded,
+                        onEdit: widget.onEdit,
+                        onComment: widget.onComment,
+                        onDeleteComment: widget.onDeleteComment,
+                        onReplyComment: widget.onReplyComment,
+                      ),
                     ),
                   ),
                 ),
@@ -597,46 +627,60 @@ class _MomentCardState extends State<MomentCard> {
     );
   }
 
-  /// 详情页沿用编辑器的三列照片节奏，但让外层阅读页负责整页滚动。
-  ///
-  /// `shrinkWrap` 会把所有行完整展开，禁用自身滚动则避免照片区与正文争抢
-  /// 手势；超过六张时自然增加第三行及后续行。
+  /// 默认保留两行局部滚动；详情顶栏可以将全部照片加入整页阅读。
   Widget _buildReadingPhotoGrid(BuildContext context) {
     final urls = moment.imageUrls;
-    return GridView.builder(
-      key: const ValueKey('diary-reading-photo-grid'),
-      shrinkWrap: true,
-      primary: false,
-      physics: const NeverScrollableScrollPhysics(),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
-        mainAxisSpacing: 8,
-        crossAxisSpacing: 8,
-      ),
+    return ExpandablePhotoPanel(
       itemCount: urls.length,
-      itemBuilder: (context, index) {
-        final url = urls[index];
-        return GestureDetector(
-          key: ValueKey('diary-reading-photo-$index'),
-          behavior: HitTestBehavior.opaque,
-          onTap: () =>
-              showFullScreenPreview(context, urls: urls, initialIndex: index),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                PrivateNetworkImage(
-                  imageUrl: url,
-                  usePreview: true,
-                  fit: BoxFit.cover,
-                  placeholder: (_, imageUrl) =>
-                      ImageDownloadPlaceholder(url: imageUrl),
-                  errorWidget: (_, _, _) => _imagePlaceholder(),
-                ),
-                _MomentCoverLiveBadge(url: url),
-              ],
+      expanded: widget.photosExpanded,
+      builder: (context, expanded) {
+        final scrollable = !expanded && urls.length > 6;
+        return Scrollbar(
+          controller: _photoScrollController,
+          thumbVisibility: scrollable,
+          child: GridView.builder(
+            key: const ValueKey('diary-reading-photo-grid'),
+            controller: _photoScrollController,
+            primary: false,
+            padding: EdgeInsets.zero,
+            physics: scrollable
+                ? const ClampingScrollPhysics()
+                : const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              mainAxisSpacing: 8,
+              crossAxisSpacing: 8,
             ),
+            itemCount: urls.length,
+            itemBuilder: (context, index) {
+              final url = urls[index];
+              return GestureDetector(
+                key: ValueKey('diary-reading-photo-$index'),
+                behavior: HitTestBehavior.opaque,
+                onTap: () => showFullScreenPreview(
+                  context,
+                  urls: urls,
+                  initialIndex: index,
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      PrivateNetworkImage(
+                        imageUrl: url,
+                        usePreview: true,
+                        fit: BoxFit.cover,
+                        placeholder: (_, imageUrl) =>
+                            ImageDownloadPlaceholder(url: imageUrl),
+                        errorWidget: (_, _, _) => _imagePlaceholder(),
+                      ),
+                      _MomentCoverLiveBadge(url: url),
+                    ],
+                  ),
+                ),
+              );
+            },
           ),
         );
       },
