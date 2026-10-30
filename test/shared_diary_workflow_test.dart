@@ -6,6 +6,7 @@ import 'package:diptych/models/shared_moment.dart';
 import 'package:diptych/providers/auth_provider.dart';
 import 'package:diptych/providers/shared_diary_draft_provider.dart';
 import 'package:diptych/screens/shared_diary_editor_screen.dart';
+import 'package:diptych/screens/shared_diary_reading_screen.dart';
 import 'package:diptych/services/api_service.dart';
 import 'package:diptych/services/draft_service.dart';
 import 'package:diptych/services/shared_diary_draft.dart';
@@ -117,9 +118,11 @@ class RecordingApi extends ApiService {
   final calls = <List<SharedMomentBlock>>[];
   final revisions = <int>[];
   SharedMoment? conflict;
+  SharedMoment? readingMoment;
   Object? failure;
   @override
-  Future<SharedMoment> getSharedMomentById(String id) async => day();
+  Future<SharedMoment> getSharedMomentById(String id) async =>
+      readingMoment ?? day();
   @override
   Future<SharedMoment> updateSharedMoment({
     required SharedMoment moment,
@@ -532,8 +535,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.pump(const Duration(seconds: 1));
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('拉取最新共记'));
-      await tester.pumpAndSettle();
+      expect(find.byTooltip('拉取最新共记'), findsNothing);
       await tester.tap(find.text('存草稿'));
       await tester.pumpAndSettle();
       expect(documentText(draft.value!.blocks), '原文');
@@ -647,27 +649,107 @@ void main() {
       ],
     );
     await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          apiServiceProvider.overrideWithValue(
+            RecordingApi()..readingMoment = moment,
+          ),
+        ],
+        child: MaterialApp(
+          home: SharedDiaryReadingScreen(initialMoment: moment),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final grid = find.byType(GridView);
+    final collapsed = tester.getSize(grid).height;
+    final expand = find.byTooltip('展开图片列表');
+    final refresh = find.byTooltip('刷新共记');
+    expect(
+      find.descendant(of: find.byType(AppBar), matching: expand),
+      findsOneWidget,
+    );
+    expect(tester.getSize(expand).width, lessThanOrEqualTo(48));
+    expect(
+      tester.getCenter(expand).dy,
+      closeTo(tester.getCenter(refresh).dy, .01),
+    );
+    await tester.drag(grid, const Offset(0, -150));
+    await tester.pumpAndSettle();
+    expect(tester.widget<GridView>(grid).controller!.offset, greaterThan(0));
+    await tester.tap(expand);
+    await tester.pumpAndSettle();
+    expect(tester.getSize(grid).height, greaterThan(collapsed * 1.8));
+    await tester.tap(find.byTooltip('收起图片列表'));
+    await tester.pumpAndSettle();
+    expect(tester.getSize(grid).height, collapsed);
+    await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
           body: SingleChildScrollView(
-            child: SizedBox(
-              width: 360,
-              child: SharedDiaryDocument(moment: moment),
-            ),
+            child: SharedDiaryDocument(moment: moment, compact: true),
           ),
         ),
       ),
     );
-    final grid = find.byType(GridView);
-    final collapsed = tester.getSize(grid).height;
-    await tester.tap(find.text('展开图片列表'));
     await tester.pumpAndSettle();
-    expect(tester.getSize(grid).height, greaterThan(collapsed * 1.8));
-    await tester.ensureVisible(find.text('收起图片列表'));
-    await tester.tap(find.text('收起图片列表'));
-    await tester.pumpAndSettle();
-    expect(tester.getSize(grid).height, collapsed);
+    expect(find.byTooltip('展开图片列表'), findsNothing);
+    expect(find.text('展开图片列表'), findsNothing);
+    expect(
+      tester.widget<GridView>(find.byType(GridView)).physics,
+      isA<ClampingScrollPhysics>(),
+    );
   });
+
+  testWidgets(
+    'shared editor keeps two locally scrolling rows without expansion or refresh controls',
+    (tester) async {
+      final draft = MemoryDraft(),
+          storage = PendingStorage(),
+          api = RecordingApi();
+      final moment = day().copyWith(
+        blocks: [
+          for (var i = 0; i < 12; i++)
+            SharedMomentBlock.image(
+              id: 'photo-$i',
+              authorId: 'A',
+              imageUrl: 'https://images.invalid/$i.jpg',
+            ),
+        ],
+      );
+      draft.value = SharedDiaryDraft(
+        base: moment,
+        blocks: moment.blocks,
+        splits: [],
+        photos: [
+          for (final block in moment.blocks)
+            SharedDraftPhoto(
+              blockId: block.id,
+              authorId: block.authorId,
+              item: DraftPhotoItem(isLocal: false, url: block.imageUrl),
+            ),
+        ],
+      );
+      await pumpEditor(tester, draft, storage, api);
+      expect(
+        tester
+            .widget<PhotoGridPicker>(find.byType(PhotoGridPicker))
+            .visibleRows,
+        2,
+      );
+      expect(find.byTooltip('展开图片列表'), findsNothing);
+      expect(find.text('展开图片列表'), findsNothing);
+      expect(find.byIcon(Icons.refresh_rounded), findsNothing);
+      final grid = find.byKey(const ValueKey('diary-photo-grid'));
+      expect(
+        tester.widget<GridView>(grid).physics,
+        isA<ClampingScrollPhysics>(),
+      );
+      await tester.drag(grid, const Offset(0, -150));
+      await tester.pumpAndSettle();
+      expect(tester.widget<GridView>(grid).controller!.offset, greaterThan(0));
+    },
+  );
 
   testWidgets(
     'long press at collapsed grid edge scrolls beyond the first six photos',

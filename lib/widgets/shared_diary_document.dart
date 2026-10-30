@@ -11,11 +11,13 @@ import 'private_network_image.dart';
 class SharedDiaryDocument extends StatelessWidget {
   final SharedMoment moment;
   final bool compact;
+  final bool photosExpanded;
 
   const SharedDiaryDocument({
     super.key,
     required this.moment,
     this.compact = false,
+    this.photosExpanded = false,
   });
 
   @override
@@ -61,6 +63,7 @@ class SharedDiaryDocument extends StatelessWidget {
             key: const ValueKey('shared-image-grid'),
             images: images,
             compact: compact,
+            expanded: photosExpanded,
           ),
         if (images.isNotEmpty && textRuns.isNotEmpty)
           SizedBox(height: compact ? 12 : 20),
@@ -92,11 +95,13 @@ class SharedDiaryDocument extends StatelessWidget {
 class _SharedImageGrid extends StatefulWidget {
   final List<SharedMomentBlock> images;
   final bool compact;
+  final bool expanded;
 
   const _SharedImageGrid({
     super.key,
     required this.images,
     required this.compact,
+    required this.expanded,
   });
 
   @override
@@ -121,6 +126,7 @@ class _SharedImageGridState extends State<_SharedImageGrid> {
     return ExpandablePhotoPanel(
       itemCount: widget.images.length,
       spacing: spacing,
+      expanded: widget.expanded,
       builder: (context, expanded) {
         final scrollable = !expanded && widget.images.length > 6;
         return LayoutBuilder(

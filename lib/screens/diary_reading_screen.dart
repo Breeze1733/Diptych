@@ -30,6 +30,7 @@ class _DiaryReadingScreenState extends ConsumerState<DiaryReadingScreen> {
   bool _refreshing = false;
   bool _publishing = false;
   bool _editing = false;
+  bool _photosExpanded = false;
   bool _commentDialogOpen = false;
   int _loadVersion = 0;
   String? _focusCommentId;
@@ -256,6 +257,18 @@ class _DiaryReadingScreenState extends ConsumerState<DiaryReadingScreen> {
       appBar: AppBar(
         title: Text('$name 的日记'),
         actions: [
+          if (_moment.imageUrls.length > 6)
+            IconButton(
+              tooltip: _photosExpanded ? '收起图片列表' : '展开图片列表',
+              onPressed: _refreshing || _publishing || _editing
+                  ? null
+                  : () => setState(() => _photosExpanded = !_photosExpanded),
+              icon: Icon(
+                _photosExpanded
+                    ? Icons.unfold_less_rounded
+                    : Icons.unfold_more_rounded,
+              ),
+            ),
           IconButton(
             tooltip: '刷新这条日记',
             onPressed: _refreshing || _publishing || _editing
@@ -288,6 +301,7 @@ class _DiaryReadingScreenState extends ConsumerState<DiaryReadingScreen> {
                 partnerNickname: other?.nickname ?? '',
                 isSelf: isSelf,
                 expandedReading: true,
+                photosExpanded: _photosExpanded,
                 focusCommentId: _focusCommentId,
                 showInlineAction: isSelf,
                 onCommentRevealed: (_) {

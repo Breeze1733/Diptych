@@ -718,25 +718,6 @@ class _SharedDiaryEditorScreenState
     _conflictLatest = null;
   }
 
-  Future<void> _refreshLatest() async {
-    if (_saving || _initializing || _savingDraft || _importing) return;
-    setState(() => _saving = true);
-    try {
-      await _persistDraft();
-      final latest = await ref
-          .read(apiServiceProvider)
-          .getSharedMomentById(_baseMoment.id);
-      if (mounted) {
-        setState(() => _conflictLatest = latest);
-        if (_pageScroll.hasClients) _pageScroll.jumpTo(0);
-      }
-    } catch (error) {
-      if (mounted) _showSaveError(error);
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
-
   Future<void> _mergeLatest() async {
     final latest = _conflictLatest;
     if (latest == null || _saving || _savingDraft) return;
@@ -990,13 +971,6 @@ class _SharedDiaryEditorScreenState
               ),
             ],
           ),
-          actions: [
-            IconButton(
-              tooltip: '拉取最新共记',
-              onPressed: busy ? null : _refreshLatest,
-              icon: const Icon(Icons.refresh_rounded),
-            ),
-          ],
         ),
         bottomNavigationBar: SafeArea(
           top: false,
@@ -1106,9 +1080,9 @@ class _SharedDiaryEditorScreenState
                     ExpandablePhotoPanel(
                       itemCount: _photos.length + 1,
                       minimumRows: 2,
-                      builder: (context, expanded) => PhotoGridPicker(
+                      builder: (context, _) => PhotoGridPicker(
                         entries: _photos,
-                        visibleRows: expanded ? null : 2,
+                        visibleRows: 2,
                         statusProvider: (entry) {
                           if (!entry.isLocal) return PhotoUploadStatus.success;
                           return _uploadStatuses[entry.file!.path] ??
