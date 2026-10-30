@@ -130,6 +130,13 @@ void main() {
       expect(original.photos.map((p) => p.blockId), ['local', 'remote']);
       expect(await original.photos.first.item.file!.readAsBytes(), bytes);
     }
+    await store.clearWorking();
+    expect(await store.loadWorking(), isNull);
+    expect(prefs.getString(primaryKey), originalManifest);
+    expect(
+      await (await store.load())!.photos.first.item.file!.readAsBytes(),
+      bytes,
+    );
     await store.clear();
     expect(await store.load(), isNull);
     expect(await store.loadWorking(), isNull);

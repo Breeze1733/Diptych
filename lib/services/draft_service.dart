@@ -545,6 +545,12 @@ class SharedDiaryDraftStore {
         );
       });
 
+  Future<void> clearWorking() => _files._serialized(() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!await prefs.remove(_workingKey)) throw StateError('无法清除共记合并副本');
+    // Files are shared with the primary draft and stay until a full clear.
+  });
+
   Future<SharedDiaryDraft> _decode(String raw) async {
     // Corrupt or missing local data must be reported rather than silently dropped.
     final data = jsonDecode(raw) as Map<String, dynamic>;

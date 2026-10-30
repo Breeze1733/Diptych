@@ -115,7 +115,7 @@ class _ImageConflictApiService extends ApiService {
 
 class _RecordingSaveApiService extends ApiService {
   final SharedMoment? conflictLatest;
-  final bool failHandshake;
+  bool failHandshake;
   final requests =
       <
         ({
@@ -681,6 +681,83 @@ void main() {
       expect(merged.text, '对方更新');
       expect(merged.splitForeignText, isEmpty);
       expect(merged.blocks.map((block) => block.id), ['source']);
+    },
+  );
+
+  testWidgets(
+    'failed conflict confirmation restores its processed text and split metadata, then success uses the latest base',
+    (tester) async {
+      _mockKeepAlive();
+      final source = SharedMomentBlock.text(
+        id: 'source',
+        authorId: 'B',
+        text: 'abcd',
+      );
+      final base = _sharedMoment(blocks: [source]);
+      final latest = base.copyWith(
+        revision: 4,
+        blocks: [
+          source,
+          SharedMomentBlock.text(id: 'other', authorId: 'B', text: '新内容'),
+        ],
+      );
+      final api = _RecordingSaveApiService(conflictLatest: latest);
+      final container = ProviderContainer(
+        overrides: [apiServiceProvider.overrideWithValue(api)],
+      );
+      addTearDown(container.dispose);
+      container.read(currentUserProvider.notifier).setUser(_userA);
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            home: SharedDiaryEditorScreen(initialMoment: base),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      _insertTwice(await _showEditorText(tester));
+      await tester.pump();
+      await tester.tap(find.text('上传发布'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('拉取最新并二次编辑'));
+      await tester.pumpAndSettle();
+      final processed = await _showEditorText(tester);
+      processed.selection = const TextSelection.collapsed(offset: 3);
+      processed.value = const TextEditingValue(
+        text: 'aXbZcYd新内容',
+        selection: TextSelection.collapsed(offset: 4),
+      );
+      await tester.pump();
+      final expectedBlocks = processed.blocks.map((b) => b.toJson()).toList();
+      final fragments = List.of(
+        processed.splitForeignText.single['fragments'] as List,
+      );
+      expect(fragments, hasLength(7));
+      api.failHandshake = true;
+      await tester.tap(find.text('确认上传发布'));
+      await tester.pumpAndSettle();
+      final restored = await _showEditorText(tester);
+      expect(restored.text, 'aXbZcYd新内容');
+      expect(restored.blocks.map((b) => b.toJson()), expectedBlocks);
+      expect(restored.splitForeignText.single['fragments'], fragments);
+      expect(find.text('上传发布'), findsOneWidget);
+      final store = SharedDiaryDraftStore(userId: 'A', dateStr: base.dateStr);
+      final savedDraft = (await store.load())!;
+      expect(savedDraft.base.revision, 4);
+      expect(savedDraft.blocks.map((b) => b.toJson()), expectedBlocks);
+      expect(savedDraft.splits.single['fragments'], fragments);
+      expect(await store.loadWorking(), isNull);
+      api.failHandshake = false;
+      await tester.tap(find.text('更新文字'));
+      await tester.pumpAndSettle();
+      expect(api.requests.last.moment.revision, 4);
+      expect(api.requests.last.splits.single['fragments'], fragments);
+      final updated = (await store.load())!;
+      expect(updated.base.revision, 5);
+      expect(updated.reference, isNull);
+      expect(updated.splits, isEmpty);
+      expect((await _showEditorText(tester)).text, 'aXbZcYd新内容');
     },
   );
 

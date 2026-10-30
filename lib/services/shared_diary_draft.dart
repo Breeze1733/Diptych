@@ -42,7 +42,7 @@ class SharedDiaryDraft {
   });
 }
 
-/// A merge session is disposable working state. It never replaces the original draft.
+/// A conflict workspace is saved separately until the next submission or return.
 class SharedDiaryWorkingDraft {
   final SharedDiaryDraft draft;
   final bool publishAfterConflict;
