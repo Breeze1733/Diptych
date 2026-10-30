@@ -50,9 +50,14 @@ class MemoryDraft extends SharedDiaryDraftStore {
   SharedDiaryWorkingDraft? working;
   int saves = 0;
   int? failAtRevision;
+  Object? loadFailure;
   MemoryDraft() : super(userId: 'A', dateStr: '2026-10-29');
   @override
-  Future<SharedDiaryDraft?> load() async => value;
+  Future<SharedDiaryDraft?> load() async {
+    if (loadFailure != null) throw loadFailure!;
+    return value;
+  }
+
   @override
   Future<void> save(SharedDiaryDraft draft) async {
     if (draft.base.revision == failAtRevision) throw StateError('本地存储失败');
@@ -242,6 +247,143 @@ void main() {
       ...day().blocks.skip(1),
     ],
   );
+
+  testWidgets(
+    'reverted saved text stays reverted after leaving and reopening',
+    (tester) async {
+      final draft = MemoryDraft(),
+          storage = PendingStorage(),
+          api = RecordingApi();
+      await pumpEditor(tester, draft, storage, api, pushRoute: true);
+      await editText(tester, '原文曾经添加的内容');
+      await tester.tap(find.text('存草稿'));
+      await tester.pumpAndSettle();
+      expect(documentText(draft.value!.blocks), '原文曾经添加的内容');
+      await editText(tester, '原文');
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(find.byType(SharedDiaryEditorScreen), findsNothing);
+      await tester.tap(find.text('打开共记'));
+      await tester.pumpAndSettle();
+      expect((await editorText(tester)).text, '原文');
+    },
+  );
+
+  testWidgets('removed imported photos stay removed after an unchanged exit', (
+    tester,
+  ) async {
+    final draft = MemoryDraft(),
+        storage = PendingStorage(),
+        api = RecordingApi();
+    await pumpEditor(tester, draft, storage, api, pushRoute: true);
+    await addPhoto(tester);
+    expect(draft.value!.photos, hasLength(3));
+    tester.widget<PhotoGridPicker>(find.byType(PhotoGridPicker)).onRemoved(2);
+    await tester.pump();
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.byType(SharedDiaryEditorScreen), findsNothing);
+    await tester.tap(find.text('打开共记'));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<PhotoGridPicker>(find.byType(PhotoGridPicker)).entries,
+      hasLength(2),
+    );
+    expect(storage.uploads, 1);
+  });
+
+  testWidgets(
+    'an unchanged exit preserves the recoverable conflict workspace',
+    (tester) async {
+      final draft = MemoryDraft(),
+          storage = PendingStorage(),
+          api = RecordingApi();
+      final base = day();
+      draft.value = SharedDiaryDraft(
+        base: base,
+        blocks: base.blocks,
+        splits: [],
+        photos: [
+          for (final b in base.blocks.where(
+            (b) => b.type == SharedMomentBlockType.image,
+          ))
+            SharedDraftPhoto(
+              blockId: b.id,
+              authorId: b.authorId,
+              item: DraftPhotoItem(isLocal: false, url: b.imageUrl),
+            ),
+        ],
+      );
+      final working = SharedDiaryWorkingDraft(
+        draft: SharedDiaryDraft(
+          base: base,
+          blocks: [base.blocks.first.copyWith(text: '尚未确认的二次编辑')],
+          splits: [],
+          photos: [],
+        ),
+        publishAfterConflict: false,
+      );
+      draft.working = working;
+      await pumpEditor(tester, draft, storage, api, pushRoute: true);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(identical(draft.working, working), isTrue);
+      await tester.tap(find.text('打开共记'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('继续上次二次编辑'));
+      await tester.pumpAndSettle();
+      expect((await editorText(tester)).text, '尚未确认的二次编辑');
+    },
+  );
+
+  testWidgets('failed draft sync keeps an unchanged editor open for retry', (
+    tester,
+  ) async {
+    final draft = MemoryDraft(),
+        storage = PendingStorage(),
+        api = RecordingApi();
+    await pumpEditor(tester, draft, storage, api, pushRoute: true);
+    await editText(tester, '原文曾经添加的内容');
+    await tester.tap(find.text('存草稿'));
+    await tester.pumpAndSettle();
+    await editText(tester, '原文');
+    draft.failAtRevision = 2;
+    // Let the earlier successful-save notification finish before the error.
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpAndSettle();
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.byType(SharedDiaryEditorScreen), findsOneWidget);
+    expect(find.textContaining('本地存储失败'), findsOneWidget);
+    draft.failAtRevision = null;
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.byType(SharedDiaryEditorScreen), findsNothing);
+    expect(documentText(draft.value!.blocks), '原文');
+  });
+
+  testWidgets('an unreadable draft is preserved when leaving without edits', (
+    tester,
+  ) async {
+    final draft = MemoryDraft(),
+        storage = PendingStorage(),
+        api = RecordingApi();
+    final saved = SharedDiaryDraft(
+      base: day(),
+      blocks: [day().blocks.first.copyWith(text: '无法恢复但不能覆盖的草稿')],
+      splits: [],
+      photos: [],
+    );
+    draft.value = saved;
+    draft.loadFailure = StateError('本地照片缺失');
+    await pumpEditor(tester, draft, storage, api, pushRoute: true);
+    expect(find.textContaining('本地照片缺失'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.byType(SharedDiaryEditorScreen), findsNothing);
+    expect(identical(draft.value, saved), isTrue);
+    expect(draft.saves, 0);
+  });
 
   testWidgets(
     'draft and text updates stay open and never wait for pending photos',

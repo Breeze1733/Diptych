@@ -203,59 +203,66 @@ class _PhotoGridPickerState extends State<PhotoGridPicker> {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final rows = visibleRows;
-        final bounded = rows != null && constraints.hasBoundedHeight;
-        final spacing = bounded
-            ? (constraints.maxHeight / 12).clamp(0.0, 8.0)
-            : 8.0;
-        final minimumSlots = bounded ? rows * 3 : 0;
-        final itemCount = entries.length + 1 < minimumSlots
-            ? minimumSlots
-            : entries.length + 1;
-        return GridView.builder(
-          controller: _scrollController,
-          key: const ValueKey('diary-photo-grid'),
-          primary: false,
-          padding: EdgeInsets.zero,
-          shrinkWrap: !bounded,
-          physics: bounded
-              ? const ClampingScrollPhysics()
-              : const NeverScrollableScrollPhysics(),
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 3,
-            mainAxisSpacing: spacing,
-            crossAxisSpacing: spacing,
-            mainAxisExtent: bounded
-                ? ((constraints.maxHeight - spacing * (rows - 1)) / rows).clamp(
-                    .1,
-                    double.infinity,
-                  )
-                : null,
-          ),
-          itemCount: itemCount,
-          itemBuilder: (context, index) {
-            final Widget tile;
-            if (index == entries.length) {
-              tile = _buildAddTile(context);
-            } else if (index > entries.length) {
-              tile = DecoratedBox(
-                decoration: BoxDecoration(
-                  color: AppTheme.softSurface,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              );
-            } else {
-              tile = _buildPhotoTile(index);
-            }
-            return KeyedSubtree(
-              key: ValueKey('photo-slot-$index'),
-              child: tile,
-            );
-          },
-        );
+    // Grid children can be recycled mid-drag. Track the pointer here so movement
+    // and termination still arrive after the source Draggable is disposed.
+    return Listener(
+      onPointerMove: (event) {
+        if (_dragTimer != null) _dragPosition = event.position;
       },
+      onPointerUp: (_) => _stopDrag(),
+      onPointerCancel: (_) => _stopDrag(),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final rows = visibleRows;
+          final bounded = rows != null && constraints.hasBoundedHeight;
+          final spacing = bounded
+              ? (constraints.maxHeight / 12).clamp(0.0, 8.0)
+              : 8.0;
+          final minimumSlots = bounded ? rows * 3 : 0;
+          final itemCount = entries.length + 1 < minimumSlots
+              ? minimumSlots
+              : entries.length + 1;
+          return GridView.builder(
+            controller: _scrollController,
+            key: const ValueKey('diary-photo-grid'),
+            primary: false,
+            padding: EdgeInsets.zero,
+            shrinkWrap: !bounded,
+            physics: bounded
+                ? const ClampingScrollPhysics()
+                : const NeverScrollableScrollPhysics(),
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              mainAxisSpacing: spacing,
+              crossAxisSpacing: spacing,
+              mainAxisExtent: bounded
+                  ? ((constraints.maxHeight - spacing * (rows - 1)) / rows)
+                        .clamp(.1, double.infinity)
+                  : null,
+            ),
+            itemCount: itemCount,
+            itemBuilder: (context, index) {
+              final Widget tile;
+              if (index == entries.length) {
+                tile = _buildAddTile(context);
+              } else if (index > entries.length) {
+                tile = DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: AppTheme.softSurface,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                );
+              } else {
+                tile = _buildPhotoTile(index);
+              }
+              return KeyedSubtree(
+                key: ValueKey('photo-slot-$index'),
+                child: tile,
+              );
+            },
+          );
+        },
+      ),
     );
   }
 
@@ -357,8 +364,6 @@ class _PhotoGridPickerState extends State<PhotoGridPicker> {
                 (_) => _autoScroll(),
               );
             },
-            onDragUpdate: (details) => _dragPosition = details.globalPosition,
-            onDragEnd: (_) => _stopDrag(),
             feedback: Material(
               color: Colors.transparent,
               elevation: 6,

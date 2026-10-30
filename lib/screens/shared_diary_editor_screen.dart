@@ -23,17 +23,8 @@ import '../widgets/shared_diary_document.dart';
 
 class SharedDiaryEditorScreen extends ConsumerStatefulWidget {
   final SharedMoment initialMoment;
-  final List<SharedMomentBlock>? initialBlocks;
-  final List<Map<String, dynamic>> initialSplitForeignText;
-  final SharedMoment? conflictReference;
 
-  const SharedDiaryEditorScreen({
-    super.key,
-    required this.initialMoment,
-    this.initialBlocks,
-    this.initialSplitForeignText = const [],
-    this.conflictReference,
-  });
+  const SharedDiaryEditorScreen({super.key, required this.initialMoment});
 
   @override
   ConsumerState<SharedDiaryEditorScreen> createState() =>
@@ -84,14 +75,9 @@ class _SharedDiaryEditorScreenState
         dateStr: widget.initialMoment.dateStr,
       )),
     );
-    _reference = widget.conflictReference;
     _baseMoment = widget.initialMoment;
-    _blocks = List<SharedMomentBlock>.of(
-      widget.initialBlocks ?? widget.initialMoment.blocks,
-    );
-    _splitForeignText = widget.initialSplitForeignText
-        .map((item) => Map<String, dynamic>.from(item))
-        .toList();
+    _blocks = List<SharedMomentBlock>.of(widget.initialMoment.blocks);
+    _splitForeignText = [];
     _textController = SharedDocumentTextController(
       blocks: _blocks,
       baseBlocks: _baseMoment.blocks,
@@ -139,25 +125,23 @@ class _SharedDiaryEditorScreenState
 
   Future<void> _restoreDraft() async {
     try {
-      if (widget.initialBlocks == null) {
-        final draft = await _draftStore.load();
+      final draft = await _draftStore.load();
+      if (!mounted) return;
+      if (draft != null) {
+        _loadSnapshot(draft);
+        // Recover the last submission state, with an unfinished conflict
+        // workspace offered separately.
+        final working = await _draftStore.loadWorking();
         if (!mounted) return;
-        if (draft != null) {
-          _loadSnapshot(draft);
-          // Recover the last submission state, with an unfinished conflict
-          // workspace offered separately.
-          final working = await _draftStore.loadWorking();
-          if (!mounted) return;
-          if (working != null) {
-            _recoveredWorking = working;
-            _conflictPublish = working.publishAfterConflict;
-          }
-          if (widget.initialMoment.revision > draft.base.revision) {
-            _conflictLatest = widget.initialMoment;
-          }
-          _updateCommittedUrls(_baseMoment);
-          _uploads.enqueue(_photos);
+        if (working != null) {
+          _recoveredWorking = working;
+          _conflictPublish = working.publishAfterConflict;
         }
+        if (widget.initialMoment.revision > draft.base.revision) {
+          _conflictLatest = widget.initialMoment;
+        }
+        _updateCommittedUrls(_baseMoment);
+        _uploads.enqueue(_photos);
       }
     } catch (error) {
       _draftBlocked = true;
@@ -854,9 +838,19 @@ class _SharedDiaryEditorScreenState
       return;
     }
     if (!_hasChanges) {
-      setState(() => _savedSuccessfully = true);
-      await WidgetsBinding.instance.endOfFrame;
-      if (mounted) Navigator.pop(context, _lastSavedMoment);
+      setState(() => _saving = true);
+      try {
+        // Reverting to the server document must also replace any earlier draft.
+        // Keep an unfinished conflict workspace, or an unreadable draft, intact.
+        if (!_draftBlocked) await _persistDraft();
+        await _closeWithResult(_lastSavedMoment);
+      } catch (error) {
+        if (mounted) _showSaveError(error);
+      } finally {
+        if (mounted && !_savedSuccessfully) {
+          setState(() => _saving = false);
+        }
+      }
       return;
     }
     _exitDialogOpen = true;
@@ -1153,99 +1147,6 @@ class _SharedDiaryEditorScreenState
                   ],
                 ),
         ),
-      ),
-    );
-  }
-}
-
-class SharedDiaryConflictScreen extends StatelessWidget {
-  final SharedMoment base;
-  final SharedMoment latest;
-  final SharedMoment localDraft;
-  final String currentUserId;
-  final List<Map<String, dynamic>> splitForeignText;
-
-  const SharedDiaryConflictScreen({
-    super.key,
-    required this.base,
-    required this.latest,
-    required this.localDraft,
-    required this.currentUserId,
-    required this.splitForeignText,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final rebased = _rebaseSharedDraft(
-      base: base,
-      local: localDraft,
-      latest: latest,
-      currentUserId: currentUserId,
-      splits: splitForeignText,
-    );
-    return Scaffold(
-      appBar: AppBar(title: const Text('处理同时修改')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: AppTheme.accentSurface,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Text(
-              rebased.conflicts.isEmpty
-                  ? '对方在你编辑期间也保存了内容。已把互不冲突的修改合并到最新版本，请在下一页检查后再次保存。'
-                  : '发现 ${rebased.conflicts.length} 处无法自动合并的修改。下一页以服务器最新版为底稿，并保留你的未提交版本供复制和核对。',
-              style: const TextStyle(height: 1.6),
-            ),
-          ),
-          if (rebased.conflicts.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            for (final message in rebased.conflicts)
-              ListTile(
-                dense: true,
-                leading: const Icon(
-                  Icons.warning_amber_rounded,
-                  color: AppTheme.accentColor,
-                ),
-                title: Text(message),
-              ),
-          ],
-          const SizedBox(height: 12),
-          ExpansionTile(
-            initiallyExpanded: true,
-            title: const Text('服务器最新版'),
-            childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
-            children: [SharedDiaryDocument(moment: latest, compact: true)],
-          ),
-          ExpansionTile(
-            title: const Text('我的未提交版本'),
-            childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
-            children: [SharedDiaryDocument(moment: localDraft, compact: true)],
-          ),
-          const SizedBox(height: 18),
-          FilledButton.icon(
-            onPressed: () async {
-              final saved = await Navigator.of(context).push<SharedMoment>(
-                MaterialPageRoute(
-                  builder: (_) => SharedDiaryEditorScreen(
-                    initialMoment: latest,
-                    initialBlocks: rebased.blocks,
-                    initialSplitForeignText: rebased.splits,
-                    conflictReference: localDraft,
-                  ),
-                ),
-              );
-              if (saved != null && context.mounted) {
-                Navigator.pop(context, saved);
-              }
-            },
-            icon: const Icon(Icons.merge_rounded),
-            label: const Text('进入二次合并编辑'),
-          ),
-        ],
       ),
     );
   }

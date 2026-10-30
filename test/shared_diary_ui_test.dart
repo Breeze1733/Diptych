@@ -14,6 +14,7 @@ import 'package:diptych/screens/feed_screen.dart';
 import 'package:diptych/screens/shared_diary_editor_screen.dart';
 import 'package:diptych/screens/shared_diary_reading_screen.dart';
 import 'package:diptych/services/api_service.dart';
+import 'package:diptych/services/shared_diary_draft.dart';
 import 'package:diptych/widgets/avatar_widget.dart';
 import 'package:diptych/widgets/photo_grid_picker.dart';
 import 'package:diptych/widgets/shared_day_view.dart';
@@ -198,6 +199,28 @@ void _insertTwice(SharedDocumentTextController controller) {
     selection: TextSelection.collapsed(offset: 5),
   );
 }
+
+Future<void> _seedEditorDraft({
+  required SharedMoment base,
+  required List<SharedMomentBlock> blocks,
+  List<Map<String, dynamic>> splits = const [],
+}) => SharedDiaryDraftStore(userId: 'A', dateStr: base.dateStr).save(
+  SharedDiaryDraft(
+    base: base,
+    blocks: blocks,
+    splits: splits,
+    photos: [
+      for (final block in blocks.where(
+        (b) => b.type == SharedMomentBlockType.image,
+      ))
+        SharedDraftPhoto(
+          blockId: block.id,
+          authorId: block.authorId,
+          item: DraftPhotoItem(isLocal: false, url: block.imageUrl),
+        ),
+    ],
+  ),
+);
 
 ProviderContainer _feedContainer({
   required Future<SharedMoment?> Function() loadShared,
@@ -424,65 +447,67 @@ void main() {
     expect(find.byType(TextField), findsOneWidget);
   });
 
-  testWidgets('pending split keeps its three blocks contiguous in the editor', (
-    tester,
-  ) async {
-    final container = ProviderContainer();
-    addTearDown(container.dispose);
-    container.read(currentUserProvider.notifier).setUser(_userA);
-    final timestamp = DateTime(2025, 6, 18, 12);
-    final source = SharedMomentBlock.text(
-      id: 'foreign-source',
-      authorId: 'B',
-      text: '前半后半',
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    );
-    final moment = _sharedMoment(blocks: [source]);
-    final left = source.copyWith(text: '前半');
-    final inserted = SharedMomentBlock.text(
-      id: 'own-insert',
-      authorId: 'A',
-      text: '中间',
-    );
-    final right = SharedMomentBlock.text(
-      id: 'foreign-right',
-      authorId: 'B',
-      text: '后半',
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    );
+  testWidgets(
+    'restored pending split keeps its three blocks contiguous in the editor',
+    (tester) async {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      container.read(currentUserProvider.notifier).setUser(_userA);
+      final timestamp = DateTime(2025, 6, 18, 12);
+      final source = SharedMomentBlock.text(
+        id: 'foreign-source',
+        authorId: 'B',
+        text: '前半后半',
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      );
+      final moment = _sharedMoment(blocks: [source]);
+      final left = source.copyWith(text: '前半');
+      final inserted = SharedMomentBlock.text(
+        id: 'own-insert',
+        authorId: 'A',
+        text: '中间',
+      );
+      final right = SharedMomentBlock.text(
+        id: 'foreign-right',
+        authorId: 'B',
+        text: '后半',
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      );
+      await _seedEditorDraft(
+        base: moment,
+        blocks: [left, inserted, right],
+        splits: const [
+          {
+            'source_block_id': 'foreign-source',
+            'left_text': '前半',
+            'inserted_block_id': 'own-insert',
+            'right_block_id': 'foreign-right',
+            'right_text': '后半',
+          },
+        ],
+      );
 
-    await tester.pumpWidget(
-      UncontrolledProviderScope(
-        container: container,
-        child: MaterialApp(
-          home: SharedDiaryEditorScreen(
-            initialMoment: moment,
-            initialBlocks: [left, inserted, right],
-            initialSplitForeignText: const [
-              {
-                'source_block_id': 'foreign-source',
-                'left_text': '前半',
-                'inserted_block_id': 'own-insert',
-                'right_block_id': 'foreign-right',
-                'right_text': '后半',
-              },
-            ],
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            home: SharedDiaryEditorScreen(initialMoment: moment),
           ),
         ),
-      ),
-    );
-    await tester.pump();
+      );
+      await tester.pump();
 
-    await tester.dragUntilVisible(
-      find.byKey(const ValueKey('shared-continuous-text-editor')),
-      find.byType(ListView),
-      const Offset(0, -300),
-    );
-    final field = tester.widget<TextField>(find.byType(TextField));
-    expect(field.controller!.text, '前半中间后半');
-  });
+      await tester.dragUntilVisible(
+        find.byKey(const ValueKey('shared-continuous-text-editor')),
+        find.byType(ListView),
+        const Offset(0, -300),
+      );
+      final field = tester.widget<TextField>(find.byType(TextField));
+      expect(field.controller!.text, '前半中间后半');
+    },
+  );
 
   testWidgets('image-only revision conflicts append both sides automatically', (
     tester,
@@ -532,15 +557,11 @@ void main() {
     addTearDown(container.dispose);
     container.read(currentUserProvider.notifier).setUser(_userA);
 
+    await _seedEditorDraft(base: base, blocks: [...base.blocks, localImage]);
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: container,
-        child: MaterialApp(
-          home: SharedDiaryEditorScreen(
-            initialMoment: base,
-            initialBlocks: [...base.blocks, localImage],
-          ),
-        ),
+        child: MaterialApp(home: SharedDiaryEditorScreen(initialMoment: base)),
       ),
     );
     await tester.pump();
@@ -808,9 +829,7 @@ void main() {
   testWidgets(
     'conflict rebase never guesses lineage when a deleted block id disappears',
     (tester) async {
-      final container = ProviderContainer();
-      addTearDown(container.dispose);
-      container.read(currentUserProvider.notifier).setUser(_userA);
+      _mockKeepAlive();
       final timestamp = DateTime(2025, 6, 18, 12);
       final original = SharedMomentBlock.text(
         id: 'own-source',
@@ -837,33 +856,36 @@ void main() {
           ),
         ],
       );
-      final local = base.copyWith(blocks: const []);
+      final api = _RecordingSaveApiService(conflictLatest: latest);
+      final container = ProviderContainer(
+        overrides: [apiServiceProvider.overrideWithValue(api)],
+      );
+      addTearDown(container.dispose);
+      container.read(currentUserProvider.notifier).setUser(_userA);
 
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
           child: MaterialApp(
-            home: SharedDiaryConflictScreen(
-              base: base,
-              latest: latest,
-              localDraft: local,
-              currentUserId: 'A',
-              splitForeignText: const [],
-            ),
+            home: SharedDiaryEditorScreen(initialMoment: base),
           ),
         ),
       );
-      expect(find.textContaining('已被拆分或删除'), findsWidgets);
-      await tester.tap(find.text('进入二次合并编辑'));
       await tester.pumpAndSettle();
-
-      await tester.dragUntilVisible(
-        find.byKey(const ValueKey('shared-continuous-text-editor')),
-        find.byType(ListView).last,
-        const Offset(0, -300),
-      );
-      final field = tester.widget<TextField>(find.byType(TextField));
-      expect(field.controller!.text, '对方插入原文');
+      (await _showEditorText(tester)).text = '';
+      await tester.pump();
+      await tester.tap(find.text('更新文字'));
+      await tester.pumpAndSettle();
+      expect(api.requests.single.blocks, isEmpty);
+      await tester.tap(find.text('拉取最新并二次编辑'));
+      await tester.pumpAndSettle();
+      expect(find.text('共记 · 二次编辑'), findsOneWidget);
+      final controller = await _showEditorText(tester);
+      expect(controller.text, '对方插入原文');
+      expect(controller.textRuns.map((b) => b.id), [
+        'partner-insert',
+        'own-source-right',
+      ]);
     },
   );
 
@@ -936,7 +958,7 @@ void main() {
   );
 
   testWidgets(
-    'reading and conflict pages omit identities and version numbers',
+    'reading and conflict editing omit identities and version numbers',
     (tester) async {
       final moment = _sharedMoment();
       final container = ProviderContainer(
@@ -964,19 +986,37 @@ void main() {
       expect(find.text('A'), findsNothing);
       expect(find.text('B'), findsNothing);
 
+      final editorContainer = ProviderContainer(
+        overrides: [
+          apiServiceProvider.overrideWithValue(
+            _RecordingSaveApiService(
+              conflictLatest: moment.copyWith(revision: 4),
+            ),
+          ),
+        ],
+      );
+      addTearDown(editorContainer.dispose);
+      editorContainer.read(currentUserProvider.notifier).setUser(_userA);
+      editorContainer.read(partnerUserProvider.notifier).setUser(_userB);
       await tester.pumpWidget(
-        MaterialApp(
-          home: SharedDiaryConflictScreen(
-            base: moment,
-            latest: moment,
-            localDraft: moment,
-            currentUserId: 'A',
-            splitForeignText: const [],
+        UncontrolledProviderScope(
+          container: editorContainer,
+          child: MaterialApp(
+            home: SharedDiaryEditorScreen(initialMoment: moment),
           ),
         ),
       );
-      await tester.pump();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('更新文字'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('拉取最新并二次编辑'));
+      await tester.pumpAndSettle();
+      expect(find.text('共记 · 二次编辑'), findsOneWidget);
+      expect(find.byType(AvatarWidget), findsNothing);
+      expect(find.text('Alice'), findsNothing);
+      expect(find.text('Bob'), findsNothing);
       expect(find.textContaining('v3'), findsNothing);
+      expect(find.textContaining('版本 3'), findsNothing);
       expect(find.text('A'), findsNothing);
       expect(find.text('B'), findsNothing);
     },
