@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -37,7 +38,7 @@ class PhotoEntry {
 
 /// 图片九宫格选择器
 /// 已选图片 + 末尾一个灰色"+"框；点"+"可拍照或从相册多选，图片右上角可删除
-class PhotoGridPicker extends StatelessWidget {
+class PhotoGridPicker extends StatefulWidget {
   final List<PhotoEntry> entries;
   final ValueChanged<List<PhotoEntry>> onAdded;
   final ValueChanged<int> onRemoved;
@@ -74,6 +75,76 @@ class PhotoGridPicker extends StatelessWidget {
     this.showCoverBadge = true,
     this.visibleRows,
   });
+
+  @override
+  State<PhotoGridPicker> createState() => _PhotoGridPickerState();
+}
+
+class _PhotoGridPickerState extends State<PhotoGridPicker> {
+  final _scrollController = ScrollController();
+  Timer? _dragTimer;
+  Offset? _dragPosition;
+
+  List<PhotoEntry> get entries => widget.entries;
+  ValueChanged<List<PhotoEntry>> get onAdded => widget.onAdded;
+  ValueChanged<int> get onRemoved => widget.onRemoved;
+  void Function(int, int) get onReordered => widget.onReordered;
+  PhotoUploadStatus Function(PhotoEntry)? get statusProvider =>
+      widget.statusProvider;
+  double? Function(PhotoEntry)? get progressProvider => widget.progressProvider;
+  ValueChanged<int>? get onRetry => widget.onRetry;
+  ValueChanged<int>? get onTap => widget.onTap;
+  Color? Function(int)? get borderColorProvider => widget.borderColorProvider;
+  String? Function(int)? get badgeLabelProvider => widget.badgeLabelProvider;
+  bool Function(int)? get canRemove => widget.canRemove;
+  bool Function(int)? get canReorder => widget.canReorder;
+  bool get reorderEnabled => widget.reorderEnabled;
+  bool get showCoverBadge => widget.showCoverBadge;
+  int? get visibleRows => widget.visibleRows;
+
+  void _stopDrag() {
+    _dragTimer?.cancel();
+    _dragTimer = null;
+    _dragPosition = null;
+  }
+
+  void _autoScroll() {
+    final pointer = _dragPosition;
+    if (pointer == null || !mounted) return;
+    final inner = _scrollController.hasClients
+        ? _scrollController.position
+        : null;
+    final outer = Scrollable.maybeOf(context);
+    final position = inner != null && inner.maxScrollExtent > 1
+        ? inner
+        : outer?.position;
+    final box = (identical(position, inner) ? context : outer?.context)
+        ?.findRenderObject();
+    if (position == null || box is! RenderBox || !box.hasSize) return;
+    final top = box.localToGlobal(Offset.zero).dy;
+    final bottom = top + box.size.height;
+    const edge = 48.0;
+    final delta = pointer.dy < top + edge
+        ? -12.0
+        : pointer.dy > bottom - edge
+        ? 12.0
+        : 0.0;
+    if (delta != 0) {
+      position.jumpTo(
+        (position.pixels + delta).clamp(
+          position.minScrollExtent,
+          position.maxScrollExtent,
+        ),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _stopDrag();
+    _scrollController.dispose();
+    super.dispose();
+  }
 
   Future<void> _pickImages(BuildContext context) async {
     final picker = ImagePicker();
@@ -144,6 +215,7 @@ class PhotoGridPicker extends StatelessWidget {
             ? minimumSlots
             : entries.length + 1;
         return GridView.builder(
+          controller: _scrollController,
           key: const ValueKey('diary-photo-grid'),
           primary: false,
           padding: EdgeInsets.zero,
@@ -278,6 +350,15 @@ class PhotoGridPicker extends StatelessWidget {
           if (!reorderEnabled || canReorder?.call(index) == false) return child;
           return LongPressDraggable<int>(
             data: index,
+            onDragStarted: () {
+              _dragTimer?.cancel();
+              _dragTimer = Timer.periodic(
+                const Duration(milliseconds: 24),
+                (_) => _autoScroll(),
+              );
+            },
+            onDragUpdate: (details) => _dragPosition = details.globalPosition,
+            onDragEnd: (_) => _stopDrag(),
             feedback: Material(
               color: Colors.transparent,
               elevation: 6,

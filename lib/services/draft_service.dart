@@ -11,6 +11,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../utils/motion_photo_helper.dart';
 import '../models/moment.dart';
+import '../models/shared_moment.dart';
+import 'shared_diary_draft.dart';
 
 /// 评论和话题草稿。调用方传入的 key 已包含作者与目标标识。
 class DraftService {
@@ -80,18 +82,24 @@ class DraftService {
 class MomentDraftStore {
   final String userId;
   final String dateStr;
+  final bool _shared;
   static final _writes = <String, Future<void>>{};
   static final _sourceNames = <String, Map<String, String>>{};
   static final _random = Random.secure();
 
-  MomentDraftStore({required this.userId, required this.dateStr}) {
+  MomentDraftStore({required this.userId, required this.dateStr})
+    : _shared = false {
     if (userId.isEmpty || !RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(dateStr)) {
       throw ArgumentError('日记草稿需要账号和有效日期');
     }
   }
 
-  String get _scope => '${Uri.encodeComponent(userId)}_$dateStr';
-  String get _key => 'moment_draft_v2_$_scope';
+  MomentDraftStore._forShared({required this.userId, required this.dateStr})
+    : _shared = true;
+
+  String get _scope =>
+      '${_shared ? 'shared_' : ''}${Uri.encodeComponent(userId)}_$dateStr';
+  String get _key => '${_shared ? 'shared' : 'moment'}_draft_v2_$_scope';
 
   Future<T> _serialized<T>(Future<T> Function() action) =>
       _serialFor(_key, action);
@@ -360,6 +368,7 @@ class MomentDraftStore {
   }
 
   Future<void> _removeOwnedLegacy(SharedPreferences prefs) async {
+    if (_shared) return;
     final raw = prefs.getString('draft_$dateStr');
     if (raw == null) return;
     try {
@@ -450,4 +459,120 @@ class DraftData {
     this.photoItems,
     this._legacySource,
   );
+}
+
+/// A shared draft is independent of the ordinary diary draft for the same day.
+/// Local originals are copied byte-for-byte before its manifest is committed.
+class SharedDiaryDraftStore {
+  final MomentDraftStore _files;
+  SharedDiaryDraftStore({required String userId, required String dateStr})
+    : _files = MomentDraftStore._forShared(userId: userId, dateStr: dateStr) {
+    if (!['A', 'B'].contains(userId) ||
+        !RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(dateStr)) {
+      throw ArgumentError('共记草稿需要账号和有效日期');
+    }
+  }
+
+  Future<File> importImage(File image) => _files.importImage(image);
+
+  Future<void> save(SharedDiaryDraft draft) {
+    final snapshot = {
+      'owner_id': _files.userId,
+      'base': draft.base.toJson(),
+      'blocks': draft.blocks.map((b) => b.toJson()).toList(),
+      'splits': jsonDecode(jsonEncode(draft.splits)),
+      if (draft.reference != null) 'reference': draft.reference!.toJson(),
+    };
+    final photos = List<SharedDraftPhoto>.of(draft.photos);
+    return _files._serialized(() async {
+      final dir = photos.any((p) => p.item.isLocal)
+          ? await _files._directory()
+          : null;
+      final serialized = <Map<String, dynamic>>[];
+      for (final photo in photos) {
+        final item = photo.item;
+        final file = item.isLocal
+            ? await _files._persistFile(item.file!, dir!)
+            : null;
+        serialized.add({
+          'block_id': photo.blockId,
+          'author_id': photo.authorId,
+          ...item.toJson(
+            fileName: file == null ? null : MomentDraftStore._fileName(file),
+          ),
+        });
+      }
+      final prefs = await SharedPreferences.getInstance();
+      if (!await prefs.setString(
+        _files._key,
+        jsonEncode({...snapshot, 'photos': serialized}),
+      )) {
+        throw StateError('无法保存共记草稿');
+      }
+    });
+  }
+
+  Future<SharedDiaryDraft?> load() => _files._serialized(() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_files._key);
+    if (raw == null) return null;
+    // Corrupt or missing local data must be reported rather than silently dropped.
+    final data = jsonDecode(raw) as Map<String, dynamic>;
+    if (data['owner_id'] != _files.userId) throw StateError('共记草稿账号不匹配');
+    final base = SharedMoment.fromJson(
+      Map<String, dynamic>.from(data['base'] as Map),
+    );
+    if (base.dateStr != _files.dateStr) throw StateError('共记草稿日期不匹配');
+    Directory? dir;
+    final photos = <SharedDraftPhoto>[];
+    for (final value in data['photos'] as List) {
+      final photo = Map<String, dynamic>.from(value as Map);
+      final name = photo['file_name'];
+      File? file;
+      if (photo['type'] == 'local') {
+        if (name is! String || !MomentDraftStore._isFileName(name)) {
+          throw StateError('草稿图片路径无效');
+        }
+        dir ??= await _files._directory();
+        file = File('${dir.path}/$name');
+        if (!await file.exists()) throw StateError('共记草稿中的本地照片缺失，已保留草稿记录');
+      }
+      photos.add(
+        SharedDraftPhoto(
+          blockId: photo['block_id'] as String,
+          authorId: photo['author_id'] as String,
+          item: DraftPhotoItem.fromJson(photo, file: file),
+        ),
+      );
+    }
+    return SharedDiaryDraft(
+      base: base,
+      blocks: (data['blocks'] as List)
+          .map(
+            (b) =>
+                SharedMomentBlock.fromJson(Map<String, dynamic>.from(b as Map)),
+          )
+          .toList(),
+      splits: (data['splits'] as List)
+          .map((s) => Map<String, dynamic>.from(s as Map))
+          .toList(),
+      photos: photos,
+      reference: data['reference'] is Map
+          ? SharedMoment.fromJson(
+              Map<String, dynamic>.from(data['reference'] as Map),
+            )
+          : null,
+    );
+  });
+
+  Future<void> clear() => _files._serialized(() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!await prefs.remove(_files._key)) throw StateError('无法清除共记草稿');
+    MomentDraftStore._sourceNames.remove(_files._key);
+    try {
+      await (await _files._directory()).delete(recursive: true);
+    } catch (_) {
+      // The manifest is authoritative; leftover private files can be cleaned later.
+    }
+  });
 }

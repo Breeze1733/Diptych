@@ -1,0 +1,407 @@
+import 'dart:async';
+import 'dart:io';
+
+import 'package:diptych/models/app_user.dart';
+import 'package:diptych/models/shared_moment.dart';
+import 'package:diptych/providers/auth_provider.dart';
+import 'package:diptych/providers/shared_diary_draft_provider.dart';
+import 'package:diptych/screens/shared_diary_editor_screen.dart';
+import 'package:diptych/services/api_service.dart';
+import 'package:diptych/services/draft_service.dart';
+import 'package:diptych/services/shared_diary_draft.dart';
+import 'package:diptych/services/storage_service.dart';
+import 'package:diptych/widgets/photo_grid_picker.dart';
+import 'package:diptych/widgets/shared_diary_document.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+SharedMoment day() => SharedMoment(
+  id: 'day',
+  dateStr: '2026-10-29',
+  revision: 2,
+  blocks: [
+    SharedMomentBlock.text(id: 'text', authorId: 'A', text: '原文'),
+    SharedMomentBlock.image(
+      id: 'old-photo',
+      authorId: 'A',
+      imageUrl: 'https://images.invalid/old.jpg',
+    ),
+    SharedMomentBlock.image(
+      id: 'partner-photo',
+      authorId: 'B',
+      imageUrl: 'https://images.invalid/b.jpg',
+    ),
+  ],
+  createdAt: DateTime(2026, 10, 29),
+  updatedAt: DateTime(2026, 10, 29),
+);
+
+class MemoryDraft extends SharedDiaryDraftStore {
+  SharedDiaryDraft? value;
+  int saves = 0;
+  MemoryDraft() : super(userId: 'A', dateStr: '2026-10-29');
+  @override
+  Future<SharedDiaryDraft?> load() async => value;
+  @override
+  Future<void> save(SharedDiaryDraft draft) async {
+    value = draft;
+    saves++;
+  }
+
+  @override
+  Future<void> clear() async {
+    value = null;
+  }
+
+  @override
+  Future<File> importImage(File file) async => file;
+}
+
+class PendingStorage extends StorageService {
+  final pending = Completer<String>();
+  int probes = 0;
+  int uploads = 0;
+  @override
+  Future<String> uploadImage(
+    File file,
+    String folder, {
+    void Function(double)? onProgress,
+    bool Function()? isCancelled,
+    void Function(String)? onUploadIdCreated,
+  }) {
+    uploads++;
+    return pending.future;
+  }
+
+  @override
+  Future<bool> originalExists(String url) async {
+    probes++;
+    return true;
+  }
+}
+
+class RecordingApi extends ApiService {
+  final calls = <List<SharedMomentBlock>>[];
+  SharedMoment? conflict;
+  @override
+  Future<SharedMoment> updateSharedMoment({
+    required SharedMoment moment,
+    required List<SharedMomentBlock> blocks,
+    List<Map<String, dynamic>> splitForeignText = const [],
+  }) async {
+    calls.add(List.of(blocks));
+    if (conflict != null) {
+      final latest = conflict!;
+      conflict = null;
+      throw SharedMomentConflictException(latest: latest);
+    }
+    return moment.copyWith(
+      blocks: List.of(blocks),
+      revision: moment.revision + 1,
+    );
+  }
+}
+
+void main() {
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    for (final channel in [
+      'com.splitmoments.split_moments/foreground_service',
+      'com.splitmoments.split_moments/wakelock',
+    ]) {
+      messenger.setMockMethodCallHandler(
+        MethodChannel(channel),
+        (_) async => null,
+      );
+      addTearDown(
+        () => messenger.setMockMethodCallHandler(MethodChannel(channel), null),
+      );
+    }
+  });
+
+  Future<void> pumpEditor(
+    WidgetTester tester,
+    MemoryDraft draft,
+    PendingStorage storage,
+    RecordingApi api,
+  ) async {
+    final container = ProviderContainer(
+      overrides: [
+        sharedDiaryDraftStoreProvider.overrideWith((ref, scope) => draft),
+        storageServiceProvider.overrideWithValue(storage),
+        apiServiceProvider.overrideWithValue(api),
+      ],
+    );
+    addTearDown(container.dispose);
+    container
+        .read(currentUserProvider.notifier)
+        .setUser(const AppUser(uid: 'A', nickname: 'A', partnerUid: 'B'));
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(home: SharedDiaryEditorScreen(initialMoment: day())),
+      ),
+    );
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> addPhoto(WidgetTester tester) async {
+    tester.widget<PhotoGridPicker>(find.byType(PhotoGridPicker)).onAdded([
+      PhotoEntry.file(
+        File('motion-original.jpg'),
+        isMotion: true,
+        uploadLive: true,
+      ),
+    ]);
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets(
+    'draft and text updates stay open and never wait for pending photos',
+    (tester) async {
+      final draft = MemoryDraft(),
+          storage = PendingStorage(),
+          api = RecordingApi();
+      await pumpEditor(tester, draft, storage, api);
+      await addPhoto(tester);
+      final picker = tester.widget<PhotoGridPicker>(
+        find.byType(PhotoGridPicker),
+      );
+      picker.onRemoved(
+        0,
+      ); // Pending deletion must not reach the text-only request.
+      await tester.pump();
+      await tester.tap(find.text('存草稿'));
+      await tester.pumpAndSettle();
+      expect(draft.value!.photos, hasLength(2));
+      expect(storage.pending.isCompleted, isFalse);
+      await tester.tap(find.text('更新文字'));
+      await tester.pumpAndSettle();
+      expect(api.calls, hasLength(1));
+      expect(
+        api.calls.single
+            .where((b) => b.type == SharedMomentBlockType.image)
+            .map((b) => b.id),
+        ['old-photo', 'partner-photo'],
+      );
+      expect(storage.probes, 0);
+      expect(storage.pending.isCompleted, isFalse);
+      expect(find.byType(SharedDiaryEditorScreen), findsOneWidget);
+      expect(
+        tester.widget<PhotoGridPicker>(find.byType(PhotoGridPicker)).entries,
+        hasLength(2),
+      );
+      expect(draft.value!.base.revision, 3);
+      expect(draft.value!.photos.last.item.uploadLive, isTrue);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets(
+    'reopening resumes a saved local photo with its original block identity',
+    (tester) async {
+      final draft = MemoryDraft(),
+          storage = PendingStorage(),
+          api = RecordingApi();
+      final base = day();
+      draft.value = SharedDiaryDraft(
+        base: base,
+        blocks: [
+          ...base.blocks,
+          SharedMomentBlock.image(id: 'pending', authorId: 'A', imageUrl: ''),
+        ],
+        splits: [],
+        photos: [
+          for (final b in base.blocks.where(
+            (b) => b.type == SharedMomentBlockType.image,
+          ))
+            SharedDraftPhoto(
+              blockId: b.id,
+              authorId: b.authorId,
+              item: DraftPhotoItem(isLocal: false, url: b.imageUrl),
+            ),
+          SharedDraftPhoto(
+            blockId: 'pending',
+            authorId: 'A',
+            item: DraftPhotoItem(
+              isLocal: true,
+              file: File('motion-original.jpg'),
+              isMotion: true,
+              uploadLive: true,
+            ),
+          ),
+        ],
+      );
+      await pumpEditor(tester, draft, storage, api);
+      expect(storage.uploads, 1);
+      expect(
+        tester
+            .widget<PhotoGridPicker>(find.byType(PhotoGridPicker))
+            .entries
+            .last
+            .uploadLive,
+        isTrue,
+      );
+      await tester.tap(find.text('存草稿'));
+      await tester.pumpAndSettle();
+      expect(draft.value!.photos.last.blockId, 'pending');
+      expect(draft.value!.blocks.last.id, 'pending');
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets(
+    'conflict rebase preserves local photo while its upload continues',
+    (tester) async {
+      final draft = MemoryDraft(),
+          storage = PendingStorage(),
+          api = RecordingApi();
+      api.conflict = day().copyWith(
+        revision: 3,
+        blocks: [
+          ...day().blocks,
+          SharedMomentBlock.text(
+            id: 'partner-text',
+            authorId: 'B',
+            text: '新文字',
+          ),
+        ],
+      );
+      await pumpEditor(tester, draft, storage, api);
+      await addPhoto(tester);
+      await tester.tap(find.text('更新文字'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('拉取最新并二次编辑'));
+      await tester.pumpAndSettle();
+      expect(storage.uploads, 1);
+      expect(storage.pending.isCompleted, isFalse);
+      expect(draft.value!.photos.last.item.file!.path, 'motion-original.jpg');
+      expect(
+        draft.value!.blocks
+            .where((b) => b.type == SharedMomentBlockType.text)
+            .map((b) => b.text),
+        ['原文', '新文字'],
+      );
+      expect(draft.value!.base.revision, 3);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets('successful full publication clears the durable draft', (
+    tester,
+  ) async {
+    final draft = MemoryDraft(),
+        storage = PendingStorage(),
+        api = RecordingApi();
+    await pumpEditor(tester, draft, storage, api);
+    await addPhoto(tester);
+    storage.pending.complete('https://images.invalid/new.jpg');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('上传发布'));
+    await tester.pumpAndSettle();
+    expect(api.calls, hasLength(1));
+    expect(
+      api.calls.single.where((b) => b.type == SharedMomentBlockType.image),
+      hasLength(3),
+    );
+    expect(draft.value, isNull);
+    expect(draft.saves, greaterThanOrEqualTo(3));
+  });
+
+  testWidgets('shared reading photos expand to all rows and collapse', (
+    tester,
+  ) async {
+    final moment = day().copyWith(
+      blocks: [
+        for (var i = 0; i < 12; i++)
+          SharedMomentBlock.image(
+            id: 'p$i',
+            authorId: 'A',
+            imageUrl: 'https://images.invalid/$i.jpg',
+          ),
+      ],
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: SizedBox(
+              width: 360,
+              child: SharedDiaryDocument(moment: moment),
+            ),
+          ),
+        ),
+      ),
+    );
+    final grid = find.byType(GridView);
+    final collapsed = tester.getSize(grid).height;
+    await tester.tap(find.text('展开图片列表'));
+    await tester.pumpAndSettle();
+    expect(tester.getSize(grid).height, greaterThan(collapsed * 1.8));
+    await tester.ensureVisible(find.text('收起图片列表'));
+    await tester.tap(find.text('收起图片列表'));
+    await tester.pumpAndSettle();
+    expect(tester.getSize(grid).height, collapsed);
+  });
+
+  testWidgets(
+    'long press at collapsed grid edge scrolls beyond the first six photos',
+    (tester) async {
+      final entries = [
+        for (var i = 0; i < 24; i++)
+          PhotoEntry.url('https://images.invalid/$i.jpg'),
+      ];
+      int? movedTo;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 320,
+              height: 215,
+              child: PhotoGridPicker(
+                entries: entries,
+                visibleRows: 2,
+                onAdded: (_) {},
+                onRemoved: (_) {},
+                onReordered: (oldIndex, newIndex) {
+                  movedTo = newIndex;
+                },
+              ),
+            ),
+          ),
+        ),
+      );
+      final grid = find.byKey(const ValueKey('diary-photo-grid'));
+      final box = tester.getRect(grid);
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byKey(const ValueKey('photo-slot-0'))),
+      );
+      await tester.pump(const Duration(milliseconds: 600));
+      await gesture.moveTo(Offset(box.center.dx, box.bottom - 4));
+      await tester.pump(const Duration(milliseconds: 900));
+      expect(
+        tester.widget<GridView>(grid).controller!.offset,
+        greaterThan(150),
+      );
+      final visibleTargets = find.byWidgetPredicate(
+        (w) => w is DragTarget<int>,
+      );
+      expect(visibleTargets, findsWidgets);
+      // Move a little to let the drag target hit-test the newly revealed row.
+      await gesture.moveBy(const Offset(10, -12));
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(movedTo, isNotNull);
+      expect(movedTo!, greaterThan(5));
+    },
+  );
+}

@@ -22,6 +22,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:diptych/services/draft_service.dart';
 
 const _userA = AppUser(uid: 'A', nickname: 'Alice', partnerUid: 'B');
 const _userB = AppUser(uid: 'B', nickname: 'Bob', partnerUid: 'A');
@@ -231,6 +233,7 @@ Future<void> _pumpFeed(WidgetTester tester, ProviderContainer container) async {
 }
 
 void main() {
+  setUp(() => SharedPreferences.setMockInitialValues({}));
   testWidgets(
     'document renders photos first and one continuous two-color text flow',
     (tester) async {
@@ -541,7 +544,7 @@ void main() {
       ),
     );
     await tester.pump();
-    await tester.tap(find.widgetWithText(FilledButton, '保存共记'));
+    await tester.tap(find.widgetWithText(FilledButton, '上传发布'));
     await tester.pumpAndSettle();
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 20)),
@@ -593,11 +596,11 @@ void main() {
       final controller = await _showEditorText(tester);
       _insertTwice(controller);
       await tester.pump();
-      await tester.tap(find.widgetWithText(FilledButton, '保存共记'));
+      await tester.tap(find.widgetWithText(FilledButton, '上传发布'));
       await tester.pumpAndSettle();
-      expect(find.text('处理同时修改'), findsOneWidget);
-      await tester.ensureVisible(find.text('进入二次合并编辑'));
-      await tester.tap(find.text('进入二次合并编辑'));
+      expect(find.text('拉取最新并二次编辑'), findsOneWidget);
+      await tester.ensureVisible(find.text('拉取最新并二次编辑'));
+      await tester.tap(find.text('拉取最新并二次编辑'));
       await tester.pumpAndSettle();
 
       final merged = await _showEditorText(tester);
@@ -606,7 +609,7 @@ void main() {
       final fragments = merged.splitForeignText.single['fragments'] as List;
       expect(fragments, hasLength(5));
       expect(fragments.first, 'source');
-      await tester.tap(find.widgetWithText(FilledButton, '保存共记'));
+      await tester.tap(find.widgetWithText(FilledButton, '上传发布'));
       await tester.pumpAndSettle();
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 20)),
@@ -655,18 +658,18 @@ void main() {
     await tester.pump();
     _insertTwice(await _showEditorText(tester));
     await tester.pump();
-    await tester.tap(find.widgetWithText(FilledButton, '保存共记'));
+    await tester.tap(find.widgetWithText(FilledButton, '上传发布'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('对方修改了你准备插入的原段'), findsOneWidget);
-    await tester.ensureVisible(find.text('进入二次合并编辑'));
-    await tester.tap(find.text('进入二次合并编辑'));
+    await tester.ensureVisible(find.text('拉取最新并二次编辑'));
+    await tester.tap(find.text('拉取最新并二次编辑'));
     await tester.pumpAndSettle();
 
-    final editor = tester.widget<SharedDiaryEditorScreen>(
-      find.byType(SharedDiaryEditorScreen).last,
-    );
+    final draft = await SharedDiaryDraftStore(
+      userId: 'A',
+      dateStr: base.dateStr,
+    ).load();
     expect(
-      editor.conflictReference!.blocks.map((block) => block.text).join(),
+      draft!.reference!.blocks.map((block) => block.text).join(),
       'aXbcYd',
     );
     final merged = await _showEditorText(tester);
@@ -701,7 +704,7 @@ void main() {
     final controller = await _showEditorText(tester);
     _insertTwice(controller);
     await tester.pump();
-    await tester.tap(find.widgetWithText(FilledButton, '保存共记'));
+    await tester.tap(find.widgetWithText(FilledButton, '上传发布'));
     await tester.pumpAndSettle();
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 20)),
@@ -713,7 +716,7 @@ void main() {
     expect(controller.splitForeignText.single['fragments'], hasLength(5));
     expect(
       tester
-          .widget<FilledButton>(find.widgetWithText(FilledButton, '保存共记'))
+          .widget<FilledButton>(find.widgetWithText(FilledButton, '上传发布'))
           .onPressed,
       isNotNull,
     );
