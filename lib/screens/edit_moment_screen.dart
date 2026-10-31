@@ -57,6 +57,7 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
   late final MomentUploadController _uploads;
   bool _isLoadingDraft = true;
   bool _isImportingPhotos = false;
+  Object? _draftLoadError;
 
   Map<String, String> get _uploadedUrls => _uploads.uploadedUrls;
   Map<String, bool> get _uploadedIsLive => _uploads.uploadedIsLive;
@@ -169,6 +170,9 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
   }
 
   Future<void> _loadDraft() async {
+    setState(() {
+      _isLoadingDraft = true;
+    });
     try {
       var draft = await _draftStore.load();
       if (draft == null && mounted) {
@@ -198,12 +202,10 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
         }
       }
       if (draft != null && mounted) await _applyDraft(draft);
+      _draftLoadError = null;
     } catch (error) {
+      _draftLoadError = error;
       debugPrint('加载草稿失败: $error');
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('恢复草稿失败，原草稿已保留，请稍后重试')));
-      }
     } finally {
       if (mounted) setState(() => _isLoadingDraft = false);
     }
@@ -222,9 +224,10 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
               uploadLive: item.uploadLive,
             ),
           );
-        } else if (item.isLocal &&
-            item.file != null &&
-            await item.file!.exists()) {
+        } else if (item.isLocal) {
+          if (item.file == null || !await item.file!.exists()) {
+            throw const DraftRestoreException('草稿中的本地照片缺失，原草稿已保留。请检查本地存储后重试。');
+          }
           final f = await _draftStore.importImage(item.file!);
           final isMotion = await MotionPhotoHelper.isMotionPhoto(f);
           if (!mounted) return;
@@ -272,7 +275,12 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
   }
 
   void _syncDraftImages() {
-    if (_hasSavedSuccessfully || !mounted) return;
+    if (_hasSavedSuccessfully ||
+        !mounted ||
+        _isLoadingDraft ||
+        _draftLoadError != null) {
+      return;
+    }
     _saveDraftInternal().catchError((Object error) {
       debugPrint('自动保存草稿失败: $error');
     });
@@ -416,6 +424,9 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
 
   Future<void> _saveDraftInternal() async {
     if (_hasSavedSuccessfully) return;
+    if (_isLoadingDraft || _draftLoadError != null) {
+      throw const DraftRestoreException('原草稿尚未完整恢复，已阻止覆盖。请先重试恢复草稿。');
+    }
     final snapshot = _takeCurrentSnapshot();
     await _draftStore.save(
       feeling: _feelingController.text,
@@ -781,6 +792,7 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
                         _isSavingDraft ||
                         _isSaving ||
                         _isLoadingDraft ||
+                        _draftLoadError != null ||
                         _isImportingPhotos
                     ? null
                     : _handleSwitchToShared,
@@ -809,6 +821,7 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
                     _isSavingDraft ||
                         _isSaving ||
                         _isLoadingDraft ||
+                        _draftLoadError != null ||
                         _isImportingPhotos
                     ? null
                     : _handleSaveDraft,
@@ -844,6 +857,7 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
                       _isSaving ||
                           _isSavingDraft ||
                           _isLoadingDraft ||
+                          _draftLoadError != null ||
                           _isImportingPhotos
                       ? null
                       : _handleSave,
@@ -866,130 +880,144 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
             ),
           ],
         ),
-        body: AbsorbPointer(
-          absorbing:
-              _isSaving ||
-              _isSwitchingShared ||
-              _isLoadingDraft ||
-              _isImportingPhotos,
-          child: SafeArea(
-            top: false,
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final outerPadding = constraints.maxHeight < 360 ? 8.0 : 12.0;
-                final height = math.max(
-                  0.0,
-                  constraints.maxHeight - outerPadding * 2,
-                );
-                final gap = math.min(height / 12, height < 360 ? 6.0 : 8.0);
-                final padding = math.min(
-                  height / 18,
-                  height < 240 ? 6.0 : 10.0,
-                );
-                final showTitles = height >= 180;
-                final titleHeight =
-                    MediaQuery.textScalerOf(context).scale(14) * 1.2;
-                final sectionFrame =
-                    padding * 2 + (showTitles ? titleHeight + 6 : 0);
-                final contentBudget = math.max(
-                  0.0,
-                  height - sectionFrame * 3 - gap * 2,
-                );
-                final moodHeight = math.min(36.0, contentBudget * .35);
-                final remaining = math.max(0.0, contentBudget - moodHeight);
-                final gridWidth = math.max(
-                  0.0,
-                  math.min(constraints.maxWidth, 680) -
-                      outerPadding * 2 -
-                      padding * 2,
-                );
-                final photoHeight = math.min(
-                  math.max(0.0, (gridWidth * 2 - 8) / 3),
-                  remaining * .5,
-                );
+        body: _draftLoadError != null
+            ? _buildDraftRecoveryError()
+            : AbsorbPointer(
+                absorbing:
+                    _isSaving ||
+                    _isSwitchingShared ||
+                    _isLoadingDraft ||
+                    _isImportingPhotos,
+                child: SafeArea(
+                  top: false,
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final outerPadding = constraints.maxHeight < 360
+                          ? 8.0
+                          : 12.0;
+                      final height = math.max(
+                        0.0,
+                        constraints.maxHeight - outerPadding * 2,
+                      );
+                      final gap = math.min(
+                        height / 12,
+                        height < 360 ? 6.0 : 8.0,
+                      );
+                      final padding = math.min(
+                        height / 18,
+                        height < 240 ? 6.0 : 10.0,
+                      );
+                      final showTitles = height >= 180;
+                      final titleHeight =
+                          MediaQuery.textScalerOf(context).scale(14) * 1.2;
+                      final sectionFrame =
+                          padding * 2 + (showTitles ? titleHeight + 6 : 0);
+                      final contentBudget = math.max(
+                        0.0,
+                        height - sectionFrame * 3 - gap * 2,
+                      );
+                      final moodHeight = math.min(36.0, contentBudget * .35);
+                      final remaining = math.max(
+                        0.0,
+                        contentBudget - moodHeight,
+                      );
+                      final gridWidth = math.max(
+                        0.0,
+                        math.min(constraints.maxWidth, 680) -
+                            outerPadding * 2 -
+                            padding * 2,
+                      );
+                      final photoHeight = math.min(
+                        math.max(0.0, (gridWidth * 2 - 8) / 3),
+                        remaining * .5,
+                      );
 
-                Widget section(String title, String id, Widget content) =>
-                    _buildEditorSection(
-                      key: ValueKey(id),
-                      title: title,
-                      padding: padding,
-                      showTitle: showTitles,
-                      titleHeight: titleHeight,
-                      child: content,
-                    );
-                return Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 680),
-                    child: Padding(
-                      padding: EdgeInsets.all(outerPadding),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          SizedBox(
-                            height: sectionFrame + moodHeight,
-                            child: section(
-                              AppStrings.feelingLabel,
-                              'diary-mood-card',
-                              _buildMoodSelector(),
-                            ),
-                          ),
-                          SizedBox(height: gap),
-                          SizedBox(
-                            height: sectionFrame + photoHeight,
-                            child: section(
-                              AppStrings.photosLabel,
-                              'diary-photos-card',
-                              _buildPhotoGrid(),
-                            ),
-                          ),
-                          SizedBox(height: gap),
-                          Expanded(
-                            child: section(
-                              '今日感受',
-                              'diary-feeling-card',
-                              SelectionContainer.disabled(
-                                child: TextField(
-                                  key: const ValueKey('diary-feeling-input'),
-                                  controller: _feelingController,
-                                  expands: true,
-                                  minLines: null,
-                                  maxLines: null,
-                                  textAlignVertical: TextAlignVertical.top,
-                                  scrollPhysics: const ClampingScrollPhysics(),
-                                  style: const TextStyle(
-                                    fontSize: 16,
-                                    height: 1.6,
-                                    color: AppTheme.textPrimary,
-                                  ),
-                                  contextMenuBuilder:
-                                      (context, editableTextState) =>
-                                          AdaptiveTextSelectionToolbar.buttonItems(
-                                            anchors: editableTextState
-                                                .contextMenuAnchors,
-                                            buttonItems: editableTextState
-                                                .contextMenuButtonItems,
-                                          ),
-                                  decoration: const InputDecoration(
-                                    hintText: AppStrings.feelingHint,
-                                    border: InputBorder.none,
-                                    enabledBorder: InputBorder.none,
-                                    focusedBorder: InputBorder.none,
-                                    filled: false,
-                                    contentPadding: EdgeInsets.zero,
+                      Widget section(String title, String id, Widget content) =>
+                          _buildEditorSection(
+                            key: ValueKey(id),
+                            title: title,
+                            padding: padding,
+                            showTitle: showTitles,
+                            titleHeight: titleHeight,
+                            child: content,
+                          );
+                      return Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 680),
+                          child: Padding(
+                            padding: EdgeInsets.all(outerPadding),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                SizedBox(
+                                  height: sectionFrame + moodHeight,
+                                  child: section(
+                                    AppStrings.feelingLabel,
+                                    'diary-mood-card',
+                                    _buildMoodSelector(),
                                   ),
                                 ),
-                              ),
+                                SizedBox(height: gap),
+                                SizedBox(
+                                  height: sectionFrame + photoHeight,
+                                  child: section(
+                                    AppStrings.photosLabel,
+                                    'diary-photos-card',
+                                    _buildPhotoGrid(),
+                                  ),
+                                ),
+                                SizedBox(height: gap),
+                                Expanded(
+                                  child: section(
+                                    '今日感受',
+                                    'diary-feeling-card',
+                                    SelectionContainer.disabled(
+                                      child: TextField(
+                                        key: const ValueKey(
+                                          'diary-feeling-input',
+                                        ),
+                                        controller: _feelingController,
+                                        expands: true,
+                                        minLines: null,
+                                        maxLines: null,
+                                        textAlignVertical:
+                                            TextAlignVertical.top,
+                                        scrollPhysics:
+                                            const ClampingScrollPhysics(),
+                                        style: const TextStyle(
+                                          fontSize: 16,
+                                          height: 1.6,
+                                          color: AppTheme.textPrimary,
+                                        ),
+                                        contextMenuBuilder:
+                                            (context, editableTextState) =>
+                                                AdaptiveTextSelectionToolbar.buttonItems(
+                                                  anchors: editableTextState
+                                                      .contextMenuAnchors,
+                                                  buttonItems: editableTextState
+                                                      .contextMenuButtonItems,
+                                                ),
+                                        decoration: const InputDecoration(
+                                          hintText: AppStrings.feelingHint,
+                                          border: InputBorder.none,
+                                          enabledBorder: InputBorder.none,
+                                          focusedBorder: InputBorder.none,
+                                          filled: false,
+                                          contentPadding: EdgeInsets.zero,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                        ],
-                      ),
-                    ),
+                        ),
+                      );
+                    },
                   ),
-                );
-              },
-            ),
-          ),
-        ),
+                ),
+              ),
       ),
     );
   }
@@ -1021,6 +1049,35 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
       });
       _syncDraftImages();
     },
+  );
+
+  Widget _buildDraftRecoveryError() => SafeArea(
+    child: Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              '草稿恢复失败',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              _draftLoadError is DraftRestoreException
+                  ? _draftLoadError.toString()
+                  : '原草稿已保留，请检查本地存储后重试。',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            OutlinedButton(
+              onPressed: _isLoadingDraft ? null : _loadDraft,
+              child: Text(_isLoadingDraft ? '恢复中…' : '重试恢复'),
+            ),
+          ],
+        ),
+      ),
+    ),
   );
 
   Widget _buildEditorSection({

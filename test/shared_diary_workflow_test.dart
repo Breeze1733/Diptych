@@ -240,6 +240,25 @@ void main() {
     await tester.pump();
   }
 
+  Future<void> waitForPublication(
+    WidgetTester tester,
+    MemoryDraft draft,
+  ) async {
+    // Original-cache promotion performs real file IO outside the widget clock.
+    for (var attempt = 0; attempt < 100 && draft.value != null; attempt++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 10)),
+      );
+      await tester.pump();
+    }
+    await tester.pumpAndSettle();
+    expect(
+      draft.value,
+      isNull,
+      reason: 'Publication must finish before asserting its result',
+    );
+  }
+
   SharedMoment remoteText(int revision, String text) => day().copyWith(
     revision: revision,
     blocks: [
@@ -548,6 +567,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('上传发布'));
     await tester.pumpAndSettle();
+    await waitForPublication(tester, draft);
     expect(api.calls, hasLength(1));
     expect(
       api.calls.single.where((b) => b.type == SharedMomentBlockType.image),
@@ -639,6 +659,7 @@ void main() {
       await editText(tester, '核对后发布');
       await tester.tap(find.text('确认上传发布'));
       await tester.pumpAndSettle();
+      await waitForPublication(tester, draft);
       expect(api.calls, hasLength(2));
       expect(
         api.calls.last.where((b) => b.type == SharedMomentBlockType.image),

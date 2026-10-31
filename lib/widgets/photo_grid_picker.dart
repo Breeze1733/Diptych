@@ -48,10 +48,8 @@ class PhotoGridPicker extends StatefulWidget {
   final ValueChanged<int>? onRetry;
   final ValueChanged<int>? onTap;
   final Color? Function(int index)? borderColorProvider;
-  final String? Function(int index)? badgeLabelProvider;
   final bool Function(int index)? canRemove;
   final bool Function(int index)? canReorder;
-  final bool reorderEnabled;
   final bool showCoverBadge;
 
   /// When bounded, show this many rows and scroll additional photos internally.
@@ -68,10 +66,8 @@ class PhotoGridPicker extends StatefulWidget {
     this.onRetry,
     this.onTap,
     this.borderColorProvider,
-    this.badgeLabelProvider,
     this.canRemove,
     this.canReorder,
-    this.reorderEnabled = true,
     this.showCoverBadge = true,
     this.visibleRows,
   });
@@ -95,10 +91,8 @@ class _PhotoGridPickerState extends State<PhotoGridPicker> {
   ValueChanged<int>? get onRetry => widget.onRetry;
   ValueChanged<int>? get onTap => widget.onTap;
   Color? Function(int)? get borderColorProvider => widget.borderColorProvider;
-  String? Function(int)? get badgeLabelProvider => widget.badgeLabelProvider;
   bool Function(int)? get canRemove => widget.canRemove;
   bool Function(int)? get canReorder => widget.canReorder;
-  bool get reorderEnabled => widget.reorderEnabled;
   bool get showCoverBadge => widget.showCoverBadge;
   int? get visibleRows => widget.visibleRows;
 
@@ -354,7 +348,7 @@ class _PhotoGridPickerState extends State<PhotoGridPicker> {
               ],
             ),
           );
-          if (!reorderEnabled || canReorder?.call(index) == false) return child;
+          if (canReorder?.call(index) == false) return child;
           return LongPressDraggable<int>(
             data: index,
             onDragStarted: () {
@@ -397,7 +391,6 @@ class _PhotoGridPickerState extends State<PhotoGridPicker> {
     final entry = entries[index];
     final progress = progressProvider?.call(entry);
     final borderColor = borderColorProvider?.call(index);
-    final badgeLabel = badgeLabelProvider?.call(index);
     final image = entry.isLocal
         ? Image.file(entry.file!, fit: BoxFit.cover)
         : PrivateNetworkImage(
@@ -512,7 +505,7 @@ class _PhotoGridPickerState extends State<PhotoGridPicker> {
                 ),
               ),
             // 封面标记（第一张）
-            if (badgeLabel != null || (showCoverBadge && index == 0))
+            if (showCoverBadge && index == 0)
               Positioned(
                 left: 0,
                 top: 0,
@@ -527,9 +520,9 @@ class _PhotoGridPickerState extends State<PhotoGridPicker> {
                       bottomRight: Radius.circular(6),
                     ),
                   ),
-                  child: Text(
-                    badgeLabel ?? '封面',
-                    style: const TextStyle(color: Colors.white, fontSize: 10),
+                  child: const Text(
+                    '封面',
+                    style: TextStyle(color: Colors.white, fontSize: 10),
                   ),
                 ),
               ),
