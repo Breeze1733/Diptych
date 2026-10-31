@@ -77,12 +77,23 @@ class DraftService {
   }
 }
 
+/// A failed restore must not turn an incomplete document into a new draft.
+class DraftRestoreException implements Exception {
+  final String message;
+
+  const DraftRestoreException(this.message);
+
+  @override
+  String toString() => message;
+}
+
 /// 一个账号某一天的日记草稿。文件名称与照片顺序无关。
 /// 所有写入按调用顺序串行，图片完整落盘后才一次替换清单。
 class MomentDraftStore {
   final String userId;
   final String dateStr;
   final bool _shared;
+  bool _restoreBlocked = false;
   static final _writes = <String, Future<void>>{};
   static final _sourceNames = <String, Map<String, String>>{};
   static final _random = Random.secure();
@@ -133,6 +144,7 @@ class MomentDraftStore {
   }) {
     final snapshot = List<DraftPhotoItem>.of(items);
     return _serialized(() async {
+      _ensureRestored();
       final dir = await _directory();
       final serialized = <Map<String, dynamic>>[];
       for (final item in snapshot) {
@@ -170,8 +182,11 @@ class MomentDraftStore {
       raw = prefs.getString('draft_$dateStr');
       legacy = true;
     }
-    if (raw == null) return null;
-    return _decodeDraft(raw, legacy: legacy);
+    if (raw == null) {
+      _restoreBlocked = false;
+      return null;
+    }
+    return _restore(raw, legacy: legacy);
   });
 
   /// 只提供给页面的明确恢复操作，绝不在 load 中自动认领无归属旧数据。
@@ -189,8 +204,33 @@ class MomentDraftStore {
     } on FormatException {
       return null;
     }
-    return _decodeDraft(raw, legacy: true, allowUnowned: true);
+    return _restore(raw, legacy: true, allowUnowned: true);
   });
+
+  Future<DraftData?> _restore(
+    String raw, {
+    required bool legacy,
+    bool allowUnowned = false,
+  }) async {
+    try {
+      final draft = await _decodeDraft(
+        raw,
+        legacy: legacy,
+        allowUnowned: allowUnowned,
+      );
+      _restoreBlocked = false;
+      return draft;
+    } catch (_) {
+      _restoreBlocked = true;
+      rethrow;
+    }
+  }
+
+  void _ensureRestored() {
+    if (_restoreBlocked) {
+      throw const DraftRestoreException('原草稿尚未完整恢复，已阻止覆盖。请先重试恢复草稿。');
+    }
+  }
 
   /// 账号间共用旧草稿认领队列，确认与新清单提交成功后才移除旧记录。
   Future<void> recoverLegacy(DraftData draft) =>
@@ -217,13 +257,16 @@ class MomentDraftStore {
     required bool legacy,
     bool allowUnowned = false,
   }) async {
+    var owned = false;
     try {
       final data = jsonDecode(raw) as Map<String, dynamic>;
       if (!allowUnowned &&
           data['owner_id'] != userId &&
           data['author_id'] != userId) {
-        return null;
+        if (legacy) return null;
+        throw const DraftRestoreException('草稿账号不匹配，原草稿已保留。');
       }
+      owned = true;
       final dir = legacy
           ? Directory(
               '${(await getApplicationDocumentsDirectory()).path}/drafts',
@@ -233,7 +276,14 @@ class MomentDraftStore {
       final rawItems = data['items'];
       if (rawItems is List) {
         for (final value in rawItems) {
-          if (value is! Map<String, dynamic>) continue;
+          if (value is! Map<String, dynamic>) {
+            throw const DraftRestoreException('草稿照片记录不完整，原草稿已保留。');
+          }
+          if (!legacy &&
+              value['type'] != 'local' &&
+              value['type'] != 'remote') {
+            throw const DraftRestoreException('草稿照片类型无效，原草稿已保留。');
+          }
           final name = value['file_name'];
           final index = value['local_index'];
           final String? safeName = name is String && _isFileName(name)
@@ -245,10 +295,14 @@ class MomentDraftStore {
             value,
             file: safeName == null ? null : File('${dir.path}/$safeName'),
           );
-          if (!item.isLocal ||
-              (item.file != null && await item.file!.exists())) {
-            result.add(item);
+          if (item.isLocal &&
+              (item.file == null || !await item.file!.exists())) {
+            throw const DraftRestoreException('草稿中的本地照片缺失，原草稿已保留。请检查本地存储后重试。');
           }
+          if (!item.isLocal && (item.url == null || item.url!.isEmpty)) {
+            throw const DraftRestoreException('草稿照片地址无效，原草稿已保留。');
+          }
+          result.add(item);
         }
       } else if (legacy) {
         final files = <int, File>{};
@@ -273,6 +327,8 @@ class MomentDraftStore {
             ),
           );
         }
+      } else {
+        throw const DraftRestoreException('草稿照片清单不完整，原草稿已保留。');
       }
       return DraftData._(
         data['feeling'] as String? ?? '',
@@ -280,13 +336,19 @@ class MomentDraftStore {
         result,
         allowUnowned ? raw : null,
       );
+    } on DraftRestoreException {
+      rethrow;
     } catch (_) {
+      if (owned || !legacy) {
+        throw const DraftRestoreException('草稿数据无法完整读取，原草稿已保留。请检查本地存储后重试。');
+      }
       return null;
     }
   }
 
   /// 选图后先取得受管理的稳定路径，页面和上传任务从此使用同一个文件。
   Future<File> importImage(File image) => _serialized(() async {
+    _ensureRestored();
     return _persistFile(image, await _directory());
   });
 
@@ -326,6 +388,7 @@ class MomentDraftStore {
   Future<void> clear() => _serialized(() async {
     final prefs = await SharedPreferences.getInstance();
     if (!await prefs.remove(_key)) throw StateError('无法清除草稿');
+    _restoreBlocked = false;
     await _removeOwnedLegacy(prefs);
     _sourceNames.remove(_key);
     final dir = await _directory();
@@ -338,6 +401,7 @@ class MomentDraftStore {
   });
 
   Future<File> createStillImage(File motionFile) => _serialized(() async {
+    _ensureRestored();
     final dir = await _directory();
     return MotionPhotoHelper.extractStillImageTo(
       motionFile,
@@ -347,9 +411,10 @@ class MomentDraftStore {
 
   static Future<void> transferToMomentCache(
     List<DraftPhotoItem> items,
-    List<String> finalImageUrls,
-  ) async {
-    final cache = PrivateImageCache();
+    List<String> finalImageUrls, {
+    PrivateImageCache? cache,
+  }) async {
+    final targetCache = cache ?? PrivateImageCache();
     for (final item in items) {
       final file = item.file;
       final url = item.uploadedUrl;
@@ -360,7 +425,8 @@ class MomentDraftStore {
         continue;
       }
       try {
-        await cache.cacheOriginal(url, file);
+        if (!await file.exists()) continue;
+        await targetCache.cacheOriginal(url, file);
       } on FileSystemException {
         // 缓存是可选优化，远端保存成功不应被本地缓存失败回滚。
       }
