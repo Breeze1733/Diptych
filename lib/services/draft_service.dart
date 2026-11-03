@@ -333,7 +333,7 @@ class MomentDraftStore {
       return DraftData._(
         data['feeling'] as String? ?? '',
         data['mood'] as int?,
-        result,
+        [for (final item in result) await _prepareRestoredPhoto(item)],
         allowUnowned ? raw : null,
       );
     } on DraftRestoreException {
@@ -363,12 +363,7 @@ class MomentDraftStore {
     final sourceKey =
         '${image.path}:${stat.modified.microsecondsSinceEpoch}:${stat.size}';
     final names = _sourceNames.putIfAbsent(_key, () => {});
-    final sourceExtension = image.path.split('.').last.toLowerCase();
-    final extension =
-        RegExp(r'^(jpe?g|png|webp|heic|heif|avif|gif|tiff?|bmp)$')
-            .hasMatch(sourceExtension)
-        ? sourceExtension
-        : 'jpg';
+    final extension = _imageExtension(image);
     final name =
         ownName ?? names[sourceKey] ?? _newName('photo', extension: extension);
     final target = File('${dir.path}/$name');
@@ -402,12 +397,47 @@ class MomentDraftStore {
 
   Future<File> createStillImage(File motionFile) => _serialized(() async {
     _ensureRestored();
+    return _createStillImage(motionFile);
+  });
+
+  static String _imageExtension(File image) {
+    final extension = image.path.split('.').last.toLowerCase();
+    return RegExp(r'^(jpe?g|png|webp|heic|heif|avif|gif|tiff?|bmp)$')
+            .hasMatch(extension)
+        ? extension
+        : 'jpg';
+  }
+
+  Future<File> _createStillImage(File image) async {
     final dir = await _directory();
     return MotionPhotoHelper.extractStillImageTo(
-      motionFile,
-      File('${dir.path}/${_newName('still')}'),
+      image,
+      File(
+        '${dir.path}/${_newName('still', extension: _imageExtension(image))}',
+      ),
     );
-  });
+  }
+
+  // Older drafts may have retained motion bytes despite a static selection.
+  // Keep the old manifest/original until the caller saves the repaired draft;
+  // a URL uploaded from different bytes must not be reused or cached as still.
+  Future<DraftPhotoItem> _prepareRestoredPhoto(DraftPhotoItem item) async {
+    if (!item.isLocal || item.uploadLive) return item;
+    final source = item.file!;
+    final still = await _createStillImage(source);
+    final changed = await still.length() != await source.length();
+    if (!changed) await still.delete();
+    return DraftPhotoItem(
+      isLocal: true,
+      file: changed ? still : source,
+      uploadedUrl: changed || item.uploadedLive == true
+          ? null
+          : item.uploadedUrl,
+      uploadedLive: changed || item.uploadedLive == true
+          ? null
+          : item.uploadedLive,
+    );
+  }
 
   static Future<void> transferToMomentCache(
     List<DraftPhotoItem> items,
@@ -541,6 +571,8 @@ class SharedDiaryDraftStore {
 
   Future<File> importImage(File image) => _files.importImage(image);
 
+  Future<File> createStillImage(File image) => _files.createStillImage(image);
+
   String get _workingKey => '${_files._key}_merge';
 
   Future<void> save(SharedDiaryDraft draft) => _saveAt(_files._key, draft);
@@ -643,7 +675,9 @@ class SharedDiaryDraftStore {
         SharedDraftPhoto(
           blockId: photo['block_id'] as String,
           authorId: photo['author_id'] as String,
-          item: DraftPhotoItem.fromJson(photo, file: file),
+          item: await _files._prepareRestoredPhoto(
+            DraftPhotoItem.fromJson(photo, file: file),
+          ),
         ),
       );
     }

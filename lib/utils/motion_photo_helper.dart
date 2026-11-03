@@ -74,7 +74,6 @@ class MotionPhotoHelper {
     }
     try {
       final length = await file.length();
-      if (length < 100 * 1024) return false;
       final mp4Offset = await _findMp4Offset(file, length);
       return mp4Offset > 0;
     } catch (_) {
@@ -84,63 +83,37 @@ class MotionPhotoHelper {
 
   /// 将实况照片提取纯静态 JPEG 保存到指定的私有目标文件（如草稿箱缓存文件）
   ///
-  /// 如果源文件不是实况照片，直接复制到目标文件；如果是实况照片，无损剥离尾部 MP4 视频流并写入目标文件。
+  /// 不依赖选图器的实况识别或文件大小。保留 JPEG 主图与视频前的辅助图像，
+  /// 移除第一段 MP4 及其后的所有数据（编辑过的照片可能带有多段视频）。
+  /// 提取失败必须交给调用方处理，不能回退为上传原始实况文件。
   static Future<File> extractStillImageTo(
     File sourceFile,
     File destinationFile,
   ) async {
-    if (!await sourceFile.exists()) return sourceFile;
-
+    if (sourceFile.absolute.path == destinationFile.absolute.path) {
+      throw ArgumentError('静态照片不能覆盖源文件');
+    }
+    final length = await sourceFile.length();
+    final jpegEnd = await _findJpegEnd(sourceFile, length);
+    final mp4Offset = jpegEnd == null
+        ? -1
+        : await _findMp4Offset(
+            sourceFile,
+            length,
+            startOffset: jpegEnd,
+            first: true,
+          );
+    final stillLength = mp4Offset > 0 ? mp4Offset : length;
+    await destinationFile.parent.create(recursive: true);
+    final pending = File('${destinationFile.path}.pending');
     try {
-      final parentDir = destinationFile.parent;
-      if (!await parentDir.exists()) {
-        await parentDir.create(recursive: true);
+      await sourceFile.openRead(0, stillLength).pipe(pending.openWrite());
+      if (await pending.length() != stillLength) {
+        throw const FileSystemException('静态照片提取不完整，请重试');
       }
-
-      final length = await sourceFile.length();
-      if (length < 100 * 1024) {
-        return await sourceFile.copy(destinationFile.path);
-      }
-
-      final mp4Offset = await _findMp4Offset(sourceFile, length);
-      if (mp4Offset <= 0) {
-        return await sourceFile.copy(destinationFile.path);
-      }
-
-      if (await destinationFile.exists()) {
-        final existingSize = await destinationFile.length();
-        if (existingSize == mp4Offset) return destinationFile;
-      }
-
-      final raf = await sourceFile.open(mode: FileMode.read);
-      RandomAccessFile? outRaf;
-      try {
-        outRaf = await destinationFile.open(mode: FileMode.write);
-        const chunkSize = 256 * 1024;
-        int bytesLeft = mp4Offset;
-        while (bytesLeft > 0) {
-          final toRead = bytesLeft > chunkSize ? chunkSize : bytesLeft;
-          final chunk = await raf.read(toRead);
-          if (chunk.isEmpty) break;
-          await outRaf.writeFrom(chunk);
-          bytesLeft -= chunk.length;
-        }
-      } finally {
-        await raf.close();
-        await outRaf?.close();
-      }
-
-      return destinationFile;
-    } catch (_) {
-      try {
-        final parentDir = destinationFile.parent;
-        if (!await parentDir.exists()) {
-          await parentDir.create(recursive: true);
-        }
-        return await sourceFile.copy(destinationFile.path);
-      } catch (_) {
-        return sourceFile;
-      }
+      return await pending.rename(destinationFile.path);
+    } finally {
+      if (await pending.exists()) await pending.delete();
     }
   }
 
@@ -158,12 +131,6 @@ class MotionPhotoHelper {
 
     try {
       final length = await file.length();
-      // 一般实况照片的内嵌视频至少在 500KB 以上，文件过小直接跳过
-      if (length < 100 * 1024) {
-        _memoryCache[path] = null;
-        return null;
-      }
-
       // 1. 查找 MP4 文件头特征 'ftyp'
       final mp4Offset = await _findMp4Offset(file, length);
       if (mp4Offset == -1) {
@@ -317,17 +284,26 @@ class MotionPhotoHelper {
   /// 在 JPEG 文件中查找 MP4 'ftyp' box 的起始偏移量
   ///
   /// MP4 规范：起始 4 字节为 Box Size，紧接 4 字节 ASCII 字符 'ftyp' (0x66, 0x74, 0x79, 0x70)
-  static Future<int> _findMp4Offset(File file, int fileLength) async {
+  static Future<int> _findMp4Offset(
+    File file,
+    int fileLength, {
+    int startOffset = 0,
+    bool first = false,
+  }) async {
     final raf = await file.open(mode: FileMode.read);
     try {
       // 实况视频通常追加在尾部，我们从文件末尾向前检索以获得极佳性能
       // 每次读取 256KB 的数据块
       const chunkSize = 256 * 1024;
       int currentEnd = fileLength;
+      var found = -1;
 
       // 最多向前检索整个文件
-      while (currentEnd > 8) {
-        final currentStart = (currentEnd - chunkSize - 8).clamp(0, fileLength);
+      while (currentEnd - startOffset >= 8) {
+        final currentStart = (currentEnd - chunkSize - 8).clamp(
+          startOffset,
+          fileLength,
+        );
         final readLength = currentEnd - currentStart;
         await raf.setPosition(currentStart);
         final buffer = await raf.read(readLength);
@@ -349,19 +325,85 @@ class MotionPhotoHelper {
             if (boxSize >= 8 && boxSize <= 1024) {
               final globalOffset = currentStart + (i - 4);
               if (globalOffset + boxSize <= fileLength) {
-                return globalOffset;
+                if (!first) return globalOffset;
+                found = globalOffset;
               }
             }
           }
         }
 
-        if (currentStart == 0) break;
+        if (currentStart == startOffset) break;
         currentEnd = currentStart + 8; // 保留 8 字节重叠防止边界跨越
       }
 
-      return -1;
+      return found;
     } finally {
       await raf.close();
+    }
+  }
+
+  /// Parse JPEG markers rather than searching for FF D9: EXIF thumbnails and
+  /// other APP segments may themselves contain complete JPEGs or MP4 headers.
+  /// The returned position is after the primary image's EOI; null is non-JPEG.
+  static Future<int?> _findJpegEnd(File file, int length) async {
+    final input = await file.open();
+    try {
+      final signature = await input.read(2);
+      if (signature.length < 2 ||
+          signature[0] != 0xff ||
+          signature[1] != 0xd8) {
+        return null;
+      }
+      var position = 2;
+      while (position < length) {
+        await input.setPosition(position);
+        if (await input.readByte() != 0xff) break;
+        var marker = await input.readByte();
+        while (marker == 0xff) {
+          marker = await input.readByte();
+        }
+        if (marker == 0xd9) return await input.position();
+        if (marker < 0 || marker == 0 || marker == 0xd8) break;
+        if (marker == 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
+          position = await input.position();
+          continue;
+        }
+        final sizeBytes = await input.read(2);
+        if (sizeBytes.length != 2) break;
+        final size = (sizeBytes[0] << 8) | sizeBytes[1];
+        if (size < 2) break;
+        position = await input.position() + size - 2;
+        if (position > length) break;
+        if (marker == 0xda) {
+          // Entropy-coded scans can contain stuffed FF 00 and restart markers.
+          // Search in blocks; retain a pending FF across block boundaries.
+          await input.setPosition(position);
+          var prefix = -1;
+          var nextMarker = -1;
+          while (position < length && nextMarker < 0) {
+            final bytes = await input.read(256 * 1024);
+            if (bytes.isEmpty) break;
+            for (var i = 0; i < bytes.length; i++) {
+              final byte = bytes[i];
+              if (byte == 0xff) {
+                prefix = position + i;
+              } else if (prefix >= 0) {
+                if (byte != 0 && (byte < 0xd0 || byte > 0xd7)) {
+                  nextMarker = prefix;
+                  break;
+                }
+                prefix = -1;
+              }
+            }
+            position += bytes.length;
+          }
+          if (nextMarker < 0) break;
+          position = nextMarker;
+        }
+      }
+      throw const FormatException('JPEG 数据不完整，无法提取静态照片');
+    } finally {
+      await input.close();
     }
   }
 }

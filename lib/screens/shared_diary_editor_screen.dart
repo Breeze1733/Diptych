@@ -397,8 +397,10 @@ class _SharedDiaryEditorScreenState
         imported.add(
           entry.isLocal
               ? PhotoEntry.file(
-                  await _draftStore.importImage(entry.file!),
-                  isMotion: entry.isMotion,
+                  entry.uploadLive
+                      ? await _draftStore.importImage(entry.file!)
+                      : await _draftStore.createStillImage(entry.file!),
+                  isMotion: entry.isMotion && entry.uploadLive,
                   uploadLive: entry.uploadLive,
                 )
               : entry,

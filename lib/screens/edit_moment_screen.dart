@@ -304,7 +304,7 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
           processed.add(entry);
           continue;
         }
-        final still = entry.isMotion && !entry.uploadLive;
+        final still = !entry.uploadLive;
         final file = still
             ? await _draftStore.createStillImage(entry.file!)
             : await _draftStore.importImage(entry.file!);
