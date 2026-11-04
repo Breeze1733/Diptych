@@ -222,7 +222,7 @@ lib/
 
 ### 环境要求
 
-- Flutter 稳定版 ≥ 3.47.0，随附 Dart SDK ≥ 3.13.0 且 < 4.0.0（当前验证环境：Flutter 3.47.7 / Dart 3.13.5；运行 `flutter --version` 确认）
+- Flutter 稳定版 ≥ 3.47.0，随附 Dart SDK ≥ 3.13.0 且 < 4.0.0（当前验证环境：Flutter 3.47.9 / Dart 3.13.7；运行 `flutter --version` 确认）
 - Android SDK Platform 37.0 与 Build-Tools `37.0.0`；应用及 Android 插件统一使用 `compileSdk = 37`，应用 `targetSdk` 保持 36，最低 Android 版本仍由 Flutter 的 `minSdkVersion` 决定
 - Android NDK `28.2.13676358`（构建配置指定）
 - JDK 25；应用 Java / Kotlin 编译目标为 25，项目 Gradle Wrapper 使用 Gradle 9.8.1（`bin` 发行包），Android Gradle Plugin 为 9.4.1，Kotlin Gradle Plugin 为 2.4.21。`image_cropper` 与 `open_filex` 的 Java 8 默认目标在根 Gradle 配置中统一为 25
@@ -284,7 +284,7 @@ flutter build apk --release
 
 产物路径：`build/app/outputs/flutter-apk/app-release.apk`
 
-上述工具链已在 Flutter 3.47.7 / Dart 3.13.5 / JDK 25 环境中通过 Release APK 构建验证。
+上述工具链已在 Flutter 3.47.9 / Dart 3.13.7 / JDK 25 环境中通过 Release APK 构建验证。
 
 ## 隐私与数据
 
