@@ -258,7 +258,7 @@ class ApiConfig {
   static const String siteUrl = '<你的站点根地址>';
 
   /// REST API 基础地址
-  static const String apiBaseUrl = '$siteUrl/api';
+  static const String static const String apiBaseUrl = siteUrl;
 }
 ```
 

@@ -23,7 +23,9 @@ class Comment {
       authorId: json['author_id'] as String? ?? '',
       content: json['content'] as String? ?? '',
       replyTo: json['reply_to'] as String?,
-      createdAt: DateHelper.tryParseDateTime(json['created_at'] as String? ?? ''),
+      createdAt: DateHelper.tryParseDateTime(
+        json['created_at'] as String? ?? '',
+      ),
     );
   }
 
@@ -87,12 +89,26 @@ class Moment {
       imageUrls: _parseImageUrls(json),
       feeling: json['feeling'] as String? ?? '',
       mood: (json['mood'] as num?)?.toInt(),
-      comments: (json['comments'] as List<dynamic>?)
-              ?.map((e) => e is Map<String, dynamic> ? Comment.fromJson(e) : Comment(id: '', authorId: '', content: e.toString(), createdAt: DateTime.now()))
+      comments:
+          (json['comments'] as List<dynamic>?)
+              ?.map(
+                (e) => e is Map<String, dynamic>
+                    ? Comment.fromJson(e)
+                    : Comment(
+                        id: '',
+                        authorId: '',
+                        content: e.toString(),
+                        createdAt: DateTime.now(),
+                      ),
+              )
               .toList() ??
           [],
-      createdAt: DateHelper.tryParseDateTime(json['created_at'] as String? ?? ''),
-      updatedAt: DateHelper.tryParseDateTime(json['updated_at'] as String? ?? ''),
+      createdAt: DateHelper.tryParseDateTime(
+        json['created_at'] as String? ?? '',
+      ),
+      updatedAt: DateHelper.tryParseDateTime(
+        json['updated_at'] as String? ?? '',
+      ),
     );
   }
 
@@ -102,7 +118,7 @@ class Moment {
       'id': id,
       'date_str': dateStr,
       'author_id': authorId,
-      'image_urls': imageUrls,
+      'image_urls': imageUrls.map(UrlHelper.imageReference).toList(),
       'feeling': feeling,
       if (mood != null) 'mood': mood,
       'comments': comments.map((c) => c.toJson()).toList(),
@@ -110,5 +126,4 @@ class Moment {
       'updated_at': DateHelper.toIsoString(updatedAt),
     };
   }
-
 }

@@ -295,7 +295,7 @@ class StorageService {
       await _http.post(
         Uri.parse('$_baseUrl/upload/delete'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'url': url}),
+        body: jsonEncode({'url': UrlHelper.imageReference(url)}),
       );
     } catch (_) {
       // 忽略删除失败

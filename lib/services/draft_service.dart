@@ -10,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../utils/motion_photo_helper.dart';
+import '../utils/url_helper.dart';
 import '../models/moment.dart';
 import '../models/shared_moment.dart';
 import 'shared_diary_draft.dart';
@@ -322,7 +323,9 @@ class MomentDraftStore {
               file: files[index],
               isMotion: _legacyValue(data, 'live_flags', index) == true,
               uploadLive: _legacyValue(data, 'live_flags', index) == true,
-              uploadedUrl: _legacyValue(data, 'uploaded', index) as String?,
+              uploadedUrl: _normalizeDraftUrl(
+                _legacyValue(data, 'uploaded', index) as String?,
+              ),
               uploadedLive: _legacyValue(data, 'uploaded_live', index) as bool?,
             ),
           );
@@ -502,6 +505,9 @@ class MomentDraftStore {
 }
 
 /// 排序、实况开关、上传进度与同一张照片一起持久化，避免按序号错配。
+String? _normalizeDraftUrl(String? value) =>
+    value == null ? null : UrlHelper.normalize(value);
+
 class DraftPhotoItem {
   final bool isLocal;
   final String? url;
@@ -524,21 +530,22 @@ class DraftPhotoItem {
   Map<String, dynamic> toJson({String? fileName}) => {
     'type': isLocal ? 'local' : 'remote',
     if (isLocal && fileName != null) 'file_name': fileName,
-    if (!isLocal && url != null) 'url': url,
+    if (!isLocal && url != null) 'url': UrlHelper.imageReference(url!),
     'is_motion': isMotion,
     'upload_live': uploadLive,
-    if (isLocal && uploadedUrl != null) 'uploaded_url': uploadedUrl,
+    if (isLocal && uploadedUrl != null)
+      'uploaded_url': UrlHelper.imageReference(uploadedUrl!),
     if (isLocal && uploadedLive != null) 'uploaded_live': uploadedLive,
   };
 
   factory DraftPhotoItem.fromJson(Map<String, dynamic> json, {File? file}) =>
       DraftPhotoItem(
         isLocal: json['type'] != 'remote',
-        url: json['url'] as String?,
+        url: _normalizeDraftUrl(json['url'] as String?),
         file: file,
         isMotion: json['is_motion'] as bool? ?? false,
         uploadLive: json['upload_live'] as bool? ?? false,
-        uploadedUrl: json['uploaded_url'] as String?,
+        uploadedUrl: _normalizeDraftUrl(json['uploaded_url'] as String?),
         uploadedLive: json['uploaded_live'] as bool?,
       );
 }

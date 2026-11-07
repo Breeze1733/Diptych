@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/app_user.dart';
+import '../utils/url_helper.dart';
 import 'auth_provider.dart';
 
 /// 壁纸类型：日记 / 话题，各自独立
@@ -73,8 +74,14 @@ Future<void> saveWallpaperSettings(
   WallpaperSettings settings,
 ) async {
   final prefs = await SharedPreferences.getInstance();
-  await prefs.setString(_key(userId, 'diary_url'), settings.diaryUrl);
-  await prefs.setString(_key(userId, 'topic_url'), settings.topicUrl);
+  await prefs.setString(
+    _key(userId, 'diary_url'),
+    UrlHelper.imageReference(settings.diaryUrl),
+  );
+  await prefs.setString(
+    _key(userId, 'topic_url'),
+    UrlHelper.imageReference(settings.topicUrl),
+  );
   await prefs.setDouble(_key(userId, 'diary_opacity'), settings.diaryOpacity);
   await prefs.setDouble(_key(userId, 'topic_opacity'), settings.topicOpacity);
   await prefs.setDouble(_key(userId, 'card_opacity'), settings.cardOpacity);
@@ -84,10 +91,12 @@ Future<WallpaperSettings> buildWallpaperSettings(AppUser? user) async {
   if (user == null) return const WallpaperSettings();
   final prefs = await SharedPreferences.getInstance();
   return WallpaperSettings(
-    diaryUrl:
-        prefs.getString(_key(user.uid, 'diary_url')) ?? user.wallpaperDiaryUrl,
-    topicUrl:
-        prefs.getString(_key(user.uid, 'topic_url')) ?? user.wallpaperTopicUrl,
+    diaryUrl: UrlHelper.normalize(
+      prefs.getString(_key(user.uid, 'diary_url')) ?? user.wallpaperDiaryUrl,
+    ),
+    topicUrl: UrlHelper.normalize(
+      prefs.getString(_key(user.uid, 'topic_url')) ?? user.wallpaperTopicUrl,
+    ),
     diaryOpacity:
         prefs.getDouble(_key(user.uid, 'diary_opacity')) ??
         user.wallpaperDiaryOpacity,

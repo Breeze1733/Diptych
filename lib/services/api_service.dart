@@ -7,6 +7,7 @@ import '../models/moment.dart';
 import '../models/app_notification.dart';
 import '../models/shared_moment.dart';
 import '../constants/api_config.dart';
+import '../utils/url_helper.dart';
 import 'http_request.dart';
 
 class SharedMomentConflictException implements Exception {
@@ -24,6 +25,14 @@ class ApiService {
   final HttpRequests _http;
 
   ApiService({HttpRequests? http}) : _http = http ?? HttpRequests();
+
+  static Map<String, dynamic> _sharedBlockForServer(SharedMomentBlock block) {
+    final data = block.toJson();
+    if (block.type == SharedMomentBlockType.image) {
+      data['image_url'] = UrlHelper.imageReference(block.imageUrl);
+    }
+    return data;
+  }
 
   // ─── 用户相关 ───
 
@@ -53,12 +62,14 @@ class ApiService {
   }) async {
     final Map<String, dynamic> data = {};
     if (nickname != null) data['nickname'] = nickname;
-    if (avatarUrl != null) data['avatar_url'] = avatarUrl;
+    if (avatarUrl != null) {
+      data['avatar_url'] = UrlHelper.imageReference(avatarUrl);
+    }
     if (wallpaperDiaryUrl != null) {
-      data['wallpaper_diary_url'] = wallpaperDiaryUrl;
+      data['wallpaper_diary_url'] = UrlHelper.imageReference(wallpaperDiaryUrl);
     }
     if (wallpaperTopicUrl != null) {
-      data['wallpaper_topic_url'] = wallpaperTopicUrl;
+      data['wallpaper_topic_url'] = UrlHelper.imageReference(wallpaperTopicUrl);
     }
     if (wallpaperDiaryOpacity != null) {
       data['wallpaper_diary_opacity'] = wallpaperDiaryOpacity;
@@ -210,7 +221,7 @@ class ApiService {
     final body = <String, dynamic>{
       'date_str': dateStr,
       'author_id': authorId,
-      'image_urls': imageUrls,
+      'image_urls': imageUrls.map(UrlHelper.imageReference).toList(),
       'feeling': feeling,
     };
     if (mood != null) body['mood'] = mood;
@@ -229,10 +240,19 @@ class ApiService {
 
   /// 更新动态
   Future<void> updateMoment(String momentId, Map<String, dynamic> data) async {
+    final requestBody = Map<String, dynamic>.of(data);
+    if (requestBody['image_urls'] is List) {
+      requestBody['image_urls'] = (requestBody['image_urls'] as List)
+          .map(
+            (value) =>
+                value is String ? UrlHelper.imageReference(value) : value,
+          )
+          .toList();
+    }
     final res = await _http.put(
       Uri.parse('$_baseUrl/moments/$momentId'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode(data),
+      body: jsonEncode(requestBody),
     );
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Exception(
@@ -279,7 +299,7 @@ class ApiService {
       body: jsonEncode({
         'date_str': dateStr,
         if (blocks.isNotEmpty)
-          'blocks': blocks.map((block) => block.toJson()).toList(),
+          'blocks': blocks.map(_sharedBlockForServer).toList(),
         'import_standard': importStandard,
       }),
     );
@@ -308,7 +328,7 @@ class ApiService {
   }) async {
     final body = <String, dynamic>{
       'base_revision': moment.revision,
-      'blocks': blocks.map((block) => block.toJson()).toList(),
+      'blocks': blocks.map(_sharedBlockForServer).toList(),
       if (splitForeignText.isNotEmpty) 'split_foreign_text': splitForeignText,
     };
     final encodedId = Uri.encodeComponent(moment.id);

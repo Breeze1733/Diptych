@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../models/moment.dart';
 import '../utils/date_helper.dart';
+import '../utils/url_helper.dart';
 import 'api_service.dart';
 import 'cache_service.dart';
 
@@ -27,7 +28,7 @@ class MomentSaveService {
     final String id;
     if (previous != null) {
       await api.updateMoment(previous.id, {
-        'image_urls': finalUrls,
+        'image_urls': finalUrls.map(UrlHelper.imageReference).toList(),
         'feeling': feeling,
         'mood': mood,
       });
@@ -51,7 +52,7 @@ class MomentSaveService {
         'id': id,
         'date_str': dateStr,
         'author_id': authorId,
-        'image_urls': finalUrls,
+        'image_urls': finalUrls.map(UrlHelper.imageReference).toList(),
         'feeling': feeling,
         'mood': mood,
         'updated_at': now,

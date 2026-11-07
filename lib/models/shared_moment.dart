@@ -107,7 +107,7 @@ class SharedMomentBlock {
       'type': type.name,
       'author_id': authorId,
       'text': text,
-      'image_url': imageUrl,
+      'image_url': UrlHelper.imageReference(imageUrl),
       'created_at': createdAt == null
           ? null
           : DateHelper.toIsoString(createdAt!),
