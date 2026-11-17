@@ -18,7 +18,11 @@ class MomentSaveService {
     required String feeling,
     required int? mood,
     Moment? existingMoment,
+    bool allowSharedArchiveEdit = false,
   }) async {
+    if (!allowSharedArchiveEdit && await api.getSharedMoment(dateStr) != null) {
+      throw const SharedModeChangedException();
+    }
     final previous =
         existingMoment ?? await api.getMomentByDate(authorId, dateStr);
     final finalUrls =
@@ -82,6 +86,13 @@ class MomentSaveService {
       ],
     );
   }
+}
+
+class SharedModeChangedException implements Exception {
+  const SharedModeChangedException();
+
+  @override
+  String toString() => '当天已切换为共记模式';
 }
 
 class MomentSaveResult {

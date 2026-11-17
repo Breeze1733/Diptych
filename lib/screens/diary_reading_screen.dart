@@ -17,8 +17,13 @@ import 'edit_moment_screen.dart';
 /// 详情持有已确认的日记与滚动控制器，避免旧的列表缓存覆盖阅读中的内容。
 class DiaryReadingScreen extends ConsumerStatefulWidget {
   final Moment initialMoment;
+  final bool allowSharedArchiveEdit;
 
-  const DiaryReadingScreen({super.key, required this.initialMoment});
+  const DiaryReadingScreen({
+    super.key,
+    required this.initialMoment,
+    this.allowSharedArchiveEdit = false,
+  });
 
   @override
   ConsumerState<DiaryReadingScreen> createState() => _DiaryReadingScreenState();
@@ -187,6 +192,7 @@ class _DiaryReadingScreenState extends ConsumerState<DiaryReadingScreen> {
           builder: (_) => EditMomentScreen(
             date: DateHelper.parseDateStr(_moment.dateStr),
             existingMoment: _moment,
+            allowSharedArchiveEdit: widget.allowSharedArchiveEdit,
           ),
         ),
       );

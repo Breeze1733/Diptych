@@ -1,15 +1,7 @@
 # 本地配置
 /lib/constants/secrets.dart
 /lib/constants/api_config.dart
-
-# 本地后端备份
 /backend/
-
-# 临时文件
-/temp/
-/latest-apk/
-/scripts/
-/pic/ignore/
 
 # 开发环境与构建产物
 /.idea/
@@ -17,5 +9,7 @@
 /.dart_tool/
 /.flutter-plugins-dependencies
 /build/
+/pic/ignore/
 /android/build/
 /android/.kotlin/
+/latest-apk/

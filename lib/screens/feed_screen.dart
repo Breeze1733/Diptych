@@ -57,8 +57,10 @@ class FeedScreen extends ConsumerWidget {
     final unreadNotificationCount = ref.watch(unreadNotificationCountProvider);
     final dateStr = DateHelper.toDateStr(selectedDate);
     final sharedMomentAsync = ref.watch(sharedMomentProvider(dateStr));
+    final dayMomentsAsync = ref.watch(dayMomentsProvider);
     final isLoading =
-        ref.watch(dayMomentsProvider).isLoading || sharedMomentAsync.isLoading;
+        (dayMomentsAsync.isLoading && !dayMomentsAsync.hasValue) ||
+        (sharedMomentAsync.isLoading && !sharedMomentAsync.hasValue);
     final screenSize = MediaQuery.sizeOf(context);
     final scale = math
         .min(screenSize.width / 375, screenSize.height / 700)
@@ -281,7 +283,7 @@ class FeedScreen extends ConsumerWidget {
             : null,
       );
     }
-    if (sharedMomentAsync.isLoading) {
+    if (sharedMomentAsync.isLoading && !sharedMomentAsync.hasValue) {
       return Expanded(child: _paperArea(ref));
     }
     if (sharedMomentAsync.hasError) {
@@ -371,10 +373,17 @@ class FeedScreen extends ConsumerWidget {
     );
   }
 
-  void _openReading(BuildContext context, Moment moment) {
+  void _openReading(
+    BuildContext context,
+    Moment moment, {
+    bool allowSharedArchiveEdit = false,
+  }) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => DiaryReadingScreen(initialMoment: moment),
+        builder: (_) => DiaryReadingScreen(
+          initialMoment: moment,
+          allowSharedArchiveEdit: allowSharedArchiveEdit,
+        ),
       ),
     );
   }
@@ -432,7 +441,9 @@ class FeedScreen extends ConsumerWidget {
         ),
       );
     }
-    if (selected != null && context.mounted) _openReading(context, selected);
+    if (selected != null && context.mounted) {
+      _openReading(context, selected, allowSharedArchiveEdit: true);
+    }
   }
 
   void _openSharedReading(BuildContext context, SharedMoment moment) {

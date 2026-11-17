@@ -157,10 +157,10 @@ final FutureProvider<Map<String, Moment?>> dayMomentsProvider =
     FutureProvider<Map<String, Moment?>>((ref) async {
       final selectedDate = ref.watch(selectedDateProvider);
       final dateStr = DateHelper.toDateStr(selectedDate);
-      final currentUser = ref.watch(currentUserProvider);
-      final partner = ref.watch(partnerUserProvider);
+      final currentUid = ref.watch(currentUserProvider.select((user) => user?.uid));
+      final partnerUid = ref.watch(partnerUserProvider.select((user) => user?.uid));
 
-      if (currentUser == null || partner == null) {
+      if (currentUid == null || partnerUid == null) {
         return {'myMoment': null, 'partnerMoment': null};
       }
 
@@ -176,7 +176,7 @@ final FutureProvider<Map<String, Moment?>> dayMomentsProvider =
         final oldJson = jsonEncode(cached);
         final selfRef = ref;
         apiService
-            .getDayMoments(dateStr, [currentUser.uid, partner.uid])
+            .getDayMoments(dateStr, [currentUid, partnerUid])
             .then((moments) async {
               if (!selfRef.mounted ||
                   CacheService.dayVersion(dateStr) != cacheVersion) {
@@ -188,7 +188,7 @@ final FutureProvider<Map<String, Moment?>> dayMomentsProvider =
                 if (!selfRef.mounted) return;
                 preloadDayImages(moments);
                 await syncMarkedDatesFromMoments(selfRef, dateStr, moments);
-                selfRef.invalidate(dayMomentsProvider);
+                selfRef.invalidateSelf();
               } else {
                 await syncMarkedDatesFromMoments(selfRef, dateStr, moments);
               }
@@ -199,21 +199,21 @@ final FutureProvider<Map<String, Moment?>> dayMomentsProvider =
         final moments = cached.map((e) => Moment.fromJson(e)).toList();
         preloadDayImages(moments);
         syncMarkedDatesFromMoments(ref, dateStr, moments);
-        return _splitMoments(moments, currentUser.uid, partner.uid);
+        return _splitMoments(moments, currentUid, partnerUid);
       }
 
       // 从未请求过 → 等网络（仅首次）
       final apiService = ref.read(apiServiceProvider);
       final moments = await apiService.getDayMoments(dateStr, [
-        currentUser.uid,
-        partner.uid,
+        currentUid,
+        partnerUid,
       ]);
       if (!ref.mounted || CacheService.dayVersion(dateStr) != cacheVersion) {
         final latest = await CacheService.loadDayMoments(dateStr) ?? [];
         return _splitMoments(
           latest.map(Moment.fromJson).toList(),
-          currentUser.uid,
-          partner.uid,
+          currentUid,
+          partnerUid,
         );
       }
       // 即使空也保存，下次秒开
@@ -223,14 +223,14 @@ final FutureProvider<Map<String, Moment?>> dayMomentsProvider =
       );
       preloadDayImages(moments);
       await syncMarkedDatesFromMoments(ref, dateStr, moments);
-      return _splitMoments(moments, currentUser.uid, partner.uid);
+      return _splitMoments(moments, currentUid, partnerUid);
     });
 
 /// 指定日期的共写日记。
 ///
 /// family 必须自动释放：离开日期再回来时要重新核对服务端，不能在整个进程中
-/// 永久复用旧 revision。已有共记可先显示缓存再后台刷新；cached-null 不能直接
-/// 当成最终结论，否则另一台设备刚切换共记时本机仍会误入旧双联编辑。
+/// 永久复用旧 revision。已缓存的共记或非共记状态都先显示，再后台核对；
+/// 普通日记发布前会再次核对服务器状态，防止依赖过期的非共记缓存。
 final sharedMomentProvider = FutureProvider.autoDispose
     .family<SharedMoment?, String>(_loadSharedMoment);
 
@@ -240,10 +240,10 @@ Future<SharedMoment?> _loadSharedMoment(Ref ref, String dateStr) async {
   if (!ref.mounted) return null;
 
   final cachedMoment = cached.moment;
-  if (cached.isCached && cachedMoment != null) {
-    preloadSharedMomentImages(cachedMoment);
+  if (cached.isCached) {
+    if (cachedMoment != null) preloadSharedMomentImages(cachedMoment);
 
-    final oldJson = jsonEncode(cachedMoment.toJson());
+    final oldJson = jsonEncode(cachedMoment?.toJson());
     final apiService = ref.read(apiServiceProvider);
     unawaited(
       (() async {
@@ -261,7 +261,7 @@ Future<SharedMoment?> _loadSharedMoment(Ref ref, String dateStr) async {
           if (latest != null) preloadSharedMomentImages(latest);
           await syncMarkedDateFromSharedMoment(ref, dateStr, latest);
           if (changed && ref.mounted) {
-            ref.invalidate(sharedMomentProvider(dateStr));
+            ref.invalidateSelf();
           }
         } catch (_) {
           // 缓存已经可用，后台刷新失败不打断离线阅读。

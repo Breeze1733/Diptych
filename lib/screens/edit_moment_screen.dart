@@ -29,8 +29,14 @@ enum EditMomentResult { standardSaved, sharedActivated }
 class EditMomentScreen extends ConsumerStatefulWidget {
   final DateTime date;
   final Moment? existingMoment; // null 表示新建
+  final bool allowSharedArchiveEdit;
 
-  const EditMomentScreen({super.key, required this.date, this.existingMoment});
+  const EditMomentScreen({
+    super.key,
+    required this.date,
+    this.existingMoment,
+    this.allowSharedArchiveEdit = false,
+  });
 
   @override
   ConsumerState<EditMomentScreen> createState() => _EditMomentScreenState();
@@ -368,6 +374,7 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
         feeling: _feelingController.text.trim(),
         mood: _mood,
         existingMoment: widget.existingMoment,
+        allowSharedArchiveEdit: widget.allowSharedArchiveEdit,
       );
       // 远端记录确认成功后，清理被替换的旧资源。
       _hasSavedSuccessfully = true;
@@ -411,7 +418,11 @@ class _EditMomentScreenState extends ConsumerState<EditMomentScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            draftSaved ? '保存失败，已保存为草稿，请稍后重试' : '保存失败，草稿未能落盘，请保留页面后重试',
+            error is SharedModeChangedException
+                ? (draftSaved
+                      ? '当天已切换为共记，草稿已保留，请返回查看共记'
+                      : '当天已切换为共记，草稿未能落盘，请保留页面后重试')
+                : (draftSaved ? '保存失败，已保存为草稿，请稍后重试' : '保存失败，草稿未能落盘，请保留页面后重试'),
           ),
           backgroundColor: AppTheme.dangerColor,
         ),
